@@ -79,7 +79,7 @@ public struct RawDecoder {
             localToneMap: f.isLocalToneMapSupported, sharpness: f.isSharpnessSupported, contrast: f.isContrastSupported,
             detail: f.isDetailSupported, luminanceNoiseReduction: f.isLuminanceNoiseReductionSupported,
             colorNoiseReduction: f.isColorNoiseReductionSupported, moireReduction: f.isMoireReductionSupported,
-            lensCorrection: f.isLensCorrectionSupported, maxExtendedDynamicRange: f.maximumExtendedDynamicRangeAmount)
+            lensCorrection: f.isLensCorrectionSupported, maxExtendedDynamicRange: 2)  // documented range 0...2 (1 = default EDR)
     }
 
     /// Write every parameter. Unsupported ones are left alone (the recipe's `effective` re-reads the filter).
@@ -96,7 +96,7 @@ public struct RawDecoder {
         if s.luminanceNoiseReduction { f.luminanceNoiseReductionAmount = p.luminanceNoiseReductionAmount }
         if s.colorNoiseReduction { f.colorNoiseReductionAmount = p.colorNoiseReductionAmount }
         if s.moireReduction { f.moireReductionAmount = p.moireReductionAmount }
-        if s.maxExtendedDynamicRange > 0 { f.extendedDynamicRangeAmount = p.extendedDynamicRangeAmount }
+        f.extendedDynamicRangeAmount = p.extendedDynamicRangeAmount
         if s.lensCorrection { f.isLensCorrectionEnabled = p.lensCorrection }
         f.isGamutMappingEnabled = p.gamutMapping
         // Only touch white balance if it changed: a temperature/tint round trip is not exact.
