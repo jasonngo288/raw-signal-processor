@@ -126,16 +126,21 @@ public enum BuiltInLook: String, CaseIterable, Sendable {
 
     static func film(_ c: SIMD3<Float>, toe: Float, contrast: Float, shoulder: Float, warm: SIMD3<Float>,
                      shadowTint: SIMD3<Float>, saturation: Float, highlightDesat: Float) -> SIMD3<Float> {
-        // Tone: S-curve around 0.5 on encoded values, applied to luma to keep hue stable.
+        // Tone: S-curve anchored at 0 and 1 (power on each half), applied to luma so hue stays stable.
+        // The toe lift is added as a neutral offset afterwards; multiplying colour by a large
+        // luma ratio in deep shadows turns noise into saturated blotches (bug seen on USER_mooncake).
         let w = SIMD3<Float>(0.2126, 0.7152, 0.0722)
-        let y = (c * w).sum()
+        let y = max((c * w).sum(), 0)
         func curve(_ v: Float) -> Float {
-            let s = 0.5 + (v - 0.5) * contrast
-            let rolled = s > shoulder ? shoulder + (1 - shoulder) * tanh((s - shoulder) / max(1 - shoulder, 1e-3)) : s
-            return toe + (1 - toe) * min(max(rolled, 0), 1)
+            let k = 1 / max(contrast, 0.1)
+            let s = v < 0.5 ? 0.5 * pow(2 * v, 1 / k) : 1 - 0.5 * pow(2 * (1 - v), 1 / k)
+            return s > shoulder ? shoulder + (1 - shoulder) * tanh((s - shoulder) / max(1 - shoulder, 1e-3)) : s
         }
-        let yt = curve(y)
-        var out = y > 1e-4 ? c * (yt / y) : SIMD3(repeating: yt)
+        let yc = curve(y)
+        let ratio = y > 1e-4 ? min(yc / y, 2) : 1
+        let base = c * ratio + SIMD3(repeating: max(yc - y * ratio, 0))  // any shortfall added as neutral grey
+        var out = SIMD3(repeating: toe) + base * (1 - toe)
+        let yt = toe + (1 - toe) * yc
         // Split tone: tint shadows, warm highlights.
         let tint = shadowTint + (warm - shadowTint) * yt
         out *= tint

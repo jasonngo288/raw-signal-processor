@@ -129,6 +129,18 @@ final class LookAndSettingsTests: XCTestCase {
         XCTAssertEqual(id.x, 0.3, accuracy: 1e-5)
     }
 
+    /// Regression: warmNegative turned dark, slightly coloured pixels into saturated blue/red blotches.
+    func testLooksDoNotBlowUpShadowChroma() {
+        for look in BuiltInLook.allCases {
+            let lut = look.lut(size: 33)
+            for c in [SIMD3<Float>(0.02, 0.004, 0.004), SIMD3<Float>(0.003, 0.003, 0.03), SIMD3<Float>(0.05, 0.03, 0.02)] {
+                let o = lut.apply(c)
+                let spreadIn = c.max() - c.min(), spreadOut = o.max() - o.min()
+                XCTAssertLessThan(spreadOut, spreadIn * 2.5 + 0.03, "\(look) \(c) -> \(o)")
+            }
+        }
+    }
+
     func testSettingsValidationAndCodable() throws {
         var s = RenderSettings.appleDefault
         XCTAssertNoThrow(try s.validate())

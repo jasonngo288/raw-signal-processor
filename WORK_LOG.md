@@ -2,6 +2,17 @@
 
 Newest first. Each entry: what changed, why, evidence, what is NOT verified yet.
 
+## 2026-11-05 — Fix: film looks made saturated blotches in deep shadows
+**What**: `BuiltInLook.film` scaled colour by curve(y)/y. The old curve pivoted at 0.5 and did not pass
+through 0, so the ratio reached ~40× in near-black pixels and noise became pure blue/red patches
+(visible on `USER_mooncake` with warmNegative: blue door edge, red hair). Now the curve is anchored at 0 and 1,
+the ratio is capped at 2× (any shortfall is added as neutral grey) and the film toe is a neutral offset.
+Regression test `testLooksDoNotBlowUpShadowChroma`.
+**Seen visually on run 41985177812 contact sheets** (also): Apple's default decode of `IMG_1901` is heavily
+blown (60 % clipped) while `sceneLinear` shows the sky/pavement detail is in the RAW → highlight recovery is the
+biggest real opportunity; the current auto rule (max −0.3 EV) is far too weak. Not changed yet.
+**Evidence**: next CI run.
+
 ## 2026-11-05 — More test RAWs + previews readable from CI logs
 **What**: added `originals/USER_mug.dng` and `originals/USER_mooncake.dng` (RAWs the user sent in earlier chats; user asked to reuse them).
 CI now resizes the bench JPEGs (900 px) and prints them as a base64 tarball between `PREVIEWS_BEGIN/END` in the log,
