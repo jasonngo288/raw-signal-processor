@@ -99,7 +99,7 @@ struct FileResult: Codable {
     var camera: String?
     var iso: Double?
     var analysisSize: [Int]
-    var reference: ImageMetrics
+    var reference: ImageMetrics?
     var variants: [VariantResult]
     var error: String?
 }
@@ -242,9 +242,7 @@ func run() throws -> Int32 {
             let url = URL(fileURLWithPath: dir).appendingPathComponent(f)
             do { results.append(try benchFile(url, outDir: outDir, longEdge: longEdge, full: a.flags.contains("full"))) } catch {
                 log("  ERROR \(error)")
-                results.append(FileResult(file: f, camera: nil, iso: nil, analysisSize: [0, 0],
-                                          reference: ImageMetrics(blackP1: 0, blackP5: 0, meanY: 0, medianY: 0, clippedFraction: 0,
-                                                                  localContrast: 0, highlightRingMeanY: nil, meanChroma: 0),
+                results.append(FileResult(file: f, camera: nil, iso: nil, analysisSize: [0, 0], reference: nil,
                                           variants: [], error: "\(error)"))
             }
         }
