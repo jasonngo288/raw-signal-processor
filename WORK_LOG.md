@@ -2,6 +2,13 @@
 
 Newest first. Each entry: what changed, why, evidence, what is NOT verified yet.
 
+## 2026-11-05 — More test RAWs + previews readable from CI logs
+**What**: added `originals/USER_mug.dng` and `originals/USER_mooncake.dng` (RAWs the user sent in earlier chats; user asked to reuse them).
+CI now resizes the bench JPEGs (900 px) and prints them as a base64 tarball between `PREVIEWS_BEGIN/END` in the log,
+because artifact blob storage is blocked from the dev container. Contact sheets are built from that outside the repo.
+**Why**: user asked for visual results.
+**Evidence / not verified**: see the next entry once CI has run.
+
 ## 2026-11-05 — First green CI + first measurements (run 41972847558)
 **Fixes to get green**: `CIRAWFilter` has no `maximumExtendedDynamicRangeAmount` (use documented 0…2 range);
 RawBench must not use `ImageMetrics`' internal memberwise init.

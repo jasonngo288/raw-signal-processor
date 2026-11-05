@@ -24,7 +24,8 @@ An iPhone camera app (iPhone 12 → 18) that captures RAW and "develops film":
    This Linux dev container has no Swift toolchain (download.swift.org blocked) — CI is the compiler.
 5. Quality claims need numbers from `raw-bench` (docs/METRICS.md), pixel-aligned vs `appleDefault` of the same file.
    Never claim "better than Apple" from a box ΔE alone; check black p1, halo ring, local contrast too.
-6. `originals/` holds the user's test RAWs. Do not add other personal images. Do not commit bench outputs.
+6. `originals/` holds the user's test RAWs (files prefixed `USER_` were added at the user's request from earlier chats).
+   Do not add other personal images. Do not commit bench outputs (CI prints a base64 preview tarball to its log instead).
 7. **Update WORK_LOG.md in the same commit** as any change: what, why, evidence (CI run / numbers), what is unverified.
 8. No third-party dependencies without a written reason in WORK_LOG.md.
 
