@@ -1,0 +1,45 @@
+name: ci
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+      - name: Build
+        run: swift build -c release
+      - name: Test
+        run: swift test 2>&1 | tee test.log
+      - name: Gate 1 lines
+        if: always()
+        run: grep '\[gate1\]' test.log || true
+      - name: Decoder info for originals
+        run: |
+          mkdir -p bench-out
+          for f in originals/*.DNG originals/*.dng; do
+            [ -e "$f" ] || continue
+            echo "=== $f"; .build/release/raw-bench info "$f" | tee "bench-out/$(basename "$f").info.json"
+          done
+      - name: Bench originals
+        run: .build/release/raw-bench bench originals --out bench-out --long-edge 1024 --full
+      - name: Job summary
+        if: always()
+        run: |
+          [ -f bench-out/summary.md ] && cat bench-out/summary.md >> "$GITHUB_STEP_SUMMARY"
+          grep '\[gate1\]' test.log >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-out
+          path: |
+            bench-out
+            test.log

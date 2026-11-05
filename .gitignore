@@ -1,0 +1,5 @@
+.build/
+.swiftpm/
+bench-out/
+*.xcodeproj/xcuserdata/
+.DS_Store
