@@ -2,6 +2,39 @@
 
 Newest first. Each entry: what changed, why, evidence, what is NOT verified yet.
 
+## 2026-11-05 — First green CI + first measurements (run 41972847558)
+**Fixes to get green**: `CIRAWFilter` has no `maximumExtendedDynamicRangeAmount` (use documented 0…2 range);
+RawBench must not use `ImageMetrics`' internal memberwise init.
+
+**Environment**: macos-15 runner, macOS 15.8.2 (24H232), Xcode 16.4. Decoder versions offered: up to `8` / `8.dng`
+(RAW 9 from WWDC26 is not on this OS). 20/20 tests pass.
+
+**Gate 1 — PASSED**: writing Apple's defaults back explicitly (pinned decoder) reproduces Apple's decode:
+ΔE00 mean 5e-7 / 3e-7 / 4e-7 (BVQX5524 / HDR01 / IMG_1901). We fully control the decoder.
+
+**Apple per-file defaults (decoder 8, macOS 15.8)**
+| file | baselineExp | shadowBias | boost / boostShadow | LTM | sharpness | contrast | lumNR / colorNR | moire | temp / tint |
+|---|---|---|---|---|---|---|---|---|---|
+| BVQX5524 (iPhone 8) | −1.79 | 16 | 1 / 0.9 | 0 | 0.94 | 0.24 | 0 / 0.4 | 0.7 | 4927 / 7.1 |
+| HDR01 (Pixel) | 0.01 | 5 | 1 / 0.9 | 0 | 0.5 | 0 | 0.1 / 0.5 | 0 | 3768 / 26.3 |
+| IMG_1901 (13 Pro Max) | 0.50 | 16 | 1 / 0.9 | 0 | 0.89 | 0.26 | 0 / 0.5 | 0.7 | 4882 / 4.9 |
+
+Defaults differ per model (sharpness, contrast, NR, shadowBias) → must be stored per model + decoder version.
+
+**Variants vs appleDefault (1024 px)** — full table in CI job summary.
+- `sceneLinear`: ΔE 11–14 (expected; Apple's tone intent removed). Analysis only.
+- `auto`: no rule fired on BVQX5524/HDR01 (= Apple). IMG_1901 (60 % clipped) → −0.3 EV: clipped 60.4→57.9 %, black p1 0.058→0.042, halo ring 0.242→0.199, local contrast 0.310→0.339 (all in the right direction), ΔE 2.46.
+- `warmNegative` @0.8: ΔE 2.4–4.0, clipping → 0 % (soft shoulder), but **black p1 raised** (0.007→0.016 on BVQX) — the intended film toe; keep as a look choice, review visually.
+- `coolSlide` @0.8: ΔE 2.1–3.7, deeper blacks, local contrast +10–30 %.
+
+**Performance (CI VM, not iPhone)**: full-res 12 MP develop + HEIC10 export 0.6–1.7 s; `auto` adds ~0.8–1.6 s (scene-linear thumb + Vision).
+
+**Not verified / next**
+- DecisionEngine DR rule never fires: scene-linear p1…p99 range on these files is only 3.5–5.5 stops, threshold 9 is wrong → recalibrate on more RAWs.
+- Vision ran on CI (labels/faces present); IMG_1901 labels "people 0.52" but faces 0.
+- No visual review yet (JPEG previews are in the CI artifact; artifact download is blocked from the dev container).
+- Gate 2/3 need more RAWs and ColorChecker shots from several iPhone models.
+
 ## 2026-11-05 — Spike: CIRAWFilter engine + raw-bench + CI (branch `spike/ciraw`)
 **What**
 - `RawCore` (pure Swift): `ColorMath` (P3↔Lab D65, CIEDE2000), `LinearImage`, `ImageMetrics` /
@@ -23,6 +56,4 @@ Newest first. Each entry: what changed, why, evidence, what is NOT verified yet.
 **Test data** — `originals/` (from the user): `BVQX5524.DNG` (iPhone 8, iOS 16.4.1, ISO 32, BaselineExposure −1.79),
 `HDR01_payload_N000.dng` (Google Pixel "sailfish" HDR+ DNG, BGGR, ISO 439), `IMG_1901.DNG` (iPhone 13 Pro Max, iOS 18.5, ISO 50).
 
-**Evidence** — written in a Linux container without a Swift toolchain; first compile happens in CI. Results: see next entry.
-
-**Not verified** — everything until CI runs.
+**Evidence** — written in a Linux container without a Swift toolchain; compiled and measured in CI (entry above).
