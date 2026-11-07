@@ -49,21 +49,26 @@ public struct ImageMetrics: Codable, Equatable, Sendable {
         let hpMean = hpSum / Double(n)
         let localContrast = sqrt(max(0, hpSq / Double(n) - hpMean * hpMean))
 
-        // Halo ring: dilate the clipped mask by 40 px and 5 px (square structuring element via box filter).
-        var ring: Double? = nil
-        if clippedCount > 0 {
-            let mask = clipped.map { $0 ? Float(1) : 0 }
-            let near = dilate(mask, width: image.width, height: image.height, radius: 5)
-            let far = dilate(mask, width: image.width, height: image.height, radius: 40)
-            var s = 0.0, c = 0
-            for i in 0..<n where far[i] && !near[i] { s += Double(y[i]); c += 1 }
-            if c > 0 { ring = s / Double(c) }
-        }
+        let ring = clippedCount > 0 ? ringMeanY(y, clipped: clipped, width: image.width, height: image.height) : nil
 
         return ImageMetrics(
             blackP1: pct(1), blackP5: pct(5), meanY: sum / Double(n), medianY: pct(50),
             clippedFraction: Double(clippedCount) / Double(n), localContrast: localContrast,
             highlightRingMeanY: ring, meanChroma: chromaSum / Double(n))
+    }
+
+    /// Mean luminance in the 5..40 px ring (square) around `clipped` pixels; nil if the ring is empty.
+    static func ringMeanY(_ y: [Float], clipped: [Bool], width: Int, height: Int) -> Double? {
+        let mask = clipped.map { $0 ? Float(1) : 0 }
+        let near = dilate(mask, width: width, height: height, radius: 5)
+        let far = dilate(mask, width: width, height: height, radius: 40)
+        var s = 0.0, c = 0
+        for i in 0..<y.count where far[i] && !near[i] { s += Double(y[i]); c += 1 }
+        return c > 0 ? s / Double(c) : nil
+    }
+
+    static func clippedMask(_ image: LinearImage) -> [Bool] {
+        (0..<image.pixelCount).map { max(image.pixels[$0 * 3], image.pixels[$0 * 3 + 1], image.pixels[$0 * 3 + 2]) >= 0.98 }
     }
 
     /// Binary dilation with a square of the given radius, via separable running maxima.
@@ -96,6 +101,9 @@ public struct ComparisonMetrics: Codable, Equatable, Sendable {
     /// Mean ΔE00 over pixels the reference did NOT clip (any channel < 0.98): changes Apple got right.
     public var deltaE00MeanUnclipped: Double
     public var referenceUnclippedFraction: Double
+    /// Halo ring of the candidate measured around the REFERENCE's clipped pixels, so both rings cover the
+    /// same pixels. (The candidate's own ring moves when it recovers highlights; comparing those is meaningless.)
+    public var candidateRingOnReferenceMask: Double?
     public var candidate: ImageMetrics
     public var reference: ImageMetrics
 
@@ -122,6 +130,11 @@ public struct ComparisonMetrics: Codable, Equatable, Sendable {
             deltaE00P95: sorted[min(n - 1, Int(0.95 * Double(n - 1)))],
             deltaE00MeanUnclipped: uN > 0 ? uSum / Double(uN) : 0,
             referenceUnclippedFraction: Double(uN) / Double(n),
+            candidateRingOnReferenceMask: {
+                let mask = ImageMetrics.clippedMask(reference)
+                return mask.contains(true) ? ImageMetrics.ringMeanY(candidate.displayLuminance(), clipped: mask,
+                                                                     width: candidate.width, height: candidate.height) : nil
+            }(),
             candidate: ImageMetrics.measure(candidate),
             reference: ImageMetrics.measure(reference))
     }

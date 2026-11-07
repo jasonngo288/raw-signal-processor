@@ -62,6 +62,7 @@ func variant(from a: Args) -> Variant {
 struct CorpusEntry: Codable {
     var id: String
     var file: String
+    var location: String?
     var category: String
     var condition: String
     var split: String
@@ -80,6 +81,7 @@ struct VariantResult: Codable {
     var deltaE00Mean: Double
     var deltaE00MeanUnclipped: Double
     var deltaE00P95: Double
+    var ringOnReferenceMask: Double?
     var metrics: ImageMetrics
     var seconds: Double
     var recipe: DecodeRecipe
@@ -110,8 +112,8 @@ func gates(_ vs: [VariantResult]) -> Gates? {
     var why: [String] = []
     if auto.deltaE00MeanUnclipped > 3 { why.append(String(format: "ΔE unclipped %.2f > 3", auto.deltaE00MeanUnclipped)) }
     if auto.metrics.blackP1 > ref.metrics.blackP1 + 0.002 { why.append(String(format: "black p1 raised %.4f -> %.4f", ref.metrics.blackP1, auto.metrics.blackP1)) }
-    if let a = auto.metrics.highlightRingMeanY, let r = ref.metrics.highlightRingMeanY, a > r + 0.01 {
-        why.append(String(format: "halo ring brighter %.3f -> %.3f", r, a))
+    if let a = auto.ringOnReferenceMask, let r = ref.metrics.highlightRingMeanY, a > r + 0.01 {
+        why.append(String(format: "halo ring (reference mask) brighter %.3f -> %.3f", r, a))
     }
     return Gates(gate1: exp.deltaE00Mean < 0.5, gate2: why.isEmpty, gate2Reasons: why)
 }
@@ -144,14 +146,14 @@ func benchFile(_ url: URL, entry: CorpusEntry?, outDir: URL, longEdge: Int, full
     try ref.recipe.prettyJSON().write(to: outDir.appendingPathComponent("\(stem)__appleDefault.recipe.json"), atomically: true, encoding: .utf8)
 
     var results = [VariantResult(name: "appleDefault", deltaE00Mean: 0, deltaE00MeanUnclipped: 0, deltaE00P95: 0,
-                                 metrics: refMetrics, seconds: refSeconds, recipe: ref.recipe, context: nil)]
+                                 ringOnReferenceMask: refMetrics.highlightRingMeanY, metrics: refMetrics, seconds: refSeconds, recipe: ref.recipe, context: nil)]
     for (v, o, secs) in renders {
         let cmp = try ComparisonMetrics.compare(candidate: renderer.linearImage(o.image, size: (w, h)), reference: refLin)
         let safe = v.name.replacingOccurrences(of: "+", with: "_")
         try renderer.export(o.image, format: .jpeg).write(to: outDir.appendingPathComponent("\(stem)__\(safe).jpg"))
         try o.recipe.prettyJSON().write(to: outDir.appendingPathComponent("\(stem)__\(safe).recipe.json"), atomically: true, encoding: .utf8)
         results.append(VariantResult(name: v.name, deltaE00Mean: cmp.deltaE00Mean, deltaE00MeanUnclipped: cmp.deltaE00MeanUnclipped,
-                                     deltaE00P95: cmp.deltaE00P95, metrics: cmp.candidate, seconds: secs, recipe: o.recipe, context: o.context))
+                                     deltaE00P95: cmp.deltaE00P95, ringOnReferenceMask: cmp.candidateRingOnReferenceMask, metrics: cmp.candidate, seconds: secs, recipe: o.recipe, context: o.context))
     }
     if full {
         for v in [Variant(name: "appleDefault", settings: .appleDefault, auto: false), variants[3]] {
@@ -188,13 +190,13 @@ func markdown(_ files: [FileResult]) -> String {
         if let r = f.variants.first?.recipe {
             md += "decoder `\(r.decoderVersion)` (supported: \(r.supportedDecoderVersions.joined(separator: ", "))), native \(r.nativeSize[0])x\(r.nativeSize[1]), analysis \(f.analysisSize[0])x\(f.analysisSize[1])\n\n"
         }
-        md += "| variant | ΔE00 mean | ΔE00 unclipped | ΔE00 p95 | black p1 | mean Y | clipped % | local contrast | halo ring Y | chroma | s |\n"
+        md += "| variant | ΔE00 mean | ΔE00 unclipped | ΔE00 p95 | black p1 | mean Y | clipped % | local contrast | halo ring Y (own / ref mask) | chroma | s |\n"
         md += "|---|---|---|---|---|---|---|---|---|---|---|\n"
         for v in f.variants {
             let m = v.metrics
             md += String(format: "| %@ | %.2f | %.2f | %.2f | %.4f | %.3f | %.2f | %.3f | %@ | %.1f | %.2f |\n",
                          v.name, v.deltaE00Mean, v.deltaE00MeanUnclipped, v.deltaE00P95, m.blackP1, m.meanY, m.clippedFraction * 100,
-                         m.localContrast, f2(m.highlightRingMeanY), m.meanChroma, v.seconds)
+                         m.localContrast, f2(m.highlightRingMeanY) + " / " + f2(v.ringOnReferenceMask), m.meanChroma, v.seconds)
         }
         if let c = f.variants.first(where: { $0.name == "auto" })?.context {
             md += String(format: "\ncontext: DR %.1f stops (p1 %.2f, p50 %.2f, p99.9 %@), sensor clipped %.2f%%, display clipped %@%%, EDR headroom %@x, faces %@",

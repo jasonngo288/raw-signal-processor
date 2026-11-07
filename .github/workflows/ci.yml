@@ -39,6 +39,19 @@ jobs:
         run: python3 scripts/fetch_corpus.py corpus/corpus.json corpus-cache
       - name: Bench originals + corpus
         run: .build/release/raw-bench bench originals corpus-cache --manifest corpus/corpus.json --out bench-out --long-edge 1024
+      - name: DNG tags of files CIRAWFilter could not open
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, subprocess
+          for f in json.load(open("bench-out/summary.json")):
+              if f.get("error"):
+                  path = ("corpus-cache/" if f.get("corpus", {}).get("location") != "originals" else "originals/") + f["file"]
+                  print("=== " + f["file"] + ": " + f["error"])
+                  out = subprocess.run(["python3", "scripts/dng_tags.py", path], capture_output=True, text=True).stdout
+                  keep = ("==", "Compression", "Photometric", "DNGVersion", "Model", "Software", "BitsPerSample", "SamplesPerPixel", "NewSubFileType", "ImageWidth")
+                  print("\n".join(l for l in out.splitlines() if l.strip().startswith(keep))[:6000])
+          PY
       - name: Previews in log (artifact storage is not reachable from the dev container)
         if: always()
         run: |

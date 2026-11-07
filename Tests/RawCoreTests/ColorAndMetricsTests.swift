@@ -219,6 +219,20 @@ final class LookAndSettingsTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(c.recoverableClippedFraction), 0.2, accuracy: 1e-9)
     }
 
+    /// Regression: recovering a clipped highlight must not read as "halo" just because the ring moved.
+    func testRingOnReferenceMaskComparesSamePixels() throws {
+        var ref = LinearImage(width: 120, height: 120, fill: (0.1, 0.1, 0.1))
+        for y in 40..<80 { for x in 40..<80 { let i = (y * 120 + x) * 3; ref.pixels[i] = 1; ref.pixels[i + 1] = 1; ref.pixels[i + 2] = 1 } }
+        var cand = ref
+        // Candidate recovers the outer part of the highlight (now 0.9, below the clip threshold).
+        for y in 40..<80 { for x in 40..<80 where x < 50 || x >= 70 || y < 50 || y >= 70 {
+            let i = (y * 120 + x) * 3; cand.pixels[i] = 0.9; cand.pixels[i + 1] = 0.9; cand.pixels[i + 2] = 0.9 } }
+        let c = try ComparisonMetrics.compare(candidate: cand, reference: ref)
+        XCTAssertGreaterThan(try XCTUnwrap(c.candidate.highlightRingMeanY), try XCTUnwrap(c.reference.highlightRingMeanY) + 0.05,
+                             "own-mask ring moves onto the recovered highlight")
+        XCTAssertEqual(try XCTUnwrap(c.candidateRingOnReferenceMask), try XCTUnwrap(c.reference.highlightRingMeanY), accuracy: 1e-6)
+    }
+
     func testUnclippedDeltaEIgnoresClippedReferencePixels() throws {
         var ref = LinearImage(width: 10, height: 10, fill: (0.3, 0.3, 0.3))
         for i in 0..<50 { ref.pixels[i * 3] = 1; ref.pixels[i * 3 + 1] = 1; ref.pixels[i * 3 + 2] = 1 }
