@@ -75,6 +75,11 @@ public enum DecisionEngine {
         public static let recoverable = 0.015
         public static let minHeadroom = 1.15
         public static let maxHeadroom = 16.0
+        /// Share of the measured headroom that is tone-mapped back (1 = all of it). Below 1 keeps whites brighter:
+        /// the top of the range is allowed to clip instead of pulling every bright tone down. Tuned on tuning files.
+        public static let headroomFraction = 0.7
+        /// Highlight local-contrast amount applied together with the tone map.
+        public static let highlightClarity: Float = 0.3
         public static let wideDynamicRange = 9.0
         public static let highISO = 800.0
         public static let faceArea = 0.01
@@ -93,9 +98,10 @@ public enum DecisionEngine {
             let head = c.edrHeadroom ?? 1
             if disp > Threshold.displayClipped, rec > Threshold.recoverable, head >= Threshold.minHeadroom {
                 st.extendedDynamicRangeAmount = 1
-                st.toneMapSourceHeadroom = Float(min(head, Threshold.maxHeadroom))
-                why.append(String(format: "display clipped %.1f%% (sensor %.1f%%, recoverable %.1f%%), EDR headroom %.2fx -> EDR 1 + tone-map headroom %.2f -> 1",
-                                  disp * 100, c.clippedFraction * 100, rec * 100, head, st.toneMapSourceHeadroom!))
+                st.toneMapSourceHeadroom = Float(min(1 + Threshold.headroomFraction * (head - 1), Threshold.maxHeadroom))
+                st.highlightClarity = Threshold.highlightClarity
+                why.append(String(format: "display clipped %.1f%% (sensor %.1f%%, recoverable %.1f%%), EDR headroom %.2fx -> EDR 1 + tone-map %.2f -> 1 (%.0f%% of headroom), highlight clarity %.2f",
+                                  disp * 100, c.clippedFraction * 100, rec * 100, head, st.toneMapSourceHeadroom!, Threshold.headroomFraction * 100, Threshold.highlightClarity))
             } else if disp > Threshold.displayClipped {
                 why.append(String(format: "display clipped %.1f%% but only %.1f%% recoverable / headroom %.2fx: kept (sensor clipping cannot be recovered)",
                                   disp * 100, rec * 100, head))

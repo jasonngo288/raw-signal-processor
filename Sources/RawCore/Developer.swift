@@ -67,6 +67,10 @@ public final class Developer: @unchecked Sendable {
             image = mapped
             out.recipe.decisions.append("highlight tone map: \(how)")
         }
+        if let c = st.highlightClarity, c > 0 {
+            image = renderer.highlightClarity(image, amount: c)
+            out.recipe.decisions.append(String(format: "highlight clarity %.2f (CIUnsharpMask r=1.2%% long edge, luminance mask 0.30-0.75)", c))
+        }
         if let lut = try renderer.resolveLook(st.look) {
             image = try renderer.applyLook(lut, to: image, intensity: st.lookIntensity)
         }

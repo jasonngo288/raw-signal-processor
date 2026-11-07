@@ -82,6 +82,8 @@ struct VariantResult: Codable {
     var deltaE00MeanUnclipped: Double
     var deltaE00P95: Double
     var ringOnReferenceMask: Double?
+    var brightMeanY: Double?
+    var brightLocalContrast: Double?
     var metrics: ImageMetrics
     var seconds: Double
     var recipe: DecodeRecipe
@@ -146,14 +148,38 @@ func benchFile(_ url: URL, entry: CorpusEntry?, outDir: URL, longEdge: Int, full
     try ref.recipe.prettyJSON().write(to: outDir.appendingPathComponent("\(stem)__appleDefault.recipe.json"), atomically: true, encoding: .utf8)
 
     var results = [VariantResult(name: "appleDefault", deltaE00Mean: 0, deltaE00MeanUnclipped: 0, deltaE00P95: 0,
-                                 ringOnReferenceMask: refMetrics.highlightRingMeanY, metrics: refMetrics, seconds: refSeconds, recipe: ref.recipe, context: nil)]
+                                 ringOnReferenceMask: refMetrics.highlightRingMeanY, brightMeanY: nil, brightLocalContrast: nil, metrics: refMetrics, seconds: refSeconds, recipe: ref.recipe, context: nil)]
     for (v, o, secs) in renders {
         let cmp = try ComparisonMetrics.compare(candidate: renderer.linearImage(o.image, size: (w, h)), reference: refLin)
         let safe = v.name.replacingOccurrences(of: "+", with: "_")
         try renderer.export(o.image, format: .jpeg).write(to: outDir.appendingPathComponent("\(stem)__\(safe).jpg"))
         try o.recipe.prettyJSON().write(to: outDir.appendingPathComponent("\(stem)__\(safe).recipe.json"), atomically: true, encoding: .utf8)
         results.append(VariantResult(name: v.name, deltaE00Mean: cmp.deltaE00Mean, deltaE00MeanUnclipped: cmp.deltaE00MeanUnclipped,
-                                     deltaE00P95: cmp.deltaE00P95, ringOnReferenceMask: cmp.candidateRingOnReferenceMask, metrics: cmp.candidate, seconds: secs, recipe: o.recipe, context: o.context))
+                                     deltaE00P95: cmp.deltaE00P95, ringOnReferenceMask: cmp.candidateRingOnReferenceMask,
+                                     brightMeanY: cmp.brightMeanYCandidate, brightLocalContrast: cmp.brightLocalContrastCandidate, metrics: cmp.candidate, seconds: secs, recipe: o.recipe, context: o.context))
+    }
+    // Reference bright-region values come from any comparison (they only depend on the reference).
+    if let firstCmp = try? ComparisonMetrics.compare(candidate: refLin, reference: refLin) {
+        results[0].brightMeanY = firstCmp.brightMeanYReference
+        results[0].brightLocalContrast = firstCmp.brightLocalContrastReference
+    }
+    // Highlight sweep (tuning aid): only where auto tone-maps highlights. k = share of headroom mapped back, c = clarity.
+    if let decided = renders.first(where: { $0.0.name == "auto" })?.1.recipe.settings, decided.toneMapSourceHeadroom != nil,
+       let head = analysis.context.edrHeadroom {
+        for (k, c) in [(1.0, 0.0), (0.7, 0.0), (0.5, 0.0), (0.7, 0.3), (0.5, 0.3), (0.5, 0.5)] as [(Double, Float)] {
+            var st = decided
+            st.toneMapSourceHeadroom = Float(min(1 + k * (head - 1), 16))
+            st.highlightClarity = c > 0 ? c : nil
+            let name = String(format: "hl k%.1f c%.1f", k, c)
+            let t = Date()
+            let o = try dev.develop(url: url, settings: st, auto: false, scaleFactor: scale)
+            let cmp = try ComparisonMetrics.compare(candidate: renderer.linearImage(o.image, size: (w, h)), reference: refLin)
+            try renderer.export(o.image, format: .jpeg).write(to: outDir.appendingPathComponent("\(stem)__hl_k\(Int(k * 10))_c\(Int(c * 10)).jpg"))
+            results.append(VariantResult(name: name, deltaE00Mean: cmp.deltaE00Mean, deltaE00MeanUnclipped: cmp.deltaE00MeanUnclipped,
+                                         deltaE00P95: cmp.deltaE00P95, ringOnReferenceMask: cmp.candidateRingOnReferenceMask,
+                                         brightMeanY: cmp.brightMeanYCandidate, brightLocalContrast: cmp.brightLocalContrastCandidate,
+                                         metrics: cmp.candidate, seconds: Date().timeIntervalSince(t), recipe: o.recipe, context: nil))
+        }
     }
     if full {
         for v in [Variant(name: "appleDefault", settings: .appleDefault, auto: false), variants[3]] {
@@ -190,13 +216,14 @@ func markdown(_ files: [FileResult]) -> String {
         if let r = f.variants.first?.recipe {
             md += "decoder `\(r.decoderVersion)` (supported: \(r.supportedDecoderVersions.joined(separator: ", "))), native \(r.nativeSize[0])x\(r.nativeSize[1]), analysis \(f.analysisSize[0])x\(f.analysisSize[1])\n\n"
         }
-        md += "| variant | ΔE00 mean | ΔE00 unclipped | ΔE00 p95 | black p1 | mean Y | clipped % | local contrast | halo ring Y (own / ref mask) | chroma | s |\n"
-        md += "|---|---|---|---|---|---|---|---|---|---|---|\n"
+        md += "| variant | ΔE00 mean | ΔE00 unclipped | ΔE00 p95 | black p1 | mean Y | clipped % | local contrast | halo ring Y (own / ref mask) | bright Y | bright LC | chroma | s |\n"
+        md += "|---|---|---|---|---|---|---|---|---|---|---|---|---|\n"
         for v in f.variants {
             let m = v.metrics
-            md += String(format: "| %@ | %.2f | %.2f | %.2f | %.4f | %.3f | %.2f | %.3f | %@ | %.1f | %.2f |\n",
+            md += String(format: "| %@ | %.2f | %.2f | %.2f | %.4f | %.3f | %.2f | %.3f | %@ | %@ | %@ | %.1f | %.2f |\n",
                          v.name, v.deltaE00Mean, v.deltaE00MeanUnclipped, v.deltaE00P95, m.blackP1, m.meanY, m.clippedFraction * 100,
-                         m.localContrast, f2(m.highlightRingMeanY) + " / " + f2(v.ringOnReferenceMask), m.meanChroma, v.seconds)
+                         m.localContrast, f2(m.highlightRingMeanY) + " / " + f2(v.ringOnReferenceMask),
+                         v.brightMeanY.map { String(format: "%.3f", $0) } ?? "–", v.brightLocalContrast.map { String(format: "%.3f", $0) } ?? "–", m.meanChroma, v.seconds)
         }
         if let c = f.variants.first(where: { $0.name == "auto" })?.context {
             md += String(format: "\ncontext: DR %.1f stops (p1 %.2f, p50 %.2f, p99.9 %@), sensor clipped %.2f%%, display clipped %@%%, EDR headroom %@x, faces %@",

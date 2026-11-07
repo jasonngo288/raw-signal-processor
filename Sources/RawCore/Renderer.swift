@@ -51,6 +51,32 @@ public final class Renderer: @unchecked Sendable {
         return (out.cropped(to: image.extent), String(format: "CIToneMapHeadroom %.2f -> 1.00", sourceHeadroom))
     }
 
+    /// Local contrast for highlights: CIUnsharpMask with a large radius, blended in through a luminance mask
+    /// that ramps from linear Y 0.30 (0) to 0.75 (1). Radius scales with the image so previews match full res.
+    public func highlightClarity(_ image: CIImage, amount: Float) -> CIImage {
+        guard amount > 0 else { return image }
+        let ext = image.extent
+        let radius = max(ext.width, ext.height) * 0.012
+        let w = ColorMath.p3LuminanceWeights
+        let lumaVec = CIVector(x: CGFloat(w.r), y: CGFloat(w.g), z: CGFloat(w.b), w: 0)
+        guard let usm = CIFilter(name: "CIUnsharpMask", parameters: [
+            kCIInputImageKey: image.clampedToExtent(), kCIInputRadiusKey: radius, kCIInputIntensityKey: amount,
+        ])?.outputImage?.cropped(to: ext) else { return image }
+        let gain: CGFloat = 1 / 0.45, bias: CGFloat = -0.30 / 0.45
+        let mask = image
+            .applyingFilter("CIColorMatrix", parameters: [
+                "inputRVector": CIVector(x: lumaVec.x * gain, y: lumaVec.y * gain, z: lumaVec.z * gain, w: 0),
+                "inputGVector": CIVector(x: lumaVec.x * gain, y: lumaVec.y * gain, z: lumaVec.z * gain, w: 0),
+                "inputBVector": CIVector(x: lumaVec.x * gain, y: lumaVec.y * gain, z: lumaVec.z * gain, w: 0),
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+                "inputBiasVector": CIVector(x: bias, y: bias, z: bias, w: 0),
+            ])
+            .applyingFilter("CIColorClamp")
+        return usm.applyingFilter("CIBlendWithMask", parameters: [
+            kCIInputBackgroundImageKey: image, kCIInputMaskImageKey: mask,
+        ]).cropped(to: ext)
+    }
+
     public func resolveLook(_ name: String?) throws -> CubeLUT? {
         guard let name, !name.isEmpty else { return nil }
         if let builtIn = BuiltInLook(rawValue: name) { return builtIn.lut() }

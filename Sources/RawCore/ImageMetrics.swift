@@ -57,6 +57,13 @@ public struct ImageMetrics: Codable, Equatable, Sendable {
             highlightRingMeanY: ring, meanChroma: chromaSum / Double(n))
     }
 
+    /// log2(Y) minus its Gaussian blur (sigma 2 px): the high-pass behind `localContrast`.
+    static func highPassLog(_ y: [Float], width: Int, height: Int) -> [Float] {
+        let logY = y.map { Float(log2(Double(max($0, 1e-4)))) }
+        let b = gaussianBlur(logY, width: width, height: height, sigma: 2)
+        return zip(logY, b).map { $0 - $1 }
+    }
+
     /// Mean luminance in the 5..40 px ring (square) around `clipped` pixels; nil if the ring is empty.
     static func ringMeanY(_ y: [Float], clipped: [Bool], width: Int, height: Int) -> Double? {
         let mask = clipped.map { $0 ? Float(1) : 0 }
@@ -104,6 +111,13 @@ public struct ComparisonMetrics: Codable, Equatable, Sendable {
     /// Halo ring of the candidate measured around the REFERENCE's clipped pixels, so both rings cover the
     /// same pixels. (The candidate's own ring moves when it recovers highlights; comparing those is meaningless.)
     public var candidateRingOnReferenceMask: Double?
+    /// "Bright region" = pixels whose reference luminance is >= 0.6 (whites, sky, lit walls; clipped ones included).
+    /// Mean luminance there (grey, flat whites read lower) and local contrast there (flat whites read lower).
+    public var brightFraction: Double
+    public var brightMeanYCandidate: Double?
+    public var brightMeanYReference: Double?
+    public var brightLocalContrastCandidate: Double?
+    public var brightLocalContrastReference: Double?
     public var candidate: ImageMetrics
     public var reference: ImageMetrics
 
@@ -124,6 +138,21 @@ public struct ComparisonMetrics: Codable, Equatable, Sendable {
         for i in 0..<n where max(reference.pixels[i * 3], reference.pixels[i * 3 + 1], reference.pixels[i * 3 + 2]) < 0.98 {
             uSum += de[i]; uN += 1
         }
+        let yRef = reference.displayLuminance(), yCand = candidate.displayLuminance()
+        let bright = yRef.map { $0 >= 0.6 }
+        let nBright = bright.filter { $0 }.count
+        func meanY(_ y: [Float]) -> Double? {
+            guard nBright > 0 else { return nil }
+            var s = 0.0; for i in 0..<n where bright[i] { s += Double(y[i]) }; return s / Double(nBright)
+        }
+        func lc(_ y: [Float]) -> Double? {
+            guard nBright > 1 else { return nil }
+            let hp = ImageMetrics.highPassLog(y, width: reference.width, height: reference.height)
+            var s = 0.0, q = 0.0
+            for i in 0..<n where bright[i] { s += Double(hp[i]); q += Double(hp[i] * hp[i]) }
+            let m = s / Double(nBright)
+            return sqrt(max(0, q / Double(nBright) - m * m))
+        }
         return ComparisonMetrics(
             deltaE00Mean: de.reduce(0, +) / Double(n),
             deltaE00Median: sorted[n / 2],
@@ -135,6 +164,9 @@ public struct ComparisonMetrics: Codable, Equatable, Sendable {
                 return mask.contains(true) ? ImageMetrics.ringMeanY(candidate.displayLuminance(), clipped: mask,
                                                                      width: candidate.width, height: candidate.height) : nil
             }(),
+            brightFraction: Double(nBright) / Double(n),
+            brightMeanYCandidate: meanY(yCand), brightMeanYReference: meanY(yRef),
+            brightLocalContrastCandidate: lc(yCand), brightLocalContrastReference: lc(yRef),
             candidate: ImageMetrics.measure(candidate),
             reference: ImageMetrics.measure(reference))
     }

@@ -2,6 +2,21 @@
 
 Newest first. Each entry: what changed, why, evidence, what is NOT verified yet.
 
+## 2026-11-08 — IMG_1901: whites look flat after highlight recovery
+**Problem (user, visual)**: with the full EDR headroom (1.99×) tone-mapped back, IMG_1901's whites turn grey and flat.
+Cause: `CIToneMapHeadroom` compresses everything from mid-highs up into SDR, so bright areas lose both level and
+micro-contrast.
+**What**
+- `Threshold.headroomFraction` (0.7): map back only part of the headroom; the top may clip again instead of pulling all
+  bright tones down.
+- `highlightClarity` (0.3): `CIUnsharpMask` with radius 1.2 % of the long edge, blended through a luminance mask
+  (linear Y 0.30 → 0.75), applied after the tone map. Restores local contrast where compression removed it.
+- Metrics: bright region = reference Y ≥ 0.6. `brightMeanY` (flat grey whites read lower) and `brightLocalContrast`
+  (std of the log2 high-pass inside that region), for candidate and reference.
+- Bench sweep on files where auto tone-maps highlights: k ∈ {1.0, 0.7, 0.5} × clarity ∈ {0, 0.3, 0.5}, previews written.
+  Tuning aid only: values are chosen on tuning files (IOS01, USR01, USR02), holdouts are not involved.
+**Not verified**: until the next CI run.
+
 ## 2026-11-07 — Re-run with fixed halo metric (run 42331461310)
 **Evidence (25/25 tests)**: Gate 1 PASS and **Gate 2 PASS on all 11 decodable files** (8 tuning, 3 holdout).
 With the ring measured on the reference mask, highlight recovery makes the ring *darker*, not brighter:
