@@ -63,13 +63,24 @@ public final class Developer: @unchecked Sendable {
         var out = try decoder.decode(url: url, settings: st, scaleFactor: scaleFactor, decisions: reasons)
         var image = out.image
         if let h = st.toneMapSourceHeadroom {
+            // 1. Highlight clarity in the EDR domain, before compression, so it cannot push pixels past white.
+            if let c = st.highlightClarity, c > 0 {
+                image = renderer.highlightClarity(image, amount: c)
+                out.recipe.decisions.append(String(format: "highlight clarity %.2f before tone map (CIUnsharpMask r=1.2%% long edge, luminance mask 0.30-0.75)", c))
+            }
+            // 2. Compress the EDR headroom into SDR.
             let (mapped, how) = renderer.toneMapHeadroom(image, sourceHeadroom: h)
             image = mapped
             out.recipe.decisions.append("highlight tone map: \(how)")
-        }
-        if let c = st.highlightClarity, c > 0 {
-            image = renderer.highlightClarity(image, amount: c)
-            out.recipe.decisions.append(String(format: "highlight clarity %.2f (CIUnsharpMask r=1.2%% long edge, luminance mask 0.30-0.75)", c))
+            // 3. Local recovery: keep Apple's own pixels wherever Apple did not (nearly) clip, and use the
+            //    recovered render only there. Avoids the grey veil a global compression puts on the whole frame.
+            if st.highlightRecoveryLocal ?? true {
+                var b = st
+                b.extendedDynamicRangeAmount = nil; b.toneMapSourceHeadroom = nil; b.highlightClarity = nil; b.highlightRecoveryLocal = nil
+                let base = try decoder.decode(url: url, settings: b, scaleFactor: scaleFactor).image
+                image = renderer.blendRecoveredHighlights(recovered: image, base: base)
+                out.recipe.decisions.append("local recovery: recovered render blended over the SDR decode where its luminance > 0.80 (soft mask, blur 0.4% long edge)")
+            }
         }
         if let lut = try renderer.resolveLook(st.look) {
             image = try renderer.applyLook(lut, to: image, intensity: st.lookIntensity)

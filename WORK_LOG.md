@@ -2,6 +2,19 @@
 
 Newest first. Each entry: what changed, why, evidence, what is NOT verified yet.
 
+## 2026-11-08 — Local highlight recovery (fix for the milky veil)
+**Evidence from run 42333880670 (sweep, IMG_1901)**: clarity applied *after* the tone map pushed bright pixels past white
+again (clipped 52.3 % at k 0.7 → 58.3 % with clarity 0.3), so it undid the recovery; every global variant kept a grey,
+milky veil over the whole frame (bright Y 0.969 Apple → 0.91–0.94).
+**What**
+- Clarity now runs in the EDR domain *before* `CIToneMapHeadroom`, so compression keeps it below white.
+- `highlightRecoveryLocal` (default on): the recovered render is blended over the plain SDR decode only where that
+  decode is near white (linear Y 0.80 → 0.97, mask blurred 0.4 % of the long edge). Pixels Apple rendered correctly
+  stay Apple's. Costs one extra decode when the rule fires.
+- Defaults: headroomFraction 1.0, highlightClarity 0.4 (the partial headroom was only a workaround for the veil).
+- Sweep: global k1.0 c0 (old) vs local k1.0 c0 / c0.4 / c0.7 / local k0.7 c0.4.
+**Not verified**: until the next CI run.
+
 ## 2026-11-08 — IMG_1901: whites look flat after highlight recovery
 **Problem (user, visual)**: with the full EDR headroom (1.99×) tone-mapped back, IMG_1901's whites turn grey and flat.
 Cause: `CIToneMapHeadroom` compresses everything from mid-highs up into SDR, so bright areas lose both level and

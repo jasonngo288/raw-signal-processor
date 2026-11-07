@@ -166,15 +166,16 @@ func benchFile(_ url: URL, entry: CorpusEntry?, outDir: URL, longEdge: Int, full
     // Highlight sweep (tuning aid): only where auto tone-maps highlights. k = share of headroom mapped back, c = clarity.
     if let decided = renders.first(where: { $0.0.name == "auto" })?.1.recipe.settings, decided.toneMapSourceHeadroom != nil,
        let head = analysis.context.edrHeadroom {
-        for (k, c) in [(1.0, 0.0), (0.7, 0.0), (0.5, 0.0), (0.7, 0.3), (0.5, 0.3), (0.5, 0.5)] as [(Double, Float)] {
+        for (k, c, local) in [(1.0, 0.0, false), (1.0, 0.0, true), (1.0, 0.4, true), (1.0, 0.7, true), (0.7, 0.4, true)] as [(Double, Float, Bool)] {
             var st = decided
             st.toneMapSourceHeadroom = Float(min(1 + k * (head - 1), 16))
             st.highlightClarity = c > 0 ? c : nil
-            let name = String(format: "hl k%.1f c%.1f", k, c)
+            st.highlightRecoveryLocal = local
+            let name = String(format: "hl k%.1f c%.1f %@", k, c, local ? "local" : "global")
             let t = Date()
             let o = try dev.develop(url: url, settings: st, auto: false, scaleFactor: scale)
             let cmp = try ComparisonMetrics.compare(candidate: renderer.linearImage(o.image, size: (w, h)), reference: refLin)
-            try renderer.export(o.image, format: .jpeg).write(to: outDir.appendingPathComponent("\(stem)__hl_k\(Int(k * 10))_c\(Int(c * 10)).jpg"))
+            try renderer.export(o.image, format: .jpeg).write(to: outDir.appendingPathComponent("\(stem)__hl_k\(Int(k * 10))_c\(Int(c * 10))_\(local ? "L" : "G").jpg"))
             results.append(VariantResult(name: name, deltaE00Mean: cmp.deltaE00Mean, deltaE00MeanUnclipped: cmp.deltaE00MeanUnclipped,
                                          deltaE00P95: cmp.deltaE00P95, ringOnReferenceMask: cmp.candidateRingOnReferenceMask,
                                          brightMeanY: cmp.brightMeanYCandidate, brightLocalContrast: cmp.brightLocalContrastCandidate,

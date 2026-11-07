@@ -77,9 +77,9 @@ public enum DecisionEngine {
         public static let maxHeadroom = 16.0
         /// Share of the measured headroom that is tone-mapped back (1 = all of it). Below 1 keeps whites brighter:
         /// the top of the range is allowed to clip instead of pulling every bright tone down. Tuned on tuning files.
-        public static let headroomFraction = 0.7
+        public static let headroomFraction = 1.0
         /// Highlight local-contrast amount applied together with the tone map.
-        public static let highlightClarity: Float = 0.3
+        public static let highlightClarity: Float = 0.4
         public static let wideDynamicRange = 9.0
         public static let highISO = 800.0
         public static let faceArea = 0.01

@@ -77,6 +77,29 @@ public final class Renderer: @unchecked Sendable {
         ]).cropped(to: ext)
     }
 
+    /// Blend `recovered` over `base` through a soft mask built from base luminance (linear 0.80 → 0.97),
+    /// blurred by 0.4 % of the long edge so the transition has no visible seam.
+    public func blendRecoveredHighlights(recovered: CIImage, base: CIImage) -> CIImage {
+        let ext = base.extent
+        let w = ColorMath.p3LuminanceWeights
+        let lo: CGFloat = 0.80, hi: CGFloat = 0.97
+        let gain = 1 / (hi - lo), bias = -lo / (hi - lo)
+        let row = CIVector(x: CGFloat(w.r) * gain, y: CGFloat(w.g) * gain, z: CGFloat(w.b) * gain, w: 0)
+        let mask = base
+            .applyingFilter("CIColorMatrix", parameters: [
+                "inputRVector": row, "inputGVector": row, "inputBVector": row,
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+                "inputBiasVector": CIVector(x: bias, y: bias, z: bias, w: 0),
+            ])
+            .applyingFilter("CIColorClamp")
+            .clampedToExtent()
+            .applyingGaussianBlur(sigma: Double(max(ext.width, ext.height) * 0.004))
+            .cropped(to: ext)
+        return recovered.applyingFilter("CIBlendWithMask", parameters: [
+            kCIInputBackgroundImageKey: base, kCIInputMaskImageKey: mask,
+        ]).cropped(to: ext)
+    }
+
     public func resolveLook(_ name: String?) throws -> CubeLUT? {
         guard let name, !name.isEmpty else { return nil }
         if let builtIn = BuiltInLook(rawValue: name) { return builtIn.lut() }

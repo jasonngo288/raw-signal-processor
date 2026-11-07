@@ -46,6 +46,9 @@ public struct RenderSettings: Codable, Equatable, Sendable {
     /// 0...1: large-radius unsharp mask (≈1.2 % of the long edge) blended in only where the image is bright,
     /// to give back local contrast that global highlight compression takes away. Applied after the tone map.
     public var highlightClarity: Float?
+    /// With a tone map: true (default) blends the recovered render only where the SDR decode is near white;
+    /// false applies the tone map to the whole frame (the 2026-11-07 behaviour, kept for comparison).
+    public var highlightRecoveryLocal: Bool?
 
     /// Look: path to a .cube file, or a built-in look name (see `BuiltInLook`).
     public var look: String?
@@ -79,7 +82,7 @@ public struct RenderSettings: Codable, Equatable, Sendable {
                                 sharpnessAmount, contrastAmount, detailAmount, luminanceNoiseReductionAmount,
                                 colorNoiseReductionAmount, moireReductionAmount, extendedDynamicRangeAmount,
                                 neutralTemperature, neutralTint]
-        return floats.contains { $0 != nil } || lensCorrection != nil || gamutMapping != nil || ccm != nil || toneMapSourceHeadroom != nil || highlightClarity != nil
+        return floats.contains { $0 != nil } || lensCorrection != nil || gamutMapping != nil || ccm != nil || toneMapSourceHeadroom != nil || highlightClarity != nil || highlightRecoveryLocal != nil
     }
 }
 
