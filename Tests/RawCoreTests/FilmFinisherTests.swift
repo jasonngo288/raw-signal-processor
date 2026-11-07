@@ -31,6 +31,20 @@ final class FilmFinisherTests: XCTestCase {
         XCTAssertEqual(a.pixels[0], a.pixels[1], accuracy: 1e-6, "monochrome grain: r == g")
     }
 
+    /// Regression: grain showed up as sparse black dots. The multiplier must stay within 1 ± 0.375 * amount.
+    func testGrainHasNoOutlierDots() throws {
+        for amount: Float in [0.45, 0.7, 1.0] {
+            let out = try renderer.linearImage(FilmFinisher.apply(flat(800, 600, 0.5), FilmFinish(grainAmount: amount, grainSize: 0.3, grainSeed: 11)))
+            let y = out.displayLuminance()
+            let lo = Double(y.min()!) / 0.5, hi = Double(y.max()!) / 0.5
+            print("[grain-range] amount \(amount): multiplier \(lo) ... \(hi)")
+            let bound = 0.375 * Double(amount) * (1 - 0.8 * 0.5) + 1e-3   // w at Y 0.5 is 0.6
+            XCTAssertGreaterThanOrEqual(lo, 1 - 0.375 * Double(amount) - 1e-3, "no black dots")
+            XCTAssertLessThanOrEqual(hi, 1 + 0.375 * Double(amount) + 1e-3)
+            _ = bound
+        }
+    }
+
     /// The point of sizing grain by the short edge: a 2x larger render, viewed at the same size, has the same grain.
     func testGrainLooksTheSameAtAnyResolution() throws {
         let f = FilmFinish(grainAmount: 0.6, grainSize: 0.4, grainSeed: 3)

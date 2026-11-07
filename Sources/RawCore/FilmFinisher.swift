@@ -95,6 +95,10 @@ public enum FilmFinisher {
             "inputRVector": CIVector(x: gainScale, y: 0, z: 0, w: 0), "inputGVector": CIVector(x: 0, y: gainScale, z: 0, w: 0),
             "inputBVector": CIVector(x: 0, y: 0, z: gainScale, w: 0), "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
             "inputBiasVector": CIVector(x: 1, y: 1, z: 1, w: 0),
+        ]).applyingFilter("CIColorClamp", parameters: [
+            // Hard bound on the grain multiplier: without it rare extreme cells became black dots (run 42388087057).
+            "inputMinComponents": CIVector(x: 1 - gainScale, y: 1 - gainScale, z: 1 - gainScale, w: 1),
+            "inputMaxComponents": CIVector(x: 1 + gainScale, y: 1 + gainScale, z: 1 + gainScale, w: 1),
         ])
         return g.applyingFilter("CIMultiplyCompositing", parameters: [kCIInputBackgroundImageKey: img]).cropped(to: ext)
     }
