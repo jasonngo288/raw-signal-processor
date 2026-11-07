@@ -106,6 +106,11 @@ public enum BuiltInLook: String, CaseIterable, Sendable {
     case warmNegative
     /// Cooler, punchier slide-film feel: deeper toe, more mid contrast, richer saturation.
     case coolSlide
+    /// Black and white: luminance only, gentle S-curve, slightly lifted toe, neutral (r = g = b).
+    case mono
+    /// Tungsten-balanced night stock: pulls warm artificial light toward neutral, teal shadows, soft shoulder.
+    /// Intentionally NOT neutral on daylight grey (it goes cool), like real tungsten film.
+    case tungstenNight
 
     public func lut(size: Int = 33) -> CubeLUT {
         switch self {
@@ -120,6 +125,18 @@ public enum BuiltInLook: String, CaseIterable, Sendable {
             return CubeLUT.generate(size: size, title: rawValue) { c in
                 BuiltInLook.film(c, toe: 0.0, contrast: 1.12, shoulder: 0.95, warm: SIMD3(0.98, 1.0, 1.03),
                                  shadowTint: SIMD3(1.0, 1.0, 1.0), saturation: 1.12, highlightDesat: 0.15)
+            }
+        case .mono:
+            return CubeLUT.generate(size: size, title: rawValue) { c in
+                let o = BuiltInLook.film(c, toe: 0.02, contrast: 1.08, shoulder: 0.9, warm: SIMD3(1, 1, 1),
+                                         shadowTint: SIMD3(1, 1, 1), saturation: 0, highlightDesat: 0)
+                let y = (o * SIMD3<Float>(0.2126, 0.7152, 0.0722)).sum()
+                return SIMD3(repeating: y)
+            }
+        case .tungstenNight:
+            return CubeLUT.generate(size: size, title: rawValue) { c in
+                BuiltInLook.film(c, toe: 0.02, contrast: 1.0, shoulder: 0.85, warm: SIMD3(0.95, 1.0, 1.06),
+                                 shadowTint: SIMD3(0.94, 1.0, 1.08), saturation: 0.95, highlightDesat: 0.3)
             }
         }
     }
@@ -150,4 +167,69 @@ public enum BuiltInLook: String, CaseIterable, Sendable {
         out = SIMD3(repeating: yo) + (out - SIMD3(repeating: yo)) * sat
         return out
     }
+}
+
+/// Film finishing applied after the look: grain, halation, vignette. Every size is a percentage of the
+/// image's SHORT edge, so a 12 MP export, a 48 MP export and a 1024 px preview look the same at the same
+/// viewing size (grain does not get finer on bigger files).
+public struct FilmFinish: Codable, Equatable, Sendable {
+    /// 0...1. Multiplicative luminance grain; strongest in shadows/mid-tones, fades toward white.
+    public var grainAmount: Float
+    /// Grain cell size, % of the short edge (0.07 ≈ 2 px on a 3024 px edge).
+    public var grainSize: Float
+    /// Same seed, same grain: renders are reproducible from the recipe.
+    public var grainSeed: UInt32
+    /// 0...1. Red-orange glow around bright areas (light scattered back through the film base).
+    public var halationAmount: Float
+    /// Linear luminance where halation starts (0...1).
+    public var halationThreshold: Float
+    /// Glow radius, % of the short edge.
+    public var halationRadius: Float
+    /// 0...1 corner darkening.
+    public var vignette: Float
+
+    public init(grainAmount: Float = 0, grainSize: Float = 0.07, grainSeed: UInt32 = 1, halationAmount: Float = 0,
+                halationThreshold: Float = 0.75, halationRadius: Float = 0.5, vignette: Float = 0) {
+        self.grainAmount = grainAmount; self.grainSize = grainSize; self.grainSeed = grainSeed
+        self.halationAmount = halationAmount; self.halationThreshold = halationThreshold
+        self.halationRadius = halationRadius; self.vignette = vignette
+    }
+
+    public static let none = FilmFinish()
+    public var isNone: Bool { grainAmount == 0 && halationAmount == 0 && vignette == 0 }
+
+    public func validate() throws {
+        for (name, v) in [("grainAmount", grainAmount), ("halationAmount", halationAmount), ("vignette", vignette)] where !(0...1).contains(v) {
+            throw RawCoreError.invalidSettings("\(name) must be in 0...1")
+        }
+        guard (0.01...1).contains(grainSize) else { throw RawCoreError.invalidSettings("grainSize must be 0.01...1 % of the short edge") }
+        guard (0.05...5).contains(halationRadius) else { throw RawCoreError.invalidSettings("halationRadius must be 0.05...5 % of the short edge") }
+        guard (0.1...0.99).contains(halationThreshold) else { throw RawCoreError.invalidSettings("halationThreshold must be 0.1...0.99") }
+    }
+}
+
+/// A complete film stock = look LUT + finishing. Names are the app's own (no real film brand names).
+public struct FilmStock: Equatable, Sendable {
+    public var name: String
+    public var look: BuiltInLook
+    public var lookIntensity: Float
+    public var finish: FilmFinish
+    public var summary: String
+
+    public static let all: [FilmStock] = [
+        FilmStock(name: "warm400", look: .warmNegative, lookIntensity: 0.85,
+                  finish: FilmFinish(grainAmount: 0.45, grainSize: 0.07, halationAmount: 0.30, halationThreshold: 0.75, halationRadius: 0.5, vignette: 0.15),
+                  summary: "warm colour negative, visible grain, soft glow on lights"),
+        FilmStock(name: "slide100", look: .coolSlide, lookIntensity: 0.85,
+                  finish: FilmFinish(grainAmount: 0.20, grainSize: 0.05, halationAmount: 0.10, halationThreshold: 0.8, halationRadius: 0.4, vignette: 0.10),
+                  summary: "cool, punchy slide film, fine grain"),
+        FilmStock(name: "mono400", look: .mono, lookIntensity: 1,
+                  finish: FilmFinish(grainAmount: 0.60, grainSize: 0.08, halationAmount: 0, vignette: 0.20),
+                  summary: "black and white, strong grain"),
+        FilmStock(name: "night800", look: .tungstenNight, lookIntensity: 0.9,
+                  finish: FilmFinish(grainAmount: 0.70, grainSize: 0.09, halationAmount: 0.50, halationThreshold: 0.6, halationRadius: 0.7, vignette: 0.10),
+                  summary: "tungsten-balanced night stock, big grain, strong halation on lamps"),
+    ]
+
+    public static func named(_ n: String) -> FilmStock? { all.first { $0.name == n } }
 }

@@ -54,6 +54,10 @@ public struct RenderSettings: Codable, Equatable, Sendable {
     public var look: String?
     /// 0...1 blend of the look over the base render.
     public var lookIntensity: Float
+    /// Film stock (`FilmStock.all`): sets look, intensity and finish unless `look` / `finish` are given explicitly.
+    public var stock: String?
+    /// Explicit finishing (grain, halation, vignette); overrides the stock's finish.
+    public var finish: FilmFinish?
 
     public init(mode: Mode = .appleDefault, decoderVersion: String? = nil, look: String? = nil, lookIntensity: Float = 1) {
         self.mode = mode
@@ -69,6 +73,10 @@ public struct RenderSettings: Codable, Equatable, Sendable {
     public func validate() throws {
         if let ccm, ccm.count != 9 { throw RawCoreError.invalidSettings("ccm must have 9 values, got \(ccm.count)") }
         if let h = toneMapSourceHeadroom, !(1...64).contains(h) { throw RawCoreError.invalidSettings("toneMapSourceHeadroom must be in 1...64") }
+        if let n = stock, FilmStock.named(n) == nil {
+            throw RawCoreError.invalidSettings("unknown stock \(n); known: \(FilmStock.all.map(\.name).joined(separator: ", "))")
+        }
+        try finish?.validate()
         if let c = highlightClarity, !(0...1).contains(c) { throw RawCoreError.invalidSettings("highlightClarity must be in 0...1") }
         if !(0...1).contains(lookIntensity) { throw RawCoreError.invalidSettings("lookIntensity must be in 0...1") }
         if mode == .appleDefault && hasOverrides {

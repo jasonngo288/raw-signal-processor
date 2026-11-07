@@ -8,6 +8,13 @@ demosaic, noise reduction, lens correction, local tone mapping and per-camera pr
 and exposes them as parameters. So: **use Apple's decoder as the base, control it explicitly, differentiate
 on top** (context decisions + film looks).
 
+## Decision 2026-11-08 (user): Apple render as the base, film on top
+The original film plan ("Pipeline tráng film iPhone") switched Apple's tone off (boost / LTM / EDR = 0) and developed
+everything in-house from linear data. Every in-house tone pipeline we built measured worse than Apple's decode
+(haze, softness, halos). Chosen direction: **Apple's CIRAWFilter render is the quality floor**; the app adds
+(1) bounded context decisions, (2) local highlight recovery, (3) film stocks = look LUT + grain + halation +
+vignette, sized as % of the short edge. `sceneLinear` stays available for analysis and a possible later engine.
+
 ## Phases
 | phase | content | exit criterion |
 |---|---|---|

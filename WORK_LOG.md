@@ -2,6 +2,23 @@
 
 Newest first. Each entry: what changed, why, evidence, what is NOT verified yet.
 
+## 2026-11-08 — Film engine: stocks with grain, halation, vignette (plan step 4)
+**Direction**: user chose "Apple render as base, film on top" (docs/PLANNING.md, Decision 2026-11-08).
+**What**
+- `FilmFinish` (pure Swift, Codable, validated): grain amount/size/seed, halation amount/threshold/radius, vignette.
+  All sizes are % of the short edge, so a preview, a 12 MP and a 48 MP render have the same grain at the same viewing size.
+- `FilmFinisher` (Core Image built-ins only: CIRandomGenerator, CIGaussianBlur, CIColorMatrix, CIColorClamp,
+  CIMultiply/AdditionCompositing, CIVignetteEffect). Grain is multiplicative, monochrome, seeded (reproducible from
+  the recipe), weaker toward white. Halation: luminance above threshold → blur → red-orange tint → added.
+- New looks `mono` (r = g = b) and `tungstenNight` (cools warm light, intentionally not neutral on daylight grey).
+- `FilmStock`: `warm400`, `slide100`, `mono400`, `night800` (own names, no film brands) = look + intensity + finish.
+  `RenderSettings.stock` / `.finish`; the recipe logs the finish actually used.
+- Bench: stock variants replace the two bare looks; `--crops` writes centre 640 px crops at full resolution
+  (Apple, warm400, night800) to judge grain at 100 %.
+- Tests: grain determinism / seed / mean preservation / resolution independence / highlight fade, halation colour and
+  locality, vignette, stock and finish validation.
+**Not verified**: until the next CI run; grain amplitude constant (k = 2.5) is a first guess.
+
 ## 2026-11-08 — Local highlight recovery (fix for the milky veil)
 **Evidence from run 42333880670 (sweep, IMG_1901)**: clarity applied *after* the tone map pushed bright pixels past white
 again (clipped 52.3 % at k 0.7 → 58.3 % with clarity 0.3), so it undid the recovery; every global variant kept a grey,

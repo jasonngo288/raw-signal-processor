@@ -38,7 +38,7 @@ jobs:
         continue-on-error: true
         run: python3 scripts/fetch_corpus.py corpus/corpus.json corpus-cache
       - name: Bench originals + corpus
-        run: .build/release/raw-bench bench originals corpus-cache --manifest corpus/corpus.json --out bench-out --long-edge 1024
+        run: .build/release/raw-bench bench originals corpus-cache --manifest corpus/corpus.json --out bench-out --long-edge 1024 --crops
       - name: DNG tags of files CIRAWFilter could not open
         if: always()
         run: |

@@ -55,6 +55,8 @@ public final class Developer: @unchecked Sendable {
             let a = try analysis ?? analyze(url: url, decoderVersion: settings.decoderVersion)
             var base = RenderSettings(mode: .explicit, decoderVersion: settings.decoderVersion, look: settings.look, lookIntensity: settings.lookIntensity)
             base.ccm = settings.ccm
+            base.stock = settings.stock
+            base.finish = settings.finish
             let d = DecisionEngine.decide(context: a.context, defaults: a.defaults, support: a.support, base: base)
             st = d.settings
             reasons = d.reasons + [String(format: "analysis %.2fs", a.seconds)]
@@ -82,8 +84,18 @@ public final class Developer: @unchecked Sendable {
                 out.recipe.decisions.append("local recovery: recovered render blended over the SDR decode where its luminance > 0.80 (soft mask, blur 0.4% long edge)")
             }
         }
+        // Film stock: supplies look, intensity and finish unless they were set explicitly.
+        let stock = st.stock.flatMap(FilmStock.named)
         if let lut = try renderer.resolveLook(st.look) {
             image = try renderer.applyLook(lut, to: image, intensity: st.lookIntensity)
+        } else if let stock {
+            image = try renderer.applyLook(stock.look.lut(), to: image, intensity: stock.lookIntensity)
+        }
+        if let finish = st.finish ?? stock?.finish, !finish.isNone {
+            image = FilmFinisher.apply(image, finish)
+            out.recipe.decisions.append(String(format: "film finish%@: grain %.2f @ %.3f%% short edge (seed %u), halation %.2f (Y>%.2f, r %.2f%%), vignette %.2f",
+                                               stock.map { " (\($0.name))" } ?? "", finish.grainAmount, finish.grainSize, finish.grainSeed,
+                                               finish.halationAmount, finish.halationThreshold, finish.halationRadius, finish.vignette))
         }
         return Output(image: image, recipe: out.recipe, context: ctx)
     }

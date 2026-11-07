@@ -122,7 +122,10 @@ final class LookAndSettingsTests: XCTestCase {
                 let y = 0.2126 * o.x + 0.7152 * o.y + 0.0722 * o.z
                 XCTAssertGreaterThanOrEqual(y, last - 1e-4, "\(look) not monotone at \(g)")
                 last = y
-                XCTAssertLessThan(abs(o.x - o.z), 0.08, "\(look) tints grey too much at \(g)")
+                if look != .tungstenNight {  // tungsten-balanced: daylight grey goes cool by design
+                    XCTAssertLessThan(abs(o.x - o.z), 0.08, "\(look) tints grey too much at \(g)")
+                }
+                if look == .mono { XCTAssertEqual(o.x, o.z, accuracy: 1e-5); XCTAssertEqual(o.x, o.y, accuracy: 1e-5) }
             }
         }
         let id = BuiltInLook.neutral.lut(size: 9).apply(SIMD3(0.3, 0.6, 0.9))
@@ -139,6 +142,26 @@ final class LookAndSettingsTests: XCTestCase {
                 XCTAssertLessThan(spreadOut, spreadIn * 2.5 + 0.03, "\(look) \(c) -> \(o)")
             }
         }
+    }
+
+    func testFilmStocksAndFinishValidation() throws {
+        XCTAssertEqual(Set(FilmStock.all.map(\.name)).count, FilmStock.all.count, "unique stock names")
+        for stock in FilmStock.all { XCTAssertNoThrow(try stock.finish.validate(), stock.name) }
+        XCTAssertTrue(FilmFinish.none.isNone)
+        XCTAssertThrowsError(try FilmFinish(grainAmount: 1.5).validate())
+        XCTAssertThrowsError(try FilmFinish(grainSize: 0).validate())
+        XCTAssertThrowsError(try FilmFinish(halationThreshold: 1).validate())
+        var s = RenderSettings(mode: .explicit)
+        s.stock = "warm400"
+        XCTAssertNoThrow(try s.validate())
+        s.stock = "Portra400"
+        XCTAssertThrowsError(try s.validate(), "unknown stock names are rejected")
+        s.stock = nil
+        s.finish = FilmFinish(grainAmount: 0.3)
+        XCTAssertNoThrow(try s.validate())
+        XCTAssertFalse(s.hasOverrides, "finishing is not a decode override")
+        let data = try JSONEncoder().encode(s)
+        XCTAssertEqual(try JSONDecoder().decode(RenderSettings.self, from: data), s)
     }
 
     func testSettingsValidationAndCodable() throws {

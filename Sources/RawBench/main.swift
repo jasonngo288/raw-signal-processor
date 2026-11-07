@@ -12,9 +12,10 @@ raw-bench — CIRAWFilter spike CLI
   raw-bench render <raw> [--mode appleDefault|explicit|sceneLinear|auto] [--look NAME|path.cube]
                    [--intensity 0..1] [--format heic10|png16|jpeg] [--scale 0..1] [--out FILE]
   raw-bench compare <raw> [--mode ...] [--look ...] [--long-edge N]   metrics + ΔE00 vs appleDefault
-  raw-bench bench <dir>... --out <dir> [--manifest corpus.json] [--long-edge N] [--full]
+  raw-bench bench <dir>... --out <dir> [--manifest corpus.json] [--long-edge N] [--full] [--crops]
 
 Looks: \(BuiltInLook.allCases.map(\.rawValue).joined(separator: ", ")) or a .cube path.
+Stocks (--stock, look + grain/halation/vignette): \(FilmStock.all.map { "\($0.name) (\($0.summary))" }.joined(separator: "; "))
 """
 
 struct Args {
@@ -53,6 +54,7 @@ func variant(from a: Args) -> Variant {
     var s = RenderSettings(mode: auto ? .explicit : (RenderSettings.Mode(rawValue: modeName) ?? .appleDefault))
     s.decoderVersion = a.options["decoder"]
     s.look = a.options["look"]
+    s.stock = a.options["stock"]
     if let i = a.options["intensity"], let f = Float(i) { s.lookIntensity = f }
     return Variant(name: modeName, settings: s, auto: auto)
 }
@@ -120,7 +122,7 @@ func gates(_ vs: [VariantResult]) -> Gates? {
     return Gates(gate1: exp.deltaE00Mean < 0.5, gate2: why.isEmpty, gate2Reasons: why)
 }
 
-func benchFile(_ url: URL, entry: CorpusEntry?, outDir: URL, longEdge: Int, full: Bool) throws -> FileResult {
+func benchFile(_ url: URL, entry: CorpusEntry?, outDir: URL, longEdge: Int, full: Bool, crops: Bool) throws -> FileResult {
     let stem = url.deletingPathExtension().lastPathComponent
     let scale = try decoder.scaleFactor(url: url, longEdge: longEdge)
     let analysis = try dev.analyze(url: url)
@@ -128,9 +130,11 @@ func benchFile(_ url: URL, entry: CorpusEntry?, outDir: URL, longEdge: Int, full
         Variant(name: "explicit", settings: .explicit, auto: false),
         Variant(name: "sceneLinear", settings: .sceneLinear, auto: false),
         Variant(name: "auto", settings: .explicit, auto: true),
-        Variant(name: "auto+warmNegative", settings: RenderSettings(mode: .explicit, look: "warmNegative", lookIntensity: 0.8), auto: true),
-        Variant(name: "auto+coolSlide", settings: RenderSettings(mode: .explicit, look: "coolSlide", lookIntensity: 0.8), auto: true),
-    ]
+    ] + FilmStock.all.map { stock in
+        var st = RenderSettings(mode: .explicit)
+        st.stock = stock.name
+        return Variant(name: "auto+\(stock.name)", settings: st, auto: true)
+    }
     var t0 = Date()
     let ref = try dev.develop(url: url, settings: .appleDefault, auto: false, scaleFactor: scale)
     let refSeconds = Date().timeIntervalSince(t0)
@@ -182,8 +186,18 @@ func benchFile(_ url: URL, entry: CorpusEntry?, outDir: URL, longEdge: Int, full
                                          metrics: cmp.candidate, seconds: Date().timeIntervalSince(t), recipe: o.recipe, context: nil))
         }
     }
+    // 100 % crops (full resolution, centre 640 x 640) to judge grain and halation at real pixel size.
+    if crops {
+        for v in [Variant(name: "appleDefault", settings: .appleDefault, auto: false)] + variants.filter({ ["auto+warm400", "auto+night800"].contains($0.name) }) {
+            let o = try dev.develop(url: url, settings: v.settings, auto: v.auto, scaleFactor: 1, analysis: analysis)
+            let e = o.image.extent
+            let crop = o.image.cropped(to: CGRect(x: e.midX - 320, y: e.midY - 320, width: 640, height: 640))
+            try renderer.export(crop, format: .jpeg, quality: 0.9)
+                .write(to: outDir.appendingPathComponent("\(stem)__crop100__\(v.name.replacingOccurrences(of: "+", with: "_")).jpg"))
+        }
+    }
     if full {
-        for v in [Variant(name: "appleDefault", settings: .appleDefault, auto: false), variants[3]] {
+        for v in [Variant(name: "appleDefault", settings: .appleDefault, auto: false), variants.first(where: { $0.name == "auto+warm400" })!] {
             let t = Date()
             let o = try dev.develop(url: url, settings: v.settings, auto: v.auto, scaleFactor: 1, analysis: analysis)
             let data = try renderer.export(o.image, format: .heic10)
@@ -297,7 +311,7 @@ func run() throws -> Int32 {
         for url in urls {
             log("bench \(url.lastPathComponent)")
             let entry = manifest[url.lastPathComponent]
-            do { results.append(try benchFile(url, entry: entry, outDir: outDir, longEdge: longEdge, full: a.flags.contains("full"))) } catch {
+            do { results.append(try benchFile(url, entry: entry, outDir: outDir, longEdge: longEdge, full: a.flags.contains("full"), crops: a.flags.contains("crops"))) } catch {
                 log("  ERROR \(error)")
                 results.append(FileResult(file: url.lastPathComponent, corpus: entry, camera: nil, iso: nil, analysisSize: [0, 0],
                                           reference: nil, variants: [], gates: nil, error: "\(error)"))
