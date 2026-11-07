@@ -13,7 +13,23 @@ milky veil over the whole frame (bright Y 0.969 Apple → 0.91–0.94).
   stay Apple's. Costs one extra decode when the rule fires.
 - Defaults: headroomFraction 1.0, highlightClarity 0.4 (the partial headroom was only a workaround for the veil).
 - Sweep: global k1.0 c0 (old) vs local k1.0 c0 / c0.4 / c0.7 / local k0.7 c0.4.
-**Not verified**: until the next CI run.
+
+**Evidence (run 42365269279, 25/25 tests, Gate 2 PASS on all 11 decodable files)** — IMG_1901, 1024 px:
+
+| variant | ΔE unclipped | clipped | mean Y | black p1 | bright LC | ring (ref mask) |
+|---|---|---|---|---|---|---|
+| Apple | 0 | 60.4 % | 0.733 | 0.0579 | 0.206 | 0.242 |
+| global k1.0 (2026-11-07) | 2.67 | 39.5 % | 0.683 | 0.0505 | 0.209 | 0.212 |
+| local k1.0 c0 | 0.30 | 42.9 % | 0.702 | 0.0576 | 0.208 | 0.241 |
+| **local k1.0 c0.4 (new auto)** | 0.41 | 45.5 % | 0.702 | 0.0576 | 0.214 | 0.241 |
+| local k1.0 c0.7 | 0.53 | 46.6 % | 0.700 | 0.0576 | 0.221 | 0.242 |
+
+Visual: stage, people, trees and banner keep Apple's contrast (no veil); sky and pavement are recovered; clarity adds
+texture to the pavement. ΔE on unclipped pixels drops 2.67 → 0.41. USER_mooncake: clipped 6.7 % → 2.2 %, ΔE unclipped
+0.05 (was 1.71). USER_mug: ΔE unclipped 0.07.
+**Known trade-off**: clarity overshoot pushes a few pixels past the source headroom, so clipping rises 42.9 % → 45.5 %
+with c0.4. Recovered areas of a scene that is mostly near white still read pale: the RAW has only 1.99× headroom there.
+Cost: one extra decode when the rule fires (~+0.5 s at 1024 px on the CI VM).
 
 ## 2026-11-08 — IMG_1901: whites look flat after highlight recovery
 **Problem (user, visual)**: with the full EDR headroom (1.99×) tone-mapped back, IMG_1901's whites turn grey and flat.
