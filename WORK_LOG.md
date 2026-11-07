@@ -2,6 +2,31 @@
 
 Newest first. Each entry: what changed, why, evidence, what is NOT verified yet.
 
+## 2026-11-07 — Re-run with fixed halo metric (run 42331461310)
+**Evidence (25/25 tests)**: Gate 1 PASS and **Gate 2 PASS on all 11 decodable files** (8 tuning, 3 holdout).
+With the ring measured on the reference mask, highlight recovery makes the ring *darker*, not brighter:
+IMG_1901 0.242 → 0.212, mooncake 0.595 → 0.540, mug 0.230 → 0.221. Black p1 not raised anywhere
+(IMG_1901 0.058 → 0.051). Local contrast unchanged (±0.002).
+
+| id | display clipped Apple → auto | ΔE unclipped | note |
+|---|---|---|---|
+| IOS01 | 60.4 % → 39.5 % | 2.67 | the remaining 39 % is sensor clipping (cannot be recovered); whites look flatter |
+| USR01 | 6.7 % → 2.1 % | 1.71 | ceiling lights and wall gradient recovered |
+| USR02 | 22.7 % → 20.4 % | 0.69 | only 1.31× headroom in the RAW |
+
+**Why the 3 Canon DNGs fail**: all were written by **dnglab 0.3.0** from EOS RP CR3 (DNG 1.4, CFA, lossless JPEG,
+16-bit). CIRAWFilter returns no image for them. Other DNG writers (Apple, Google HDR+, Panasonic via digiKam) decode.
+Treated as a compatibility finding of the decoder, not worked around; provenance updated in corpus.json.
+
+**Coverage vs the 36 target cases** (RAW_TEST_CORPUS.md): decodable public files cover 1 condition each for café
+(night, warm light, ISO 3200), Tokyo night (skyline through glass, ISO 10 000), beach (haze, derived DNG), mountain
+(layered haze); sky 2 (clouds; bright daytime sky); restaurant 0 real (2 tavern proxies). ≈ 7 / 36 conditions, and
+none of the new ones are iPhone Bayer DNGs. Gap unchanged: app-captured iPhone DNGs per category.
+
+**Observations, not acted on**: CAFE01 display clipping 2.98 % sits just under the 3 % trigger (lamps; recoverable,
+headroom 3.2×). Night scenes keep Apple's dark rendering (mean Y 0.03–0.09); no rule changes them, which keeps the mood.
+Faces on the IMG_1901 stage are still not detected at 1024 px (people label 0.52).
+
 ## 2026-11-07 — Results of run 42330787659 + halo metric fix
 **Evidence (run 42330787659, 24/24 tests)**
 - All 9 public RAWs downloaded on the GitHub runner (SHA-256 now pinned in corpus.json). 11/14 files decode:
