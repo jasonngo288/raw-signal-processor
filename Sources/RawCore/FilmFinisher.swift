@@ -59,46 +59,41 @@ public enum FilmFinisher {
         ]).cropped(to: ext)
     }
 
-    /// Multiplicative luminance grain: out = img * (1 + a * w * (n - 0.5)), n = smoothed uniform noise,
-    /// w = 1 - 0.8 Y (clamped to 0.2...1) so grain fades toward white. Cell size and smoothing are both
-    /// tied to the short edge, so grain statistics do not depend on resolution.
+    /// Multiplicative luminance grain: out = img * (1 + a * w * k * (n1 - n2)).
+    /// n1, n2 = two independent smoothed noise fields (different offsets of CIRandomGenerator); their difference
+    /// has zero mean whatever the generator's value distribution, so grain never shifts exposure.
+    /// w = 1 - 0.8 Y (clamped to 0.2...1): grain fades toward white. Cell size and smoothing are tied to the
+    /// short edge, so grain statistics do not depend on resolution.
     static func grain(_ img: CIImage, _ f: FilmFinish, short: Double) -> CIImage {
         let ext = img.extent
         let cell = max(0.35, short * Double(f.grainSize) / 100)
         guard let random = CIFilter(name: "CIRandomGenerator")?.outputImage else { return img }
-        let seedOffset = CGFloat(f.grainSeed % 4096) * 613
-        let noise = random
-            .transformed(by: CGAffineTransform(translationX: seedOffset, y: -seedOffset))
-            .transformed(by: CGAffineTransform(scaleX: cell, y: cell))
-            .transformed(by: CGAffineTransform(translationX: ext.minX, y: ext.minY))
-            .applyingFilter("CIColorMatrix", parameters: [   // monochrome: red channel everywhere
-                "inputRVector": CIVector(x: 1, y: 0, z: 0, w: 0),
-                "inputGVector": CIVector(x: 1, y: 0, z: 0, w: 0),
-                "inputBVector": CIVector(x: 1, y: 0, z: 0, w: 0),
-                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0), "inputBiasVector": CIVector(x: 0, y: 0, z: 0, w: 1),
-            ])
-            .applyingGaussianBlur(sigma: 0.5 * cell)
-            .cropped(to: ext)
-        // Smoothing shrinks the spread of uniform noise; stretch it back around 0.5 by a fixed factor
-        // (the factor is resolution independent because sigma is a fixed fraction of the cell).
-        let k: CGFloat = 2.5
-        let n = noise.applyingFilter("CIColorMatrix", parameters: [
-            "inputRVector": CIVector(x: k, y: 0, z: 0, w: 0), "inputGVector": CIVector(x: 0, y: k, z: 0, w: 0),
-            "inputBVector": CIVector(x: 0, y: 0, z: k, w: 0), "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
-            "inputBiasVector": CIVector(x: 0.5 - 0.5 * k, y: 0.5 - 0.5 * k, z: 0.5 - 0.5 * k, w: 0),
-        ]).applyingFilter("CIColorClamp")
-        let w = lumaRamp(img, gain: -0.8, bias: 1, min: 0.2)
-        let a = CGFloat(f.grainAmount) * 0.25
-        // G = a*w*n + (1 - 0.5*a*w): built from non-negative pieces only.
-        let wn = n.applyingFilter("CIMultiplyCompositing", parameters: [kCIInputBackgroundImageKey: w])
-        let scale = { (img: CIImage, s: CGFloat, b: CGFloat) in
-            img.applyingFilter("CIColorMatrix", parameters: [
-                "inputRVector": CIVector(x: s, y: 0, z: 0, w: 0), "inputGVector": CIVector(x: 0, y: s, z: 0, w: 0),
-                "inputBVector": CIVector(x: 0, y: 0, z: s, w: 0), "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
-                "inputBiasVector": CIVector(x: b, y: b, z: b, w: 0),
-            ])
+        func field(_ offset: CGFloat, sign: CGFloat) -> CIImage {
+            random
+                .transformed(by: CGAffineTransform(translationX: offset, y: -offset))
+                .transformed(by: CGAffineTransform(scaleX: cell, y: cell))
+                .transformed(by: CGAffineTransform(translationX: ext.minX, y: ext.minY))
+                .applyingFilter("CIColorMatrix", parameters: [   // monochrome: red channel everywhere
+                    "inputRVector": CIVector(x: sign, y: 0, z: 0, w: 0),
+                    "inputGVector": CIVector(x: sign, y: 0, z: 0, w: 0),
+                    "inputBVector": CIVector(x: sign, y: 0, z: 0, w: 0),
+                    "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0), "inputBiasVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+                ])
+                .applyingGaussianBlur(sigma: 0.5 * cell)
+                .cropped(to: ext)
         }
-        let g = scale(wn, a, 0).applyingFilter("CIAdditionCompositing", parameters: [kCIInputBackgroundImageKey: scale(w, -0.5 * a, 1)])
+        let seed = CGFloat(f.grainSeed % 4096) * 613
+        let d = field(seed, sign: 1).applyingFilter("CIAdditionCompositing", parameters: [
+            kCIInputBackgroundImageKey: field(seed + 100_003, sign: -1),
+        ])
+        let w = lumaRamp(img, gain: -0.8, bias: 1, min: 0.2)
+        let wd = d.applyingFilter("CIMultiplyCompositing", parameters: [kCIInputBackgroundImageKey: w])
+        let gainScale = CGFloat(f.grainAmount) * 0.25 * 1.5
+        let g = wd.applyingFilter("CIColorMatrix", parameters: [
+            "inputRVector": CIVector(x: gainScale, y: 0, z: 0, w: 0), "inputGVector": CIVector(x: 0, y: gainScale, z: 0, w: 0),
+            "inputBVector": CIVector(x: 0, y: 0, z: gainScale, w: 0), "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+            "inputBiasVector": CIVector(x: 1, y: 1, z: 1, w: 0),
+        ])
         return g.applyingFilter("CIMultiplyCompositing", parameters: [kCIInputBackgroundImageKey: img]).cropped(to: ext)
     }
 }
