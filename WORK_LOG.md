@@ -24,6 +24,15 @@ symmetric around 0.5 in the linear working space. Fixed by using the difference 
 **Run 42387738885** (pipefail works: job red): mean 0.18 → 0.36. Real cause of both shifts: `CIAdditionCompositing`
 sums alpha (1 + 1 = 2), and the following multiply compositing uses alpha. Fixed with `settingAlphaOne(in:)` after
 every addition (grain and halation). Grain std is now 0.032 and still resolution independent (0.03178 vs 0.03177).
+**Run 42388087057**: green; but 100 % crops showed grain as sparse BLACK DOTS (walls, night sky): rare noise cells
+far outside the expected range drove the multiplier toward 0.
+**Run 42388988000** (25+ tests green): multiplier clamped to 1 ± 0.375·amount; regression test
+`testGrainHasNoOutlierDots` (multiplier 0.83…1.17 at amount 0.45, 0.625…1.375 at 1.0). Visual check of crops
+(Tokyo, mooncake wall, tavern): dots gone, grain reads as fine even texture; night800 is strong on white walls by design.
+Grain std 0.022 at 600×400 vs 0.022 for 1200×800 viewed at 600×400. Gates 1/2 still PASS on all 11 decodable files.
+**Not verified / open**: the multiplier often sits at the clamp bound, i.e. the generator's distribution is wider than
+assumed; a measured normalisation would give a softer distribution. Grain is monochrome only (no chroma grain).
+On-device speed of the finish (3 blur passes at full res) is not measured.
 **CI bug found**: `swift test | tee` hid the failing exit code, so that run showed green. Fixed with `set -o pipefail`.
 Earlier runs were checked: all reported "0 failures" in their logs.
 
