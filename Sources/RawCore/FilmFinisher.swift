@@ -45,7 +45,9 @@ public enum FilmFinisher {
             "inputBVector": CIVector(x: 0, y: 0, z: a * 0.10, w: 0),
             "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
         ])
-        return tinted.applyingFilter("CIAdditionCompositing", parameters: [kCIInputBackgroundImageKey: img]).cropped(to: ext)
+        // CIAdditionCompositing also adds alpha (1 + 1 = 2); reset it, or later compositing goes wrong.
+        return tinted.applyingFilter("CIAdditionCompositing", parameters: [kCIInputBackgroundImageKey: img])
+            .settingAlphaOne(in: ext).cropped(to: ext)
     }
 
     static func vignette(_ img: CIImage, _ amount: Float) -> CIImage {
@@ -85,7 +87,7 @@ public enum FilmFinisher {
         let seed = CGFloat(f.grainSeed % 4096) * 613
         let d = field(seed, sign: 1).applyingFilter("CIAdditionCompositing", parameters: [
             kCIInputBackgroundImageKey: field(seed + 100_003, sign: -1),
-        ])
+        ]).settingAlphaOne(in: ext)  // addition sums alpha too (see halation)
         let w = lumaRamp(img, gain: -0.8, bias: 1, min: 0.2)
         let wd = d.applyingFilter("CIMultiplyCompositing", parameters: [kCIInputBackgroundImageKey: w])
         let gainScale = CGFloat(f.grainAmount) * 0.25 * 1.5

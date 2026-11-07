@@ -21,6 +21,9 @@ Newest first. Each entry: what changed, why, evidence, what is NOT verified yet.
 symmetric around 0.5 in the linear working space. Fixed by using the difference of two independent noise fields
 (zero mean by construction); amplitude raised (×1.5). Resolution independence already held: grain std 0.00267 at
 600×400 vs 0.00267 for 1200×800 viewed at 600×400.
+**Run 42387738885** (pipefail works: job red): mean 0.18 → 0.36. Real cause of both shifts: `CIAdditionCompositing`
+sums alpha (1 + 1 = 2), and the following multiply compositing uses alpha. Fixed with `settingAlphaOne(in:)` after
+every addition (grain and halation). Grain std is now 0.032 and still resolution independent (0.03178 vs 0.03177).
 **CI bug found**: `swift test | tee` hid the failing exit code, so that run showed green. Fixed with `set -o pipefail`.
 Earlier runs were checked: all reported "0 failures" in their logs.
 
