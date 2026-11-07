@@ -8,6 +8,7 @@ so the comparison is pixel-aligned.
 | metric | definition | why |
 |---|---|---|
 | ΔE00 mean / median / p95 | CIEDE2000 per pixel (kL=kC=kH=1) vs `appleDefault`, Lab D65 | colour/tone distance to Apple's decode |
+| ΔE00 unclipped | mean ΔE00 over pixels where the reference has every channel < 0.98 | how much we changed what Apple rendered correctly (highlight recovery is expected to change clipped pixels) |
 | blackP1 / blackP5 | 1st / 5th percentile of luminance Y | haze / lifted blacks (our old pipeline: 0.012–0.033 vs Apple 0.0003) |
 | meanY / medianY | mean / median Y | overall brightness |
 | clippedFraction | share of pixels with any channel ≥ 0.98 | blown highlights |

@@ -93,6 +93,9 @@ public struct ComparisonMetrics: Codable, Equatable, Sendable {
     public var deltaE00Mean: Double
     public var deltaE00Median: Double
     public var deltaE00P95: Double
+    /// Mean ΔE00 over pixels the reference did NOT clip (any channel < 0.98): changes Apple got right.
+    public var deltaE00MeanUnclipped: Double
+    public var referenceUnclippedFraction: Double
     public var candidate: ImageMetrics
     public var reference: ImageMetrics
 
@@ -109,10 +112,16 @@ public struct ComparisonMetrics: Codable, Equatable, Sendable {
             de[i] = ColorMath.deltaE2000(c.l, c.a, c.b, r.l, r.a, r.b)
         }
         let sorted = de.sorted()
+        var uSum = 0.0, uN = 0
+        for i in 0..<n where max(reference.pixels[i * 3], reference.pixels[i * 3 + 1], reference.pixels[i * 3 + 2]) < 0.98 {
+            uSum += de[i]; uN += 1
+        }
         return ComparisonMetrics(
             deltaE00Mean: de.reduce(0, +) / Double(n),
             deltaE00Median: sorted[n / 2],
             deltaE00P95: sorted[min(n - 1, Int(0.95 * Double(n - 1)))],
+            deltaE00MeanUnclipped: uN > 0 ? uSum / Double(uN) : 0,
+            referenceUnclippedFraction: Double(uN) / Double(n),
             candidate: ImageMetrics.measure(candidate),
             reference: ImageMetrics.measure(reference))
     }

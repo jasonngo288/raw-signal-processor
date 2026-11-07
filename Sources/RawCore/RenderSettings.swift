@@ -40,6 +40,10 @@ public struct RenderSettings: Codable, Equatable, Sendable {
     /// linearSpaceFilter). Used for per-model colour calibration.
     public var ccm: [Float]?
 
+    /// If set, the decoded image (normally an EDR decode) is tone-mapped from this headroom down to
+    /// SDR white (Core Image CIToneMapHeadroom). Recovers highlights that Apple's curve clips.
+    public var toneMapSourceHeadroom: Float?
+
     /// Look: path to a .cube file, or a built-in look name (see `BuiltInLook`).
     public var look: String?
     /// 0...1 blend of the look over the base render.
@@ -58,6 +62,7 @@ public struct RenderSettings: Codable, Equatable, Sendable {
 
     public func validate() throws {
         if let ccm, ccm.count != 9 { throw RawCoreError.invalidSettings("ccm must have 9 values, got \(ccm.count)") }
+        if let h = toneMapSourceHeadroom, !(1...64).contains(h) { throw RawCoreError.invalidSettings("toneMapSourceHeadroom must be in 1...64") }
         if !(0...1).contains(lookIntensity) { throw RawCoreError.invalidSettings("lookIntensity must be in 0...1") }
         if mode == .appleDefault && hasOverrides {
             throw RawCoreError.invalidSettings("appleDefault mode must not carry parameter overrides; use explicit")
@@ -70,7 +75,7 @@ public struct RenderSettings: Codable, Equatable, Sendable {
                                 sharpnessAmount, contrastAmount, detailAmount, luminanceNoiseReductionAmount,
                                 colorNoiseReductionAmount, moireReductionAmount, extendedDynamicRangeAmount,
                                 neutralTemperature, neutralTint]
-        return floats.contains { $0 != nil } || lensCorrection != nil || gamutMapping != nil || ccm != nil
+        return floats.contains { $0 != nil } || lensCorrection != nil || gamutMapping != nil || ccm != nil || toneMapSourceHeadroom != nil
     }
 }
 

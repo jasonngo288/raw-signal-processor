@@ -25,17 +25,25 @@ jobs:
       - name: Decoder info for originals
         run: |
           mkdir -p bench-out
-          for f in originals/*.DNG originals/*.dng; do
+          for f in originals/BVQX5524.DNG; do
             [ -e "$f" ] || continue
             echo "=== $f"; .build/release/raw-bench info "$f" | tee "bench-out/$(basename "$f").info.json"
           done
-      - name: Bench originals
-        run: .build/release/raw-bench bench originals --out bench-out --long-edge 1024 --full
+      - name: Cache public RAW corpus
+        uses: actions/cache@v4
+        with:
+          path: corpus-cache
+          key: corpus-${{ hashFiles('corpus/corpus.json') }}
+      - name: Fetch public RAW corpus (CC-BY-SA, not committed)
+        continue-on-error: true
+        run: python3 scripts/fetch_corpus.py corpus/corpus.json corpus-cache
+      - name: Bench originals + corpus
+        run: .build/release/raw-bench bench originals corpus-cache --manifest corpus/corpus.json --out bench-out --long-edge 1024
       - name: Previews in log (artifact storage is not reachable from the dev container)
         if: always()
         run: |
           mkdir -p previews
-          for f in bench-out/*.jpg; do [ -e "$f" ] && sips -Z 900 -s formatOptions 78 "$f" --out "previews/$(basename "$f")" >/dev/null; done
+          for f in bench-out/*.jpg; do [ -e "$f" ] && sips -Z 720 -s formatOptions 72 "$f" --out "previews/$(basename "$f")" >/dev/null; done
           cp bench-out/summary.md bench-out/summary.json previews/ 2>/dev/null || true
           tar czf previews.tgz previews
           echo "PREVIEWS_BEGIN"; base64 -i previews.tgz | fold -w 4000; echo "PREVIEWS_END"

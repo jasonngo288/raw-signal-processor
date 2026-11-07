@@ -173,15 +173,60 @@ final class LookAndSettingsTests: XCTestCase {
                                  luminanceNoiseReductionAmount: 0.95, colorNoiseReductionAmount: 0, moireReductionAmount: 0,
                                  extendedDynamicRangeAmount: 0, lensCorrection: true, gamutMapping: true, neutralTemperature: 5000, neutralTint: 0)
         let s = DecoderSupport(localToneMap: true, sharpness: true, contrast: true, detail: true, luminanceNoiseReduction: true,
-                               colorNoiseReduction: true, moireReduction: true, lensCorrection: true, maxExtendedDynamicRange: 0)
-        let c = SceneContext(logP1: -12, logP50: -3, logP99: 1, dynamicRangeStops: 15, clippedFraction: 0.5, iso: 3200, faceCount: 1, labels: nil)
+                               colorNoiseReduction: true, moireReduction: true, lensCorrection: true, maxExtendedDynamicRange: 2)
+        var c = SceneContext(logP1: -12, logP50: -3, logP99: 1, dynamicRangeStops: 15, clippedFraction: 0.05, iso: 3200, faceCount: 1, labels: nil)
+        c.displayClippedFraction = 0.40; c.edrHeadroom = 40; c.largestFaceArea = 0.05
         let dec = DecisionEngine.decide(context: c, defaults: d, support: s)
+        XCTAssertEqual(dec.settings.extendedDynamicRangeAmount, 1)
+        XCTAssertEqual(dec.settings.toneMapSourceHeadroom, 16, "headroom is capped")
+        XCTAssertNil(dec.settings.exposure, "highlights are tone-mapped, not fixed by darkening the picture")
         XCTAssertEqual(dec.settings.localToneMapAmount, 1)
-        XCTAssertEqual(try XCTUnwrap(dec.settings.exposure), -0.3, accuracy: 1e-6)
         XCTAssertEqual(dec.settings.luminanceNoiseReductionAmount, 1)
         XCTAssertEqual(dec.settings.sharpnessAmount, 0)
+        XCTAssertEqual(dec.settings.detailAmount, 0)
         XCTAssertEqual(dec.reasons.count, 5)
+        XCTAssertNoThrow(try dec.settings.validate())
+
+        // Sensor-clipped highlights (nothing recoverable) are left alone and the reason is logged.
+        var sensor = c
+        sensor.clippedFraction = 0.39; sensor.displayClippedFraction = 0.40
+        let ds = DecisionEngine.decide(context: sensor, defaults: d, support: s)
+        XCTAssertNil(ds.settings.toneMapSourceHeadroom)
+        XCTAssertTrue(ds.reasons.contains { $0.contains("cannot be recovered") })
+
+        // Unsupported local tone map is reported, not silently skipped; tiny faces keep detail.
+        var tiny = c
+        tiny.largestFaceArea = 0.001
+        let noLTM = DecoderSupport(localToneMap: false, sharpness: true, contrast: true, detail: true, luminanceNoiseReduction: true,
+                                   colorNoiseReduction: true, moireReduction: true, lensCorrection: false, maxExtendedDynamicRange: 2)
+        let dt = DecisionEngine.decide(context: tiny, defaults: d, support: noLTM)
+        XCTAssertNil(dt.settings.localToneMapAmount)
+        XCTAssertNil(dt.settings.detailAmount)
+        XCTAssertTrue(dt.reasons.contains { $0.contains("unsupported") })
+
         let calm = SceneContext(logP1: -6, logP50: -3, logP99: -1, dynamicRangeStops: 5, clippedFraction: 0, iso: 50, faceCount: 0, labels: nil)
         XCTAssertFalse(DecisionEngine.decide(context: calm, defaults: d, support: s).settings.hasOverrides)
+    }
+
+    func testContextHelpers() {
+        var img = LinearImage(width: 10, height: 10, fill: (0.2, 0.2, 0.2))
+        for i in 0..<10 { img.pixels[i * 3] = 4 }  // 10 % of pixels at 4x white in red
+        XCTAssertEqual(SceneContext.clippedFraction(img), 0.1, accuracy: 1e-9)
+        XCTAssertEqual(SceneContext.headroom(img), 4, accuracy: 1e-6)
+        XCTAssertEqual(SceneContext.headroom(LinearImage(width: 4, height: 4, fill: (0.1, 0.1, 0.1))), 1)
+        var c = SceneContext.measure(sceneLinear: img, iso: 100)
+        c.displayClippedFraction = 0.3
+        XCTAssertEqual(try XCTUnwrap(c.recoverableClippedFraction), 0.2, accuracy: 1e-9)
+    }
+
+    func testUnclippedDeltaEIgnoresClippedReferencePixels() throws {
+        var ref = LinearImage(width: 10, height: 10, fill: (0.3, 0.3, 0.3))
+        for i in 0..<50 { ref.pixels[i * 3] = 1; ref.pixels[i * 3 + 1] = 1; ref.pixels[i * 3 + 2] = 1 }
+        var cand = ref
+        for i in 0..<50 { cand.pixels[i * 3] = 0.8; cand.pixels[i * 3 + 1] = 0.8; cand.pixels[i * 3 + 2] = 0.8 }
+        let c = try ComparisonMetrics.compare(candidate: cand, reference: ref)
+        XCTAssertGreaterThan(c.deltaE00Mean, 1)
+        XCTAssertEqual(c.deltaE00MeanUnclipped, 0, accuracy: 1e-9)
+        XCTAssertEqual(c.referenceUnclippedFraction, 0.5, accuracy: 1e-9)
     }
 }

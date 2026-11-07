@@ -3,3 +3,4 @@
 bench-out/
 *.xcodeproj/xcuserdata/
 .DS_Store
+corpus-cache/

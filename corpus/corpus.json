@@ -1,0 +1,38 @@
+{
+  "note": "Public RAW test corpus. Files are downloaded by CI (scripts/fetch_corpus.py), never committed. Licence CC-BY-SA 4.0 unless stated; keep attribution. Categories and target conditions follow RAW_TEST_CORPUS.md (2026-11-05). Split is by scene: never tune on holdout.",
+  "files": [
+    {"id": "SKY01", "file": "BVQX5524.DNG", "location": "originals", "category": "sky", "condition": "white/blue clouds, daylight", "split": "tuning", "provenance": "native iPhone Bayer DNG", "camera": "iPhone 8",
+     "author": "okieman", "source": "https://discuss.pixls.us/t/processing-blue-pixels-and-white-pixels-separately/37343", "license": "CC-BY-SA-4.0"},
+    {"id": "IOS01", "file": "IMG_1901.DNG", "location": "originals", "category": "sky", "condition": "outdoor performers, bright daytime sky (not a dinner)", "split": "tuning", "provenance": "native iPhone Bayer DNG", "camera": "iPhone 13 Pro Max",
+     "author": "Tim Cuthbertson", "source": "https://discuss.pixls.us/t/my-sons-band-playing-on-a-hot-summer-morning/51031", "license": "CC-BY-SA-4.0"},
+    {"id": "HDR01", "file": "HDR01_payload_N000.dng", "location": "originals", "category": "indoor", "condition": "white walls, red chairs, ceiling lights; one HDR+ burst frame", "split": "tuning", "provenance": "HDR+ burst frame (payload_N000), not merged", "camera": "Google Pixel (sailfish)",
+     "author": "Hasinoff et al. (HDR+ dataset)", "source": "https://hdrplusdata.org/dataset.html", "license": "CC-BY-SA-4.0"},
+    {"id": "USR01", "file": "USER_mooncake.dng", "location": "originals", "category": "indoor", "condition": "person + product under indoor light", "split": "tuning", "provenance": "native iPhone Bayer DNG (user's own)", "camera": "iPhone 14 Pro",
+     "author": "repository owner", "source": "user upload", "license": "private"},
+    {"id": "USR02", "file": "USER_mug.dng", "location": "originals", "category": "indoor", "condition": "dark mug, bright desk, monitor", "split": "tuning", "provenance": "native iPhone Bayer DNG (user's own)", "camera": "iPhone 14 Pro",
+     "author": "repository owner", "source": "user upload", "license": "private"},
+
+    {"id": "CAFE01", "file": "_DSC6752.ARW", "location": "corpus", "category": "cafe", "condition": "café at night, warm artificial light", "split": "tuning", "provenance": "native Sony ARW",
+     "author": "Ogven", "source": "https://discuss.pixls.us/t/cafe-at-night-saturation-vibrance-in-art/50923", "url": "https://discuss.pixls.us/uploads/short-url/2TyzIvOIE2N0IsYJbfOeCliKMvk.ARW", "license": "CC-BY-SA-4.0"},
+    {"id": "TOKYO01", "file": "_DSC6890.NEF", "location": "corpus", "category": "tokyo_night", "condition": "skyline at dusk/night through glass, reflections", "split": "holdout", "provenance": "native Nikon NEF",
+     "author": "Kadsura", "source": "https://discuss.pixls.us/t/tokyo-skyline-from-tokyo-tower-thru-glass/61639", "url": "https://discuss.pixls.us/uploads/short-url/rpf00f3uuBor5vp9vEbuSR5eAes.NEF", "license": "CC-BY-SA-4.0"},
+    {"id": "BEACH01", "file": "20250322_0735.dng", "location": "corpus", "category": "beach", "condition": "hazy bay, morning", "split": "tuning", "provenance": "DERIVED DNG (converted by Popanz with digiKam), not camera-native",
+     "author": "Tony Barrett; DNG by Popanz", "source": "https://discuss.pixls.us/t/dng-file-now-added-hazy-day-in-balcary-bay/48991", "url": "https://discuss.pixls.us/uploads/short-url/uhuvtxG4MDkvel3nz8F0Y7ph0vQ.dng", "license": "CC-BY-SA-4.0"},
+    {"id": "MTN01", "file": "P1073242.rw2", "location": "corpus", "category": "mountain_forest", "condition": "layered mountains, haze", "split": "tuning", "provenance": "native Panasonic RW2",
+     "author": "Sai Deepak", "source": "https://discuss.pixls.us/t/mountains-in-the-front-mountains-in-the-back/57008", "url": "https://discuss.pixls.us/uploads/short-url/jboxO20bwY86oTu0c5ZcT4YY86P.rw2", "license": "CC-BY-SA-4.0"},
+    {"id": "MTN02", "file": "20211120_CRP3665.dng", "location": "corpus", "category": "mountain_forest", "condition": "autumn forest, Dolomites, deep shadows", "split": "holdout", "provenance": "DNG from Canon EOS RP (conversion provenance unverified)",
+     "author": "aadm", "source": "https://discuss.pixls.us/t/urban-and-mountain-landscapes-with-deep-shadows/30847", "url": "https://discuss.pixls.us/uploads/short-url/psNmN1EQEtft2LHudbGWRRRgwLL.dng", "license": "CC-BY-SA-4.0"},
+    {"id": "SKY02", "file": "20211113_CRP3539.dng", "location": "corpus", "category": "sky", "condition": "urban Rome, dramatic clouds, high contrast", "split": "tuning", "provenance": "DNG from Canon EOS RP (conversion provenance unverified)",
+     "author": "aadm", "source": "https://discuss.pixls.us/t/urban-and-mountain-landscapes-with-deep-shadows/30847", "url": "https://discuss.pixls.us/uploads/short-url/oM2QJ8vQ5T1mgKkxilvwn08Gyrl.dng", "license": "CC-BY-SA-4.0"},
+    {"id": "SKY03", "file": "20211113_CRP3608.dng", "location": "corpus", "category": "sky", "condition": "urban Rome, clouds, strong light contrast", "split": "holdout", "provenance": "DNG from Canon EOS RP (conversion provenance unverified)",
+     "author": "aadm", "source": "https://discuss.pixls.us/t/urban-and-mountain-landscapes-with-deep-shadows/30847", "url": "https://discuss.pixls.us/uploads/short-url/naOKr0jNwjheUg362P2rNjYi74t.dng", "license": "CC-BY-SA-4.0"},
+    {"id": "NIGHT01", "file": "_DSC0140.NEF", "location": "corpus", "category": "restaurant_night_proxy", "condition": "tavern/festival at night (PROXY only, not a restaurant dinner)", "split": "tuning", "provenance": "native Nikon NEF",
+     "author": "lightlover (Andrea)", "source": "https://discuss.pixls.us/t/the-grape-festival/35709", "url": "https://discuss.pixls.us/uploads/short-url/pHUR6P26pCcQ0USLXW6ECnwo0uR.NEF", "license": "CC-BY-SA-4.0"},
+    {"id": "NIGHT02", "file": "_DSC0165.NEF", "location": "corpus", "category": "restaurant_night_proxy", "condition": "tavern/festival at night (PROXY only)", "split": "holdout", "provenance": "native Nikon NEF",
+     "author": "lightlover (Andrea)", "source": "https://discuss.pixls.us/t/the-grape-festival/35709", "url": "https://discuss.pixls.us/uploads/short-url/aT7DmuDdpUHc8lDmB6Kmf9B4RVg.NEF", "license": "CC-BY-SA-4.0"}
+  ],
+  "excluded": [
+    {"file": "IMG_20240510_084731.dng", "reason": "CC-BY-NC 4.0 (Branscombe Beach): not usable for a commercial app corpus"},
+    {"file": "MIT-Adobe FiveK", "reason": "research-only licence"}
+  ]
+}

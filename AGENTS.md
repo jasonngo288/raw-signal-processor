@@ -31,14 +31,16 @@ An iPhone camera app (iPhone 12 → 18) that captures RAW and "develops film":
 
 ## Decision gates
 - **Gate 1**: `explicit` (Apple defaults written back) reproduces `appleDefault` — ΔE00 mean < 0.5. Proves we control the decoder.
-- **Gate 2**: `auto` stays within ΔE00 mean ≤ 3 of `appleDefault`, with black p1 not raised and halo ring not brighter.
+- **Gate 2**: `auto` stays within ΔE00 ≤ 3 of `appleDefault` **on pixels Apple did not clip** (`deltaE00MeanUnclipped`),
+  with black p1 not raised (> +0.002) and halo ring not brighter (> +0.01). Evaluated per file in `summary.md`; holdout files are reported, never tuned on.
 - **Gate 3**: cross-model chart ΔE00 < 2 after CCM (needs ColorChecker shots from ≥ 2 iPhone models — not yet available).
 
 ## Layout
 ```
 Sources/RawCore/   ColorMath, LinearImage, ImageMetrics, RenderSettings, Look, ContextAnalysis (pure Swift)
-                   RawDecoder, Renderer (Core Image), VisionAnalyzer (Vision)
+                   RawDecoder, Renderer, Developer (Core Image: analyse → decode → tone map → look), VisionAnalyzer
 Sources/RawBench/  raw-bench CLI: info | render | compare | bench
+corpus/            corpus.json (public RAWs, fetched by CI, never committed) + README
 Tests/RawCoreTests unit tests (Sharma CIEDE2000, metrics, LUT, settings, decisions) + decoder tests on originals/
 docs/              PLANNING.md, METRICS.md
 ```

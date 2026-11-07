@@ -35,6 +35,22 @@ public final class Renderer: @unchecked Sendable {
         return mixed.cropped(to: image.extent)
     }
 
+    /// Map an EDR image whose highlights reach `sourceHeadroom` (× SDR white) into SDR, keeping mid-tones.
+    /// Uses Core Image's CIToneMapHeadroom where available (macOS 15 / iOS 18); otherwise the image
+    /// is returned unchanged and the reason is reported for the recipe.
+    public func toneMapHeadroom(_ image: CIImage, sourceHeadroom: Float) -> (CIImage, String) {
+        guard let f = CIFilter(name: "CIToneMapHeadroom") else { return (image, "CIToneMapHeadroom unavailable on this OS: not applied") }
+        let keys = f.inputKeys
+        guard keys.contains("inputSourceHeadroom"), keys.contains("inputTargetHeadroom") else {
+            return (image, "CIToneMapHeadroom has unexpected inputs \(keys): not applied")
+        }
+        f.setValue(image, forKey: kCIInputImageKey)
+        f.setValue(sourceHeadroom, forKey: "inputSourceHeadroom")
+        f.setValue(Float(1), forKey: "inputTargetHeadroom")
+        guard let out = f.outputImage else { return (image, "CIToneMapHeadroom produced no image: not applied") }
+        return (out.cropped(to: image.extent), String(format: "CIToneMapHeadroom %.2f -> 1.00", sourceHeadroom))
+    }
+
     public func resolveLook(_ name: String?) throws -> CubeLUT? {
         guard let name, !name.isEmpty else { return nil }
         if let builtIn = BuiltInLook(rawValue: name) { return builtIn.lut() }

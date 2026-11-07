@@ -45,6 +45,25 @@ final class DecoderTests: XCTestCase {
         }
     }
 
+    /// Highlight recovery: where Apple's curve clips data the RAW still holds, auto must reduce
+    /// display clipping without darkening the unclipped part of the picture.
+    func testAutoRecoversToneClippedHighlights() throws {
+        let dev = Developer()
+        for url in try files() {
+            let an = try dev.analyze(url: url)
+            let scale = try dev.decoder.scaleFactor(url: url, longEdge: 384)
+            let auto = try dev.develop(url: url, settings: .explicit, auto: true, scaleFactor: scale, analysis: an)
+            guard auto.recipe.effective.extendedDynamicRangeAmount > 0 else { continue }
+            let ref = try dev.develop(url: url, settings: .appleDefault, auto: false, scaleFactor: scale)
+            let size = (Int(min(ref.image.extent.width, auto.image.extent.width)), Int(min(ref.image.extent.height, auto.image.extent.height)))
+            let cmp = try ComparisonMetrics.compare(candidate: dev.renderer.linearImage(auto.image, size: size),
+                                                    reference: dev.renderer.linearImage(ref.image, size: size))
+            print("[highlight] \(url.lastPathComponent) clipped \(cmp.reference.clippedFraction) -> \(cmp.candidate.clippedFraction), ΔE unclipped \(cmp.deltaE00MeanUnclipped), \(auto.recipe.decisions)")
+            if auto.recipe.decisions.contains(where: { $0.contains("not applied") }) { continue }
+            XCTAssertLessThan(cmp.candidate.clippedFraction, cmp.reference.clippedFraction, url.lastPathComponent)
+        }
+    }
+
     func testUnsupportedDecoderVersionThrows() throws {
         let url = try XCTUnwrap(try files().first)
         XCTAssertThrowsError(try RawDecoder().decode(url: url, settings: RenderSettings(mode: .explicit, decoderVersion: "nope")))
