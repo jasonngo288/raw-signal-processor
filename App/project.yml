@@ -1,22 +1,44 @@
 # XcodeGen spec for the demo app. Generate with:  brew install xcodegen && cd App && xcodegen generate
+# RawCore and CaptureKit are compiled straight from ../Sources as framework targets (no local Swift package),
+# because Xcode on the user's Mac would not load the repo root as a local package ("Missing package product").
 name: RawFilmDemo
 options:
   bundleIdPrefix: com.example.rawfilm
   deploymentTarget:
     iOS: "17.0"
-packages:
-  RawSignalProcessor:
-    path: ..
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    CODE_SIGN_STYLE: Automatic
+    TARGETED_DEVICE_FAMILY: "1"
 targets:
+  RawCore:
+    type: framework
+    platform: iOS
+    sources: [../Sources/RawCore]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.rawfilm.RawCore
+        GENERATE_INFOPLIST_FILE: YES
+        DEFINES_MODULE: YES
+        SKIP_INSTALL: YES
+  CaptureKit:
+    type: framework
+    platform: iOS
+    sources: [../Sources/CaptureKit]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.rawfilm.CaptureKit
+        GENERATE_INFOPLIST_FILE: YES
+        DEFINES_MODULE: YES
+        SKIP_INSTALL: YES
   RawFilmDemo:
     type: application
     platform: iOS
     sources: [RawFilmDemo]
     dependencies:
-      - package: RawSignalProcessor
-        product: RawCore
-      - package: RawSignalProcessor
-        product: CaptureKit
+      - target: RawCore
+      - target: CaptureKit
     info:
       path: RawFilmDemo/Info.plist
       properties:
@@ -30,6 +52,10 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.rawfilm.demo
-        SWIFT_VERSION: "5.0"
-        CODE_SIGN_STYLE: Automatic
-        TARGETED_DEVICE_FAMILY: "1"
+schemes:
+  RawFilmDemo:
+    build:
+      targets:
+        RawFilmDemo: all
+    run:
+      config: Debug
