@@ -58,6 +58,15 @@ public struct RenderSettings: Codable, Equatable, Sendable {
     public var stock: String?
     /// Explicit finishing (grain, halation, vignette); overrides the stock's finish.
     public var finish: FilmFinish?
+    /// 0...1: how much of the look is held back on people (Vision person mask). nil/0 = off.
+    public var skinProtection: Float?
+    /// Exposure offset (EV) applied inside CIRAWFilter's linearSpaceFilter, i.e. scene-linear, together with the CCM.
+    /// Normally filled from the per-model calibration table.
+    public var linearExposureEV: Float?
+    /// Use the per-model calibration table (CCM + exposure offset) when an entry exists. nil = yes.
+    public var useCalibration: Bool?
+    /// Plugins to run (ids from `PluginRegistry`). nil = the developer's default set, [] = none.
+    public var plugins: [String]?
 
     public init(mode: Mode = .appleDefault, decoderVersion: String? = nil, look: String? = nil, lookIntensity: Float = 1) {
         self.mode = mode
@@ -77,6 +86,8 @@ public struct RenderSettings: Codable, Equatable, Sendable {
             throw RawCoreError.invalidSettings("unknown stock \(n); known: \(FilmStock.all.map(\.name).joined(separator: ", "))")
         }
         try finish?.validate()
+        if let p = skinProtection, !(0...1).contains(p) { throw RawCoreError.invalidSettings("skinProtection must be in 0...1") }
+        if let e = linearExposureEV, !(-4...4).contains(e) { throw RawCoreError.invalidSettings("linearExposureEV must be in -4...4") }
         if let c = highlightClarity, !(0...1).contains(c) { throw RawCoreError.invalidSettings("highlightClarity must be in 0...1") }
         if !(0...1).contains(lookIntensity) { throw RawCoreError.invalidSettings("lookIntensity must be in 0...1") }
         if mode == .appleDefault && hasOverrides {
@@ -90,7 +101,7 @@ public struct RenderSettings: Codable, Equatable, Sendable {
                                 sharpnessAmount, contrastAmount, detailAmount, luminanceNoiseReductionAmount,
                                 colorNoiseReductionAmount, moireReductionAmount, extendedDynamicRangeAmount,
                                 neutralTemperature, neutralTint]
-        return floats.contains { $0 != nil } || lensCorrection != nil || gamutMapping != nil || ccm != nil || toneMapSourceHeadroom != nil || highlightClarity != nil || highlightRecoveryLocal != nil
+        return floats.contains { $0 != nil } || lensCorrection != nil || gamutMapping != nil || ccm != nil || linearExposureEV != nil || toneMapSourceHeadroom != nil || highlightClarity != nil || highlightRecoveryLocal != nil
     }
 }
 
@@ -170,6 +181,12 @@ public struct DecodeRecipe: Codable, Equatable, Sendable {
     public var exposureTime: Double?
     public var osVersion: String
     public var decisions: [String]
+    /// Plugins that ran for this render (empty = core pipeline only).
+    public var plugins: [String] = []
+    /// Calibration entry used ("iPhone14,3 v1"), or why none was used.
+    public var calibration: String? = nil
+    /// How the decoder version was chosen ("policy", "requested", "Apple default").
+    public var decoderVersionSource: String? = nil
 
     public init(file: String, settings: RenderSettings, decoderVersion: String, supportedDecoderVersions: [String],
                 defaults: DecodeParameters, effective: DecodeParameters, support: DecoderSupport, nativeSize: [Int],
@@ -184,6 +201,13 @@ public struct DecodeRecipe: Codable, Equatable, Sendable {
 }
 
 public extension Encodable {
+    func compactJSON() -> String {
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.sortedKeys]
+        enc.nonConformingFloatEncodingStrategy = .convertToString(positiveInfinity: "inf", negativeInfinity: "-inf", nan: "nan")
+        return (try? String(decoding: enc.encode(self), as: UTF8.self)) ?? "{}"
+    }
+
     func prettyJSON() -> String {
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]

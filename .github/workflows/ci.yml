@@ -17,6 +17,12 @@ jobs:
           swift --version
       - name: Build
         run: swift build -c release
+      - name: Build RawCore + CaptureKit for iOS (compile check; no device in CI)
+        run: |
+          set -o pipefail
+          for scheme in RawCore CaptureKit; do
+            xcodebuild build -scheme "$scheme" -destination 'generic/platform=iOS' -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO -quiet 2>&1 | tail -40
+          done
       - name: Test
         run: |
           set -o pipefail

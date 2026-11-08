@@ -3,17 +3,17 @@ import CoreImage
 import Foundation
 
 /// Core Image implementation of `FilmFinish`, built only from built-in filters (no custom kernels).
-/// Order: halation (light, so it is added before the print darkens corners) → vignette → grain (last, on top).
+/// Order: halation (light) → grain (last, on top). Vignette lives in VignettePlugin.
 public enum FilmFinisher {
     static let luma = ColorMath.p3LuminanceWeights
 
     public static func apply(_ image: CIImage, _ f: FilmFinish) -> CIImage {
-        guard !f.isNone else { return image }
+        guard f.grainAmount > 0 || f.halationAmount > 0 else { return image }
         let ext = image.extent
         let short = Double(min(ext.width, ext.height))
         var out = image
         if f.halationAmount > 0 { out = halation(out, f, short: short) }
-        if f.vignette > 0 { out = vignette(out, f.vignette) }
+        // Vignette is the `vignette` plugin (Plugins.swift), not part of the core finish.
         if f.grainAmount > 0 { out = grain(out, f, short: short) }
         return out.cropped(to: ext)
     }
@@ -50,7 +50,7 @@ public enum FilmFinisher {
             .settingAlphaOne(in: ext).cropped(to: ext)
     }
 
-    static func vignette(_ img: CIImage, _ amount: Float) -> CIImage {
+    public static func vignette(_ img: CIImage, _ amount: Float) -> CIImage {
         let ext = img.extent
         let radius = 0.35 * hypot(ext.width, ext.height)  // corners sit at ~1.4x radius
         return img.applyingFilter("CIVignetteEffect", parameters: [

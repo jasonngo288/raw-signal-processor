@@ -75,11 +75,30 @@ final class FilmFinisherTests: XCTestCase {
         XCTAssertEqual(out.pixels[3], before.pixels[3], accuracy: 1e-4, "far corner untouched")
     }
 
+    func testPluginRegistryUnplugs() throws {
+        var st = RenderSettings.explicit
+        XCTAssertEqual(try PluginRegistry.standard.active(for: st).map(\.id), ["highlightRecovery", "vignette"])
+        st.plugins = []
+        XCTAssertTrue(try PluginRegistry.standard.active(for: st).isEmpty)
+        st.plugins = ["vignette"]
+        XCTAssertEqual(try PluginRegistry.standard.active(for: st).map(\.id), ["vignette"])
+        st.plugins = ["nope"]
+        XCTAssertThrowsError(try PluginRegistry.standard.active(for: st))
+        XCTAssertTrue(try PluginRegistry.none.active(for: .explicit).isEmpty)
+        // Vignette plugin: unplugged = untouched image.
+        let img = flat(200, 150, 0.5)
+        let (v, why) = try VignettePlugin().afterFinish(img, settings: .explicit, finish: FilmFinish(vignette: 0.5),
+                                                        ctx: PluginRenderContext(renderer: renderer, decodeBase: { img }))
+        XCTAssertFalse(why.isEmpty)
+        XCTAssertLessThan(try renderer.linearImage(v).pixels[0], 0.49)
+    }
+
     func testVignetteDarkensCornersOnly() throws {
-        let out = try renderer.linearImage(FilmFinisher.apply(flat(400, 300, 0.5), FilmFinish(vignette: 0.5)))
+        let out = try renderer.linearImage(FilmFinisher.vignette(flat(400, 300, 0.5), 0.5))
         let centre = out.pixels[(150 * 400 + 200) * 3], corner = out.pixels[(2 * 400 + 2) * 3]
         XCTAssertEqual(Double(centre), 0.5, accuracy: 0.02)
         XCTAssertLessThan(corner, centre - 0.03)
     }
 }
 #endif
+

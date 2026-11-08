@@ -2,6 +2,30 @@
 
 Newest first. Each entry: what changed, why, evidence, what is NOT verified yet.
 
+## 2026-11-08 — Roadmap = user's architecture; extras become plugins; gaps filled
+**Why**: user set the architecture (docs/ROADMAP.md) as the roadmap, asked to fill what is missing, keep extras
+highlighted for later, make extras pluggable, then re-audit and re-test. Audit (subagent, 2026-11-08) found:
+no capture layer, no person mask / saliency / CIAreaHistogram / CCT, no skin protection, decoder version floating with
+the OS, no per-model calibration path, recipes missing for some outputs, auto dropping caller overrides, stale
+`largestFaceArea` on Vision failure, `?? 1` treating an unknown face as large, EDR exported if CIToneMapHeadroom absent.
+**What**
+- Plugins: `DevelopPlugin` + `PluginRegistry` (Plugins.swift). `highlightRecovery` (rule moved out of DecisionEngine
+  into `HighlightRecoveryRule`) and `vignette` (moved out of FilmFinisher). `RenderSettings.plugins`, CLI `--plugins`,
+  `recipe.plugins`. Bench runs `auto` and `auto core`; Gate 2 is reported for both.
+- Analysis: Vision person segmentation + attention saliency; CIAreaHistogram (64 bins); CCT/tint; `analyzeInBackground`.
+- DecisionEngine: colour NR at high ISO, lens correction when supported, skin protection when people ≥ 3 % or a face
+  ≥ 1 %; explicit caller values (e.g. skinProtection 0) are respected; unknown face area no longer counts as large.
+- Skin protection: `Renderer.protectSkin` (CIDissolveTransition + CIBlendWithMask with the scaled, softened mask).
+- Decoder pinned by `DecoderPolicy` (fixed list) instead of the OS default; `recipe.decoderVersionSource`.
+- Calibration: `ModelCalibration` / `CalibrationTable` (CCM + exposure offset folded into the linearSpaceFilter
+  matrix), lookup by camera string, `recipe.calibration`; CLI `--calibration`. No measured entries yet.
+- Export embeds the recipe JSON in EXIF UserComment; bench writes a sidecar recipe for every image (crops, full HEIC).
+- highlightRecovery falls back to the SDR decode if CIToneMapHeadroom is unavailable (iOS 17).
+- CaptureKit: AVFoundation wide camera, Bayer RAW + HEIC in one `AVCapturePhotoSettings`, metadata (model id, ISO,
+  shutter, lens position, RAW FourCC, fallback). CI builds RawCore + CaptureKit for iOS.
+- Highlight parameter sweep removed from the bench (tuning finished, saves CI time).
+**Not verified**: until the next CI run; CaptureKit never ran on a device.
+
 ## 2026-11-08 — Film engine: stocks with grain, halation, vignette (plan step 4)
 **Direction**: user chose "Apple render as base, film on top" (docs/PLANNING.md, Decision 2026-11-08).
 **What**

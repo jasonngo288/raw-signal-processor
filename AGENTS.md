@@ -6,7 +6,7 @@ An iPhone camera app (iPhone 12 → 18) that captures RAW and "develops film":
 2. **Consistent colour across models**: ΔE00 < 2 on a colour chart between models after per-model CCM.
 3. **Film looks as the differentiator**, applied on top of the base render (looks never repair tone/colour).
 
-## Architecture (decided — see docs/PLANNING.md)
+## Architecture (decided — see docs/ROADMAP.md, the roadmap the user set on 2026-11-08)
 - Decode with **Core Image `CIRAWFilter`** (Apple's demosaic, NR, lens correction, tone). No custom C++ ISP.
 - **Pin the decoder version** (`decoderVersion`) and write **every parameter explicitly** in production modes.
 - Per-model colour: 3×3 CCM via `linearSpaceFilter` (scene-linear, before Apple's tone).
@@ -28,6 +28,9 @@ An iPhone camera app (iPhone 12 → 18) that captures RAW and "develops film":
    Do not add other personal images. Do not commit bench outputs (CI prints a base64 preview tarball to its log instead).
 7. **Update WORK_LOG.md in the same commit** as any change: what, why, evidence (CI run / numbers), what is unverified.
 8. No third-party dependencies without a written reason in WORK_LOG.md.
+9. **Anything not in docs/ROADMAP.md is a plugin** (`DevelopPlugin`, Plugins.swift): it must be removable with
+   `plugins = []` without breaking the core, list itself in `recipe.plugins`, and be listed in the ROADMAP "EXTRAS" table.
+   The bench always runs `auto` (default plugins) and `auto core` (no plugins) so the effect of the plugins is visible.
 
 ## Decision gates
 - **Gate 1**: `explicit` (Apple defaults written back) reproduces `appleDefault` — ΔE00 mean < 0.5. Proves we control the decoder.
@@ -38,7 +41,10 @@ An iPhone camera app (iPhone 12 → 18) that captures RAW and "develops film":
 ## Layout
 ```
 Sources/RawCore/   ColorMath, LinearImage, ImageMetrics, RenderSettings, Look, ContextAnalysis (pure Swift)
-                   RawDecoder, Renderer, Developer (Core Image: analyse → decode → tone map → look), VisionAnalyzer
+                   Calibration (per-model CCM table, DecoderPolicy)
+                   RawDecoder, Renderer, Developer (analyse → decode → plugins → look → skin protection → finish), VisionAnalyzer,
+                   FilmFinisher, Plugins (highlightRecovery, vignette)
+Sources/CaptureKit AVFoundation Bayer RAW + HEIC capture (iOS; compiled in CI, not run)
 Sources/RawBench/  raw-bench CLI: info | render | compare | bench
 corpus/            corpus.json (public RAWs, fetched by CI, never committed) + README
 Tests/RawCoreTests unit tests (Sharma CIEDE2000, metrics, LUT, settings, decisions) + decoder tests on originals/

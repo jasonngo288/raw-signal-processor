@@ -1,5 +1,6 @@
 #if canImport(CoreImage)
 import CoreImage
+import ImageIO
 import XCTest
 @testable import RawCore
 
@@ -62,6 +63,79 @@ final class DecoderTests: XCTestCase {
             if auto.recipe.decisions.contains(where: { $0.contains("not applied") }) { continue }
             XCTAssertLessThan(cmp.candidate.clippedFraction, cmp.reference.clippedFraction, url.lastPathComponent)
         }
+    }
+
+    /// Unplugging every plugin gives the roadmap core; the recipe says which plugins ran.
+    func testPluginsCanBeUnplugged() throws {
+        let dev = Developer()
+        let url = try XCTUnwrap(try files().first { $0.lastPathComponent == "IMG_1901.DNG" } ?? files().first)
+        let an = try dev.analyze(url: url)
+        let scale = try dev.decoder.scaleFactor(url: url, longEdge: 256)
+        let full = try dev.develop(url: url, settings: .explicit, auto: true, scaleFactor: scale, analysis: an)
+        var coreSettings = RenderSettings.explicit
+        coreSettings.plugins = []
+        let core = try dev.develop(url: url, settings: coreSettings, auto: true, scaleFactor: scale, analysis: an)
+        XCTAssertEqual(full.recipe.plugins, ["highlightRecovery", "vignette"])
+        XCTAssertEqual(core.recipe.plugins, [])
+        XCTAssertEqual(core.recipe.effective.extendedDynamicRangeAmount, 0, "no EDR without the plugin")
+        XCTAssertFalse(core.recipe.decisions.contains { $0.hasPrefix("[highlightRecovery]") })
+        XCTAssertEqual(core.recipe.decoderVersionSource, "policy")
+        // Core auto equals an explicit decode with the same decided settings (nothing hidden in the core).
+        let again = try dev.decoder.decode(url: url, settings: core.recipe.settings, scaleFactor: scale)
+        let size = (Int(core.image.extent.width), Int(core.image.extent.height))
+        let cmp = try ComparisonMetrics.compare(candidate: dev.renderer.linearImage(core.image, size: size), reference: dev.renderer.linearImage(again.image, size: size))
+        XCTAssertLessThan(cmp.deltaE00Mean, 0.01)
+    }
+
+    func testLinearExposureAndCalibrationLookup() throws {
+        let url = try XCTUnwrap(try files().first)
+        let cam = try XCTUnwrap(try RawDecoder().decode(url: url, settings: .appleDefault, scaleFactor: 0.1).recipe.camera)
+        let dev = Developer(plugins: .none, calibration: CalibrationTable(models: [
+            ModelCalibration(model: cam, ccm: [1, 0, 0, 0, 1, 0, 0, 0, 1], exposureOffsetEV: 1, version: "test1", source: "unit test")]))
+        let scale = try dev.decoder.scaleFactor(url: url, longEdge: 256)
+        let plain = try dev.develop(url: url, settings: .explicit, auto: false, scaleFactor: scale)
+        var noCal = RenderSettings.explicit
+        noCal.useCalibration = false
+        let without = try dev.develop(url: url, settings: noCal, auto: false, scaleFactor: scale)
+        XCTAssertEqual(plain.recipe.calibration?.hasPrefix(cam), true)
+        XCTAssertEqual(plain.recipe.settings.linearExposureEV, 1)
+        let a = ImageMetrics.measure(try dev.renderer.linearImage(plain.image)), b = ImageMetrics.measure(try dev.renderer.linearImage(without.image))
+        XCTAssertGreaterThan(a.medianY, b.medianY, "+1 EV in linearSpaceFilter brightens the render")
+    }
+
+    func testRecipeIsEmbeddedInHEIC() throws {
+        let url = try XCTUnwrap(try files().first)
+        let dev = Developer()
+        let o = try dev.develop(url: url, settings: .explicit, auto: false, scaleFactor: try dev.decoder.scaleFactor(url: url, longEdge: 256))
+        let data = try dev.renderer.export(o.image, format: .heic10, recipe: o.recipe)
+        let src = try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, nil))
+        let props = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [String: Any])
+        let comment = (props[kCGImagePropertyExifDictionary as String] as? [String: Any])?[kCGImagePropertyExifUserComment as String] as? String
+        XCTAssertTrue(comment?.contains("decoderVersion") ?? false, "recipe JSON in EXIF UserComment")
+    }
+
+    func testAnalysisHasHistogramCCTAndVision() throws {
+        let dev = Developer()
+        for url in try files() {
+            let an = try dev.analyze(url: url)
+            let c = an.context
+            let h = try XCTUnwrap(c.lumaHistogram, url.lastPathComponent)
+            XCTAssertEqual(h.count, 64)
+            XCTAssertEqual(h.reduce(0, +), 1, accuracy: 1e-6)
+            XCTAssertNotNil(c.cct)
+            print("[context] \(url.lastPathComponent) people \(c.personFraction.map { String($0) } ?? "nil") saliency \(c.saliencyBox ?? []) faces \(c.faceCount ?? -1) cct \(c.cct ?? 0)")
+            if url.lastPathComponent == "USER_mooncake.dng", c.personFraction != nil {
+                XCTAssertGreaterThan(c.personFraction!, 0.03, "the person in the mooncake shot is segmented")
+            }
+        }
+    }
+
+    func testAsyncAnalysisMatchesSync() async throws {
+        let url = try XCTUnwrap(try files().first)
+        let dev = Developer()
+        let a = try await dev.analyzeInBackground(url: url)
+        let b = try dev.analyze(url: url)
+        XCTAssertEqual(a.context.logP50, b.context.logP50, accuracy: 1e-9)
     }
 
     func testUnsupportedDecoderVersionThrows() throws {

@@ -121,7 +121,11 @@ public struct ComparisonMetrics: Codable, Equatable, Sendable {
     public var candidate: ImageMetrics
     public var reference: ImageMetrics
 
-    public static func compare(candidate: LinearImage, reference: LinearImage) throws -> ComparisonMetrics {
+    /// Mean ΔE00 inside / outside `mask` (when a mask was given).
+    public var deltaE00MeanMasked: Double? = nil
+    public var deltaE00MeanOutsideMask: Double? = nil
+
+    public static func compare(candidate: LinearImage, reference: LinearImage, mask: [Bool]? = nil) throws -> ComparisonMetrics {
         guard candidate.width == reference.width, candidate.height == reference.height else {
             throw RawCoreError.sizeMismatch(candidate: (candidate.width, candidate.height), reference: (reference.width, reference.height))
         }
@@ -133,6 +137,7 @@ public struct ComparisonMetrics: Codable, Equatable, Sendable {
             let r = ColorMath.lab(r: clamp(reference.pixels[i * 3]), g: clamp(reference.pixels[i * 3 + 1]), b: clamp(reference.pixels[i * 3 + 2]))
             de[i] = ColorMath.deltaE2000(c.l, c.a, c.b, r.l, r.a, r.b)
         }
+        if let mask, mask.count != n { throw RawCoreError.invalidSettings("mask has \(mask.count) entries, image \(n) pixels") }
         let sorted = de.sorted()
         var uSum = 0.0, uN = 0
         for i in 0..<n where max(reference.pixels[i * 3], reference.pixels[i * 3 + 1], reference.pixels[i * 3 + 2]) < 0.98 {
@@ -153,7 +158,7 @@ public struct ComparisonMetrics: Codable, Equatable, Sendable {
             let m = s / Double(nBright)
             return sqrt(max(0, q / Double(nBright) - m * m))
         }
-        return ComparisonMetrics(
+        var result = ComparisonMetrics(
             deltaE00Mean: de.reduce(0, +) / Double(n),
             deltaE00Median: sorted[n / 2],
             deltaE00P95: sorted[min(n - 1, Int(0.95 * Double(n - 1)))],
@@ -169,6 +174,13 @@ public struct ComparisonMetrics: Codable, Equatable, Sendable {
             brightLocalContrastCandidate: lc(yCand), brightLocalContrastReference: lc(yRef),
             candidate: ImageMetrics.measure(candidate),
             reference: ImageMetrics.measure(reference))
+        if let mask {
+            var a = 0.0, an = 0, b = 0.0, bn = 0
+            for i in 0..<n { if mask[i] { a += de[i]; an += 1 } else { b += de[i]; bn += 1 } }
+            result.deltaE00MeanMasked = an > 0 ? a / Double(an) : nil
+            result.deltaE00MeanOutsideMask = bn > 0 ? b / Double(bn) : nil
+        }
+        return result
     }
 }
 

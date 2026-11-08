@@ -100,6 +100,61 @@ public final class Renderer: @unchecked Sendable {
         ]).cropped(to: ext)
     }
 
+    /// Same as `toneMapHeadroom`, plus whether the tone map really ran.
+    public func toneMapHeadroomChecked(_ image: CIImage, sourceHeadroom: Float) -> (CIImage, String, Bool) {
+        let (out, how) = toneMapHeadroom(image, sourceHeadroom: sourceHeadroom)
+        return (out, how, !how.contains("not applied"))
+    }
+
+    /// Roadmap "skin / subject protection": on people, hold back `strength` of the look.
+    /// `mask` is the Vision person mask at any size; it is scaled to the image and softened.
+    public func protectSkin(looked: CIImage, base: CIImage, mask: CIImage, strength: Float) -> CIImage {
+        guard strength > 0 else { return looked }
+        let ext = looked.extent
+        let m = mask.extent
+        guard m.width > 0, m.height > 0 else { return looked }
+        let scaled = mask
+            .transformed(by: CGAffineTransform(translationX: -m.minX, y: -m.minY))
+            .transformed(by: CGAffineTransform(scaleX: ext.width / m.width, y: ext.height / m.height))
+            .transformed(by: CGAffineTransform(translationX: ext.minX, y: ext.minY))
+            .clampedToExtent()
+            .applyingGaussianBlur(sigma: Double(min(ext.width, ext.height)) * 0.004)
+            .cropped(to: ext)
+        guard let held = CIFilter(name: "CIDissolveTransition", parameters: [
+            kCIInputImageKey: looked, kCIInputTargetImageKey: base, kCIInputTimeKey: strength,
+        ])?.outputImage else { return looked }
+        return held.applyingFilter("CIBlendWithMask", parameters: [
+            kCIInputBackgroundImageKey: looked, kCIInputMaskImageKey: scaled,
+        ]).cropped(to: ext)
+    }
+
+    /// Mean of channel 0 over the image (CIAreaAverage on the GPU).
+    public func areaMean(_ image: CIImage) -> Double {
+        let e = image.extent
+        guard let avg = CIFilter(name: "CIAreaAverage", parameters: [kCIInputImageKey: image, kCIInputExtentKey: CIVector(cgRect: e)])?.outputImage else { return 0 }
+        var px = [Float](repeating: 0, count: 4)
+        px.withUnsafeMutableBytes { context.render(avg, toBitmap: $0.baseAddress!, rowBytes: 16, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBAf, colorSpace: nil) }
+        return Double(px[0])
+    }
+
+    /// 64-bin histogram of display-encoded luminance (CIAreaHistogram on the GPU), normalised to sum 1.
+    public func lumaHistogram(_ image: CIImage, bins: Int = 64) -> [Double]? {
+        let w = ColorMath.p3LuminanceWeights
+        let row = CIVector(x: CGFloat(w.r), y: CGFloat(w.g), z: CGFloat(w.b), w: 0)
+        let encoded = image.matchedFromWorkingSpace(to: Renderer.displayP3) ?? image
+        let luma = encoded.applyingFilter("CIColorMatrix", parameters: [
+            "inputRVector": row, "inputGVector": row, "inputBVector": row, "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+        ]).applyingFilter("CIColorClamp")
+        guard let h = CIFilter(name: "CIAreaHistogram", parameters: [
+            kCIInputImageKey: luma, kCIInputExtentKey: CIVector(cgRect: image.extent), "inputCount": bins, "inputScale": 1,
+        ])?.outputImage else { return nil }
+        var px = [Float](repeating: 0, count: bins * 4)
+        px.withUnsafeMutableBytes { context.render(h, toBitmap: $0.baseAddress!, rowBytes: bins * 16, bounds: CGRect(x: 0, y: 0, width: bins, height: 1), format: .RGBAf, colorSpace: nil) }
+        let v = (0..<bins).map { Double(px[$0 * 4]) }
+        let total = v.reduce(0, +)
+        return total > 0 ? v.map { $0 / total } : nil
+    }
+
     public func resolveLook(_ name: String?) throws -> CubeLUT? {
         guard let name, !name.isEmpty else { return nil }
         if let builtIn = BuiltInLook(rawValue: name) { return builtIn.lut() }
@@ -108,10 +163,20 @@ public final class Renderer: @unchecked Sendable {
 
     public enum Format: String, CaseIterable, Sendable { case heic10, png16, jpeg }
 
-    public func export(_ image: CIImage, format: Format, quality: Double = 0.92) throws -> Data {
+    /// Export. With `recipe`, the recipe JSON is embedded in the file (EXIF UserComment) as well, so a HEIC/JPEG
+    /// can always be traced back to how it was developed (the sidecar .recipe.json stays the readable copy).
+    public func export(_ image: CIImage, format: Format, quality: Double = 0.92, recipe: DecodeRecipe? = nil) throws -> Data {
         let opts: [CIImageRepresentationOption: Any] = [
             CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): quality,
         ]
+        var image = image
+        if let recipe {
+            var props = image.properties
+            var exif = props[kCGImagePropertyExifDictionary as String] as? [String: Any] ?? [:]
+            exif[kCGImagePropertyExifUserComment as String] = "raw-signal-processor recipe " + recipe.compactJSON()
+            props[kCGImagePropertyExifDictionary as String] = exif
+            image = image.settingProperties(props)
+        }
         let data: Data?
         switch format {
         case .heic10: data = try context.heif10Representation(of: image, colorSpace: Renderer.displayP3, options: opts)

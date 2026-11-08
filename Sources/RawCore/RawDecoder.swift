@@ -27,14 +27,21 @@ public struct RawDecoder {
 
     public func decode(url: URL, settings: RenderSettings, scaleFactor: Float = 1, decisions: [String] = []) throws -> Output {
         try settings.validate()
-        let (filter, defaults, support, version, supported) = try inspect(url: url, decoderVersion: settings.decoderVersion)
-        var effective = defaults
+        var (filter, defaults, support, version, supported) = try inspect(url: url, decoderVersion: settings.decoderVersion)
+        var versionSource = settings.decoderVersion != nil ? "requested" : "Apple default"
         if settings.mode != .appleDefault {
-            // Pin the version even when it equals the default, so the recipe is the whole truth.
+            // Pin the version: requested, else the fixed DecoderPolicy list, never "whatever this OS defaults to".
+            if settings.decoderVersion == nil, let pinned = DecoderPolicy.pick(supported: supported) {
+                versionSource = "policy"
+                if pinned != version { (filter, defaults, support, version, supported) = try inspect(url: url, decoderVersion: pinned) }
+            }
             filter.decoderVersion = CIRAWDecoderVersion(rawValue: version)
-            effective = defaults.applying(settings)
-            Self.write(effective, to: filter, support: support)
-            if let m = settings.ccm { filter.linearSpaceFilter = Self.matrixFilter(m) }
+            Self.write(defaults.applying(settings), to: filter, support: support)
+            if settings.ccm != nil || settings.linearExposureEV != nil {
+                let base = settings.ccm ?? [1, 0, 0, 0, 1, 0, 0, 0, 1]
+                let gain = Float(pow(2.0, Double(settings.linearExposureEV ?? 0)))
+                filter.linearSpaceFilter = Self.matrixFilter(base.map { $0 * gain })
+            }
         }
         filter.scaleFactor = min(max(scaleFactor, 0.01), 1)
         guard let image = filter.outputImage else { throw RawCoreError.renderFailed("CIRAWFilter produced no image for \(url.lastPathComponent)") }
@@ -47,12 +54,12 @@ public struct RawDecoder {
         let iso = (exif?[kCGImagePropertyExifISOSpeedRatings as String] as? [Double])?.first
         let exposureTime = exif?[kCGImagePropertyExifExposureTime as String] as? Double
 
-        let recipe = DecodeRecipe(
+        var recipe = DecodeRecipe(
             file: url.lastPathComponent, settings: settings, decoderVersion: version, supportedDecoderVersions: supported,
             defaults: defaults, effective: Self.read(filter), support: support,
             nativeSize: [Int(filter.nativeSize.width), Int(filter.nativeSize.height)], scaleFactor: filter.scaleFactor,
             camera: camera.isEmpty ? nil : camera, iso: iso, exposureTime: exposureTime, decisions: decisions)
-        _ = effective
+        recipe.decoderVersionSource = versionSource
         return Output(image: image, recipe: recipe)
     }
 

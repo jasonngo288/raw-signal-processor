@@ -24,6 +24,16 @@ public struct SceneContext: Codable, Equatable, Sendable {
     /// Largest face as a fraction of the image area (Vision run at 1024 px).
     public var largestFaceArea: Double? = nil
     public var exposureTime: Double? = nil
+    /// Share of the frame covered by people (Vision person segmentation, mean of the mask).
+    public var personFraction: Double? = nil
+    /// Union of Vision attention-saliency boxes, normalised [x, y, w, h] (origin bottom-left).
+    public var saliencyBox: [Double]? = nil
+    /// 64-bin histogram (GPU, CIAreaHistogram) of display-encoded luminance of the 512 px Apple render;
+    /// encoded luminance ≈ log-like spacing of tones. Sums to 1.
+    public var lumaHistogram: [Double]? = nil
+    /// Correlated colour temperature / tint the camera's white balance chose (CIRAWFilter neutral defaults).
+    public var cct: Double? = nil
+    public var tint: Double? = nil
 
     /// Clipped by Apple's tone curve but present in the RAW.
     public var recoverableClippedFraction: Double? {
@@ -71,18 +81,11 @@ public enum DecisionEngine {
 
     /// Thresholds in one place so tuning is visible in diffs.
     public enum Threshold {
-        public static let displayClipped = 0.03
-        public static let recoverable = 0.015
-        public static let minHeadroom = 1.15
-        public static let maxHeadroom = 16.0
-        /// Share of the measured headroom that is tone-mapped back (1 = all of it). Below 1 keeps whites brighter:
-        /// the top of the range is allowed to clip instead of pulling every bright tone down. Tuned on tuning files.
-        public static let headroomFraction = 1.0
-        /// Highlight local-contrast amount applied together with the tone map.
-        public static let highlightClarity: Float = 0.4
         public static let wideDynamicRange = 9.0
         public static let highISO = 800.0
         public static let faceArea = 0.01
+        public static let personFraction = 0.03
+        public static let skinProtection: Float = 0.5
     }
 
     public static func decide(context c: SceneContext, defaults d: DecodeParameters, support s: DecoderSupport,
@@ -91,22 +94,6 @@ public enum DecisionEngine {
         st.mode = .explicit
         var why: [String] = []
 
-        // Highlights: Apple's tone curve clips data that the RAW still holds. Decode with EDR and
-        // tone-map that headroom back into SDR, so mid-tones stay where Apple put them.
-        // (Lowering exposure does not help sensor-clipped pixels and darkens the whole picture.)
-        if let disp = c.displayClippedFraction, let rec = c.recoverableClippedFraction {
-            let head = c.edrHeadroom ?? 1
-            if disp > Threshold.displayClipped, rec > Threshold.recoverable, head >= Threshold.minHeadroom {
-                st.extendedDynamicRangeAmount = 1
-                st.toneMapSourceHeadroom = Float(min(1 + Threshold.headroomFraction * (head - 1), Threshold.maxHeadroom))
-                st.highlightClarity = Threshold.highlightClarity
-                why.append(String(format: "display clipped %.1f%% (sensor %.1f%%, recoverable %.1f%%), EDR headroom %.2fx -> EDR 1 + tone-map %.2f -> 1 (%.0f%% of headroom), highlight clarity %.2f",
-                                  disp * 100, c.clippedFraction * 100, rec * 100, head, st.toneMapSourceHeadroom!, Threshold.headroomFraction * 100, Threshold.highlightClarity))
-            } else if disp > Threshold.displayClipped {
-                why.append(String(format: "display clipped %.1f%% but only %.1f%% recoverable / headroom %.2fx: kept (sensor clipping cannot be recovered)",
-                                  disp * 100, rec * 100, head))
-            }
-        }
         // Wide dynamic range: more local tone mapping, if this decoder allows it for the file.
         if c.dynamicRangeStops > Threshold.wideDynamicRange {
             if s.localToneMap {
@@ -127,10 +114,25 @@ public enum DecisionEngine {
                 st.sharpnessAmount = max(0, d.sharpnessAmount - 0.1)
                 why.append("ISO \(Int(iso)) >= \(Int(Threshold.highISO)) -> sharpness -0.10")
             }
+            if s.colorNoiseReduction {
+                st.colorNoiseReductionAmount = min(1, d.colorNoiseReductionAmount + 0.1)
+                why.append("ISO \(Int(iso)) >= \(Int(Threshold.highISO)) -> colorNR +0.10")
+            }
+        }
+        // Lens correction: use it whenever the decoder can do it for this file.
+        if s.lensCorrection && !d.lensCorrection {
+            st.lensCorrection = true
+            why.append("lens correction supported -> on")
+        }
+        // People in frame: hold part of the look back on them (skin protection through the Vision mask).
+        let person = c.personFraction ?? 0, face = c.largestFaceArea ?? 0
+        if st.skinProtection == nil, person >= Threshold.personFraction || face >= Threshold.faceArea {
+            st.skinProtection = Threshold.skinProtection
+            why.append(String(format: "people %.1f%% of frame, largest face %.1f%% -> skin protection %.2f", person * 100, face * 100, Threshold.skinProtection))
         }
         // Visible faces: avoid crunchy skin. Tiny faces (crowd, stage) are left alone.
         if let faces = c.faceCount, faces > 0, s.detail {
-            if (c.largestFaceArea ?? 1) >= Threshold.faceArea {
+            if (c.largestFaceArea ?? 0) >= Threshold.faceArea {
                 st.detailAmount = max(0, d.detailAmount - 0.1)
                 why.append(String(format: "%d face(s), largest %.1f%% of frame -> detail -0.10", faces, (c.largestFaceArea ?? 1) * 100))
             } else {
@@ -139,5 +141,33 @@ public enum DecisionEngine {
         }
         if why.isEmpty { why.append("no rule fired: Apple defaults kept (explicit)") }
         return Decision(settings: st, reasons: why)
+    }
+}
+
+/// Rule of the `highlightRecovery` plugin (pure, testable): where Apple's tone curve clips data the RAW still
+/// holds, decode with EDR and tone-map that headroom back, blended only near white (see HighlightRecoveryPlugin).
+public enum HighlightRecoveryRule {
+    public static let displayClipped = 0.03
+    public static let recoverable = 0.015
+    public static let minHeadroom = 1.15
+    public static let maxHeadroom = 16.0
+    public static let headroomFraction = 1.0
+    public static let clarity: Float = 0.4
+
+    public static func decide(context c: SceneContext, settings: inout RenderSettings) -> [String] {
+        guard let disp = c.displayClippedFraction, let rec = c.recoverableClippedFraction else { return [] }
+        let head = c.edrHeadroom ?? 1
+        if disp > displayClipped, rec > recoverable, head >= minHeadroom {
+            settings.extendedDynamicRangeAmount = 1
+            settings.toneMapSourceHeadroom = Float(min(1 + headroomFraction * (head - 1), maxHeadroom))
+            settings.highlightClarity = clarity
+            return [String(format: "display clipped %.1f%% (sensor %.1f%%, recoverable %.1f%%), EDR headroom %.2fx -> EDR 1 + tone-map %.2f -> 1, clarity %.2f",
+                           disp * 100, c.clippedFraction * 100, rec * 100, head, settings.toneMapSourceHeadroom!, clarity)]
+        }
+        if disp > displayClipped {
+            return [String(format: "display clipped %.1f%% but only %.1f%% recoverable / headroom %.2fx: kept (sensor clipping cannot be recovered)",
+                           disp * 100, rec * 100, head)]
+        }
+        return []
     }
 }

@@ -193,42 +193,90 @@ final class LookAndSettingsTests: XCTestCase {
     func testDecisionEngineIsBoundedAndLogged() {
         let d = DecodeParameters(exposure: 0, baselineExposure: 0, shadowBias: 0, boostAmount: 1, boostShadowAmount: 1,
                                  localToneMapAmount: 0.9, sharpnessAmount: 0.05, contrastAmount: 0, detailAmount: 0,
-                                 luminanceNoiseReductionAmount: 0.95, colorNoiseReductionAmount: 0, moireReductionAmount: 0,
-                                 extendedDynamicRangeAmount: 0, lensCorrection: true, gamutMapping: true, neutralTemperature: 5000, neutralTint: 0)
+                                 luminanceNoiseReductionAmount: 0.95, colorNoiseReductionAmount: 0.95, moireReductionAmount: 0,
+                                 extendedDynamicRangeAmount: 0, lensCorrection: false, gamutMapping: true, neutralTemperature: 5000, neutralTint: 0)
         let s = DecoderSupport(localToneMap: true, sharpness: true, contrast: true, detail: true, luminanceNoiseReduction: true,
                                colorNoiseReduction: true, moireReduction: true, lensCorrection: true, maxExtendedDynamicRange: 2)
         var c = SceneContext(logP1: -12, logP50: -3, logP99: 1, dynamicRangeStops: 15, clippedFraction: 0.05, iso: 3200, faceCount: 1, labels: nil)
-        c.displayClippedFraction = 0.40; c.edrHeadroom = 40; c.largestFaceArea = 0.05
+        c.displayClippedFraction = 0.40; c.edrHeadroom = 40; c.largestFaceArea = 0.05; c.personFraction = 0.2
         let dec = DecisionEngine.decide(context: c, defaults: d, support: s)
-        XCTAssertEqual(dec.settings.extendedDynamicRangeAmount, 1)
-        XCTAssertEqual(dec.settings.toneMapSourceHeadroom, 16, "headroom is capped")
-        XCTAssertNil(dec.settings.exposure, "highlights are tone-mapped, not fixed by darkening the picture")
+        XCTAssertNil(dec.settings.toneMapSourceHeadroom, "highlight recovery is a plugin, not core")
         XCTAssertEqual(dec.settings.localToneMapAmount, 1)
         XCTAssertEqual(dec.settings.luminanceNoiseReductionAmount, 1)
+        XCTAssertEqual(dec.settings.colorNoiseReductionAmount, 1)
         XCTAssertEqual(dec.settings.sharpnessAmount, 0)
         XCTAssertEqual(dec.settings.detailAmount, 0)
-        XCTAssertEqual(dec.reasons.count, 5)
+        XCTAssertEqual(dec.settings.lensCorrection, true)
+        XCTAssertEqual(dec.settings.skinProtection, DecisionEngine.Threshold.skinProtection)
+        XCTAssertEqual(dec.reasons.count, 7)
         XCTAssertNoThrow(try dec.settings.validate())
 
-        // Sensor-clipped highlights (nothing recoverable) are left alone and the reason is logged.
-        var sensor = c
-        sensor.clippedFraction = 0.39; sensor.displayClippedFraction = 0.40
-        let ds = DecisionEngine.decide(context: sensor, defaults: d, support: s)
-        XCTAssertNil(ds.settings.toneMapSourceHeadroom)
-        XCTAssertTrue(ds.reasons.contains { $0.contains("cannot be recovered") })
+        // An explicit skinProtection (e.g. 0 = off) is respected.
+        var off = RenderSettings.explicit
+        off.skinProtection = 0
+        XCTAssertEqual(DecisionEngine.decide(context: c, defaults: d, support: s, base: off).settings.skinProtection, 0)
 
-        // Unsupported local tone map is reported, not silently skipped; tiny faces keep detail.
+        // Unsupported local tone map is reported; tiny faces keep detail; a missing face area is not a big face.
         var tiny = c
-        tiny.largestFaceArea = 0.001
+        tiny.largestFaceArea = 0.001; tiny.personFraction = 0
         let noLTM = DecoderSupport(localToneMap: false, sharpness: true, contrast: true, detail: true, luminanceNoiseReduction: true,
                                    colorNoiseReduction: true, moireReduction: true, lensCorrection: false, maxExtendedDynamicRange: 2)
         let dt = DecisionEngine.decide(context: tiny, defaults: d, support: noLTM)
         XCTAssertNil(dt.settings.localToneMapAmount)
         XCTAssertNil(dt.settings.detailAmount)
+        XCTAssertNil(dt.settings.skinProtection)
         XCTAssertTrue(dt.reasons.contains { $0.contains("unsupported") })
+        var unknownArea = tiny
+        unknownArea.largestFaceArea = nil
+        XCTAssertNil(DecisionEngine.decide(context: unknownArea, defaults: d, support: s).settings.detailAmount)
 
         let calm = SceneContext(logP1: -6, logP50: -3, logP99: -1, dynamicRangeStops: 5, clippedFraction: 0, iso: 50, faceCount: 0, labels: nil)
-        XCTAssertFalse(DecisionEngine.decide(context: calm, defaults: d, support: s).settings.hasOverrides)
+        let dLens = DecodeParameters(exposure: 0, baselineExposure: 0, shadowBias: 0, boostAmount: 1, boostShadowAmount: 1,
+                                     localToneMapAmount: 0, sharpnessAmount: 0.5, contrastAmount: 0, detailAmount: 0,
+                                     luminanceNoiseReductionAmount: 0, colorNoiseReductionAmount: 0, moireReductionAmount: 0,
+                                     extendedDynamicRangeAmount: 0, lensCorrection: true, gamutMapping: true, neutralTemperature: 5000, neutralTint: 0)
+        XCTAssertFalse(DecisionEngine.decide(context: calm, defaults: dLens, support: s).settings.hasOverrides)
+    }
+
+    func testHighlightRecoveryRule() {
+        var c = SceneContext(logP1: -6, logP50: -2, logP99: 1, dynamicRangeStops: 7, clippedFraction: 0.05, iso: 50, faceCount: 0, labels: nil)
+        c.displayClippedFraction = 0.40; c.edrHeadroom = 40
+        var st = RenderSettings.explicit
+        let why = HighlightRecoveryRule.decide(context: c, settings: &st)
+        XCTAssertEqual(st.extendedDynamicRangeAmount, 1)
+        XCTAssertEqual(st.toneMapSourceHeadroom, 16, "headroom is capped")
+        XCTAssertEqual(st.highlightClarity, HighlightRecoveryRule.clarity)
+        XCTAssertEqual(why.count, 1)
+        var sensor = c
+        sensor.clippedFraction = 0.39
+        var st2 = RenderSettings.explicit
+        let why2 = HighlightRecoveryRule.decide(context: sensor, settings: &st2)
+        XCTAssertNil(st2.toneMapSourceHeadroom)
+        XCTAssertTrue(why2.first?.contains("cannot be recovered") ?? false)
+    }
+
+    func testCalibrationTableAndDecoderPolicy() throws {
+        let entry = ModelCalibration(model: "iPhone 13 Pro Max", ccm: [1, 0, 0, 0, 1, 0, 0, 0, 1], exposureOffsetEV: 1, version: "v0", source: "test")
+        let t = CalibrationTable(models: [entry])
+        XCTAssertEqual(t.entry(for: "Apple iPhone 13 Pro Max")?.version, "v0", "contained model name matches")
+        XCTAssertNil(t.entry(for: "Apple iPhone 8"))
+        XCTAssertNil(t.entry(for: nil))
+        XCTAssertEqual(entry.linearMatrix[0], 2, accuracy: 1e-6, "+1 EV doubles the matrix")
+        XCTAssertThrowsError(try ModelCalibration(model: "x", ccm: [1], exposureOffsetEV: 0, version: "", source: "").validate())
+        XCTAssertEqual(DecoderPolicy.pick(supported: ["6.dng", "7.dng", "8.dng", "8"]), "8")
+        XCTAssertEqual(DecoderPolicy.pick(supported: ["6.dng", "7.dng", "8.dng"]), "8.dng")
+        XCTAssertEqual(DecoderPolicy.pick(supported: ["9", "8"]), "8", "versions not in the policy are not picked silently")
+        XCTAssertNil(DecoderPolicy.pick(supported: ["9"]))
+    }
+
+    func testMaskedDeltaE() throws {
+        let a = LinearImage(width: 4, height: 1, fill: (0.3, 0.3, 0.3))
+        var b = a
+        b.pixels[0] = 0.6
+        let c = try ComparisonMetrics.compare(candidate: b, reference: a, mask: [true, false, false, false])
+        XCTAssertGreaterThan(try XCTUnwrap(c.deltaE00MeanMasked), 1)
+        XCTAssertEqual(try XCTUnwrap(c.deltaE00MeanOutsideMask), 0, accuracy: 1e-9)
+        XCTAssertThrowsError(try ComparisonMetrics.compare(candidate: b, reference: a, mask: [true]))
     }
 
     func testContextHelpers() {

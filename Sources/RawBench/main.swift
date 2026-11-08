@@ -13,6 +13,7 @@ raw-bench — CIRAWFilter spike CLI
                    [--intensity 0..1] [--format heic10|png16|jpeg] [--scale 0..1] [--out FILE]
   raw-bench compare <raw> [--mode ...] [--look ...] [--long-edge N]   metrics + ΔE00 vs appleDefault
   raw-bench bench <dir>... --out <dir> [--manifest corpus.json] [--long-edge N] [--full] [--crops]
+  common options: --plugins none|highlightRecovery,vignette   --calibration models.json
 
 Looks: \(BuiltInLook.allCases.map(\.rawValue).joined(separator: ", ")) or a .cube path.
 Stocks (--stock, look + grain/halation/vignette): \(FilmStock.all.map { "\($0.name) (\($0.summary))" }.joined(separator: "; "))
@@ -35,7 +36,7 @@ struct Args {
     }
 }
 
-let dev = Developer()
+var dev = Developer()
 let decoder = dev.decoder
 let renderer = dev.renderer
 let rawExtensions: Set<String> = ["dng", "cr2", "cr3", "nef", "arw", "raf", "orf", "rw2"]
@@ -87,6 +88,8 @@ struct VariantResult: Codable {
     var brightMeanY: Double?
     var brightLocalContrast: Double?
     var metrics: ImageMetrics
+    var skinDeltaE: Double? = nil
+    var nonSkinDeltaE: Double? = nil
     var seconds: Double
     var recipe: DecodeRecipe
     var context: SceneContext?
@@ -96,6 +99,8 @@ struct Gates: Codable {
     var gate1: Bool
     var gate2: Bool
     var gate2Reasons: [String]
+    var gate2Core: Bool
+    var gate2CoreReasons: [String]
 }
 
 struct FileResult: Codable {
@@ -119,21 +124,45 @@ func gates(_ vs: [VariantResult]) -> Gates? {
     if let a = auto.ringOnReferenceMask, let r = ref.metrics.highlightRingMeanY, a > r + 0.01 {
         why.append(String(format: "halo ring (reference mask) brighter %.3f -> %.3f", r, a))
     }
-    return Gates(gate1: exp.deltaE00Mean < 0.5, gate2: why.isEmpty, gate2Reasons: why)
+    var coreWhy: [String] = []
+    if let core = vs.first(where: { $0.name == "auto core" }) {
+        if core.deltaE00MeanUnclipped > 3 { coreWhy.append(String(format: "core ΔE unclipped %.2f > 3", core.deltaE00MeanUnclipped)) }
+        if core.metrics.blackP1 > ref.metrics.blackP1 + 0.002 { coreWhy.append("core black p1 raised") }
+        if let a = core.ringOnReferenceMask, let r = ref.metrics.highlightRingMeanY, a > r + 0.01 { coreWhy.append("core halo ring brighter") }
+    }
+    return Gates(gate1: exp.deltaE00Mean < 0.5, gate2: why.isEmpty, gate2Reasons: why, gate2Core: coreWhy.isEmpty, gate2CoreReasons: coreWhy)
+}
+
+/// Writes an image with its recipe embedded and a sidecar .recipe.json next to it (AGENTS.md rule 1).
+func save(_ image: CIImage, recipe: DecodeRecipe, name: String, outDir: URL, format: Renderer.Format = .jpeg, quality: Double = 0.92) throws -> Int {
+    let ext = format == .heic10 ? "heic" : (format == .png16 ? "png" : "jpg")
+    let data = try renderer.export(image, format: format, quality: quality, recipe: recipe)
+    try data.write(to: outDir.appendingPathComponent("\(name).\(ext)"))
+    try recipe.prettyJSON().write(to: outDir.appendingPathComponent("\(name).recipe.json"), atomically: true, encoding: .utf8)
+    return data.count
 }
 
 func benchFile(_ url: URL, entry: CorpusEntry?, outDir: URL, longEdge: Int, full: Bool, crops: Bool) throws -> FileResult {
     let stem = url.deletingPathExtension().lastPathComponent
     let scale = try decoder.scaleFactor(url: url, longEdge: longEdge)
     let analysis = try dev.analyze(url: url)
-    let variants: [Variant] = [
+    var core = RenderSettings(mode: .explicit)
+    core.plugins = []
+    var variants: [Variant] = [
         Variant(name: "explicit", settings: .explicit, auto: false),
         Variant(name: "sceneLinear", settings: .sceneLinear, auto: false),
         Variant(name: "auto", settings: .explicit, auto: true),
+        Variant(name: "auto core", settings: core, auto: true),   // roadmap core, every plugin unplugged
     ] + FilmStock.all.map { stock in
         var st = RenderSettings(mode: .explicit)
         st.stock = stock.name
         return Variant(name: "auto+\(stock.name)", settings: st, auto: true)
+    }
+    let hasPeople = (analysis.context.personFraction ?? 0) >= DecisionEngine.Threshold.personFraction
+    if hasPeople {
+        var st = RenderSettings(mode: .explicit)
+        st.stock = "warm400"; st.skinProtection = 0
+        variants.append(Variant(name: "auto+warm400 noSkin", settings: st, auto: true))
     }
     var t0 = Date()
     let ref = try dev.develop(url: url, settings: .appleDefault, auto: false, scaleFactor: scale)
@@ -148,43 +177,41 @@ func benchFile(_ url: URL, entry: CorpusEntry?, outDir: URL, longEdge: Int, full
     let w = all.map { Int($0.extent.integral.width) }.min()!, h = all.map { Int($0.extent.integral.height) }.min()!
     let refLin = try renderer.linearImage(ref.image, size: (w, h))
     let refMetrics = ImageMetrics.measure(refLin)
-    try renderer.export(ref.image, format: .jpeg).write(to: outDir.appendingPathComponent("\(stem)__appleDefault.jpg"))
-    try ref.recipe.prettyJSON().write(to: outDir.appendingPathComponent("\(stem)__appleDefault.recipe.json"), atomically: true, encoding: .utf8)
+    _ = try save(ref.image, recipe: ref.recipe, name: "\(stem)__appleDefault", outDir: outDir)
+
+    // Person mask at bench size: skin ΔE = how much a look changes people (vs the auto base render).
+    var skinMask: [Bool]?
+    if hasPeople, let m = analysis.personMask {
+        let e = ref.image.extent, me = m.extent
+        let scaled = m.transformed(by: CGAffineTransform(translationX: -me.minX, y: -me.minY))
+            .transformed(by: CGAffineTransform(scaleX: e.width / me.width, y: e.height / me.height))
+            .transformed(by: CGAffineTransform(translationX: e.minX, y: e.minY)).cropped(to: e)
+        let lin = try renderer.linearImage(scaled, size: (w, h))
+        skinMask = (0..<(w * h)).map { lin.pixels[$0 * 3] > 0.25 }
+    }
+    let autoLin = try renderer.linearImage(renders.first { $0.0.name == "auto" }!.1.image, size: (w, h))
 
     var results = [VariantResult(name: "appleDefault", deltaE00Mean: 0, deltaE00MeanUnclipped: 0, deltaE00P95: 0,
-                                 ringOnReferenceMask: refMetrics.highlightRingMeanY, brightMeanY: nil, brightLocalContrast: nil, metrics: refMetrics, seconds: refSeconds, recipe: ref.recipe, context: nil)]
+                                 ringOnReferenceMask: refMetrics.highlightRingMeanY, brightMeanY: nil, brightLocalContrast: nil,
+                                 metrics: refMetrics, seconds: refSeconds, recipe: ref.recipe, context: nil)]
     for (v, o, secs) in renders {
-        let cmp = try ComparisonMetrics.compare(candidate: renderer.linearImage(o.image, size: (w, h)), reference: refLin)
-        let safe = v.name.replacingOccurrences(of: "+", with: "_")
-        try renderer.export(o.image, format: .jpeg).write(to: outDir.appendingPathComponent("\(stem)__\(safe).jpg"))
-        try o.recipe.prettyJSON().write(to: outDir.appendingPathComponent("\(stem)__\(safe).recipe.json"), atomically: true, encoding: .utf8)
-        results.append(VariantResult(name: v.name, deltaE00Mean: cmp.deltaE00Mean, deltaE00MeanUnclipped: cmp.deltaE00MeanUnclipped,
-                                     deltaE00P95: cmp.deltaE00P95, ringOnReferenceMask: cmp.candidateRingOnReferenceMask,
-                                     brightMeanY: cmp.brightMeanYCandidate, brightLocalContrast: cmp.brightLocalContrastCandidate, metrics: cmp.candidate, seconds: secs, recipe: o.recipe, context: o.context))
+        let cand = try renderer.linearImage(o.image, size: (w, h))
+        let cmp = try ComparisonMetrics.compare(candidate: cand, reference: refLin)
+        _ = try save(o.image, recipe: o.recipe, name: "\(stem)__\(v.name.replacingOccurrences(of: "+", with: "_").replacingOccurrences(of: " ", with: "_"))", outDir: outDir)
+        var r = VariantResult(name: v.name, deltaE00Mean: cmp.deltaE00Mean, deltaE00MeanUnclipped: cmp.deltaE00MeanUnclipped,
+                              deltaE00P95: cmp.deltaE00P95, ringOnReferenceMask: cmp.candidateRingOnReferenceMask,
+                              brightMeanY: cmp.brightMeanYCandidate, brightLocalContrast: cmp.brightLocalContrastCandidate,
+                              metrics: cmp.candidate, seconds: secs, recipe: o.recipe, context: o.context)
+        if let skinMask, v.name.hasPrefix("auto+") {
+            let vsAuto = try ComparisonMetrics.compare(candidate: cand, reference: autoLin, mask: skinMask)
+            r.skinDeltaE = vsAuto.deltaE00MeanMasked
+            r.nonSkinDeltaE = vsAuto.deltaE00MeanOutsideMask
+        }
+        results.append(r)
     }
-    // Reference bright-region values come from any comparison (they only depend on the reference).
     if let firstCmp = try? ComparisonMetrics.compare(candidate: refLin, reference: refLin) {
         results[0].brightMeanY = firstCmp.brightMeanYReference
         results[0].brightLocalContrast = firstCmp.brightLocalContrastReference
-    }
-    // Highlight sweep (tuning aid): only where auto tone-maps highlights. k = share of headroom mapped back, c = clarity.
-    if let decided = renders.first(where: { $0.0.name == "auto" })?.1.recipe.settings, decided.toneMapSourceHeadroom != nil,
-       let head = analysis.context.edrHeadroom {
-        for (k, c, local) in [(1.0, 0.0, false), (1.0, 0.0, true), (1.0, 0.4, true), (1.0, 0.7, true), (0.7, 0.4, true)] as [(Double, Float, Bool)] {
-            var st = decided
-            st.toneMapSourceHeadroom = Float(min(1 + k * (head - 1), 16))
-            st.highlightClarity = c > 0 ? c : nil
-            st.highlightRecoveryLocal = local
-            let name = String(format: "hl k%.1f c%.1f %@", k, c, local ? "local" : "global")
-            let t = Date()
-            let o = try dev.develop(url: url, settings: st, auto: false, scaleFactor: scale)
-            let cmp = try ComparisonMetrics.compare(candidate: renderer.linearImage(o.image, size: (w, h)), reference: refLin)
-            try renderer.export(o.image, format: .jpeg).write(to: outDir.appendingPathComponent("\(stem)__hl_k\(Int(k * 10))_c\(Int(c * 10))_\(local ? "L" : "G").jpg"))
-            results.append(VariantResult(name: name, deltaE00Mean: cmp.deltaE00Mean, deltaE00MeanUnclipped: cmp.deltaE00MeanUnclipped,
-                                         deltaE00P95: cmp.deltaE00P95, ringOnReferenceMask: cmp.candidateRingOnReferenceMask,
-                                         brightMeanY: cmp.brightMeanYCandidate, brightLocalContrast: cmp.brightLocalContrastCandidate,
-                                         metrics: cmp.candidate, seconds: Date().timeIntervalSince(t), recipe: o.recipe, context: nil))
-        }
     }
     // 100 % crops (full resolution, centre 640 x 640) to judge grain and halation at real pixel size.
     if crops {
@@ -192,17 +219,15 @@ func benchFile(_ url: URL, entry: CorpusEntry?, outDir: URL, longEdge: Int, full
             let o = try dev.develop(url: url, settings: v.settings, auto: v.auto, scaleFactor: 1, analysis: analysis)
             let e = o.image.extent
             let crop = o.image.cropped(to: CGRect(x: e.midX - 320, y: e.midY - 320, width: 640, height: 640))
-            try renderer.export(crop, format: .jpeg, quality: 0.9)
-                .write(to: outDir.appendingPathComponent("\(stem)__crop100__\(v.name.replacingOccurrences(of: "+", with: "_")).jpg"))
+            _ = try save(crop, recipe: o.recipe, name: "\(stem)__crop100__\(v.name.replacingOccurrences(of: "+", with: "_"))", outDir: outDir, quality: 0.9)
         }
     }
     if full {
         for v in [Variant(name: "appleDefault", settings: .appleDefault, auto: false), variants.first(where: { $0.name == "auto+warm400" })!] {
             let t = Date()
             let o = try dev.develop(url: url, settings: v.settings, auto: v.auto, scaleFactor: 1, analysis: analysis)
-            let data = try renderer.export(o.image, format: .heic10)
-            try data.write(to: outDir.appendingPathComponent("\(stem)__\(v.name.replacingOccurrences(of: "+", with: "_"))__full.heic"))
-            log(String(format: "  full-res %@ HEIC10: %.2fs, %.1f MB", v.name, Date().timeIntervalSince(t), Double(data.count) / 1e6))
+            let bytes = try save(o.image, recipe: o.recipe, name: "\(stem)__\(v.name.replacingOccurrences(of: "+", with: "_"))__full", outDir: outDir, format: .heic10)
+            log(String(format: "  full-res %@ HEIC10: %.2fs, %.1f MB", v.name, Date().timeIntervalSince(t), Double(bytes) / 1e6))
         }
     }
     return FileResult(file: url.lastPathComponent, corpus: entry, camera: ref.recipe.camera, iso: ref.recipe.iso, analysisSize: [w, h],
@@ -215,13 +240,14 @@ func markdown(_ files: [FileResult]) -> String {
     var md = "# raw-bench summary\n\n"
     md += "Reference = Apple's default CIRAWFilter decode of the same file (pixel-aligned). Metrics: docs/METRICS.md.\n"
     md += "OS: \(ProcessInfo.processInfo.operatingSystemVersionString)\n\n"
-    md += "## Gates\n\n| id | file | category | split | camera | Gate 1 | Gate 2 (auto) | auto decisions |\n|---|---|---|---|---|---|---|---|\n"
+    md += "## Gates\n\n| id | file | category | split | camera | Gate 1 | Gate 2 (auto) | Gate 2 (core) | auto decisions |\n|---|---|---|---|---|---|---|---|---|\n"
     for f in files {
         let c = f.corpus
         let g1 = f.gates.map { $0.gate1 ? "PASS" : "FAIL" } ?? (f.error == nil ? "–" : "ERROR")
         let g2 = f.gates.map { $0.gate2 ? "PASS" : "FAIL: " + $0.gate2Reasons.joined(separator: "; ") } ?? (f.error ?? "–")
         let dec = f.variants.first(where: { $0.name == "auto" })?.recipe.decisions.joined(separator: "; ") ?? ""
-        md += "| \(c?.id ?? "") | \(f.file) | \(c?.category ?? "") | \(c?.split ?? "") | \(f.camera ?? "?") | \(g1) | \(g2) | \(dec) |\n"
+        let g2c = f.gates.map { $0.gate2Core ? "PASS" : "FAIL: " + $0.gate2CoreReasons.joined(separator: "; ") } ?? "–"
+        md += "| \(c?.id ?? "") | \(f.file) | \(c?.category ?? "") | \(c?.split ?? "") | \(f.camera ?? "?") | \(g1) | \(g2) | \(g2c) | \(dec) |\n"
     }
     md += "\n"
     for f in files {
@@ -240,10 +266,17 @@ func markdown(_ files: [FileResult]) -> String {
                          m.localContrast, f2(m.highlightRingMeanY) + " / " + f2(v.ringOnReferenceMask),
                          v.brightMeanY.map { String(format: "%.3f", $0) } ?? "–", v.brightLocalContrast.map { String(format: "%.3f", $0) } ?? "–", m.meanChroma, v.seconds)
         }
+        let skin = f.variants.filter { $0.skinDeltaE != nil }
+        if !skin.isEmpty {
+            md += "\nlook change on people vs elsewhere (ΔE00 vs auto base, Vision person mask): "
+            md += skin.map { String(format: "%@ skin %.2f / rest %.2f", $0.name, $0.skinDeltaE!, $0.nonSkinDeltaE ?? 0) }.joined(separator: "; ") + "\n"
+        }
         if let c = f.variants.first(where: { $0.name == "auto" })?.context {
             md += String(format: "\ncontext: DR %.1f stops (p1 %.2f, p50 %.2f, p99.9 %@), sensor clipped %.2f%%, display clipped %@%%, EDR headroom %@x, faces %@",
                          c.dynamicRangeStops, c.logP1, c.logP50, f2(c.logP999), c.clippedFraction * 100,
                          f2(c.displayClippedFraction.map { $0 * 100 }), f2(c.edrHeadroom), c.faceCount.map(String.init) ?? "n/a")
+            md += String(format: ", people %@%%, saliency %@, CCT %@ K", f2(c.personFraction.map { $0 * 100 }),
+                         c.saliencyBox.map { $0.map { String(format: "%.2f", $0) }.joined(separator: ",") } ?? "–", f2(c.cct))
             if let l = c.labels, !l.isEmpty {
                 md += ", labels " + l.sorted { $0.value > $1.value }.prefix(5).map { String(format: "%@ %.2f", $0.key, $0.value) }.joined(separator: ", ")
             }
@@ -258,11 +291,17 @@ func run() throws -> Int32 {
     let a = Args(Array(CommandLine.arguments.dropFirst()))
     guard let cmd = a.positional.first else { print(usage); return 2 }
     let rest = Array(a.positional.dropFirst())
+    if let c = a.options["calibration"] { dev.calibration = try CalibrationTable.load(URL(fileURLWithPath: c)) }
+    if let p = a.options["plugins"] {   // unplug from the CLI: --plugins none | id,id
+        let ids = p == "none" ? [] : p.split(separator: ",").map(String.init)
+        dev.plugins.defaultEnabled = ids
+    }
     switch cmd {
     case "info":
         guard !rest.isEmpty else { print(usage); return 2 }
         for p in rest { print(try decoder.decode(url: URL(fileURLWithPath: p), settings: .appleDefault, scaleFactor: 0.1).recipe.prettyJSON()) }
         if let f = CIFilter(name: "CIToneMapHeadroom") { log("CIToneMapHeadroom inputs: \(f.inputKeys)") } else { log("CIToneMapHeadroom: not available") }
+        log("plugins: " + dev.plugins.available.map { "\($0.id)\(dev.plugins.defaultEnabled.contains($0.id) ? " (on)" : " (off)"): \($0.summary)" }.joined(separator: "; "))
     case "analyze":
         for p in rest {
             let an = try dev.analyze(url: URL(fileURLWithPath: p))
@@ -278,7 +317,7 @@ func run() throws -> Int32 {
         let o = try dev.develop(url: url, settings: v.settings, auto: v.auto, scaleFactor: a.options["scale"].flatMap(Float.init) ?? 1)
         let ext = format == .heic10 ? "heic" : (format == .png16 ? "png" : "jpg")
         let outPath = a.options["out"] ?? url.deletingPathExtension().lastPathComponent + "__\(v.name).\(ext)"
-        try renderer.export(o.image, format: format).write(to: URL(fileURLWithPath: outPath))
+        try renderer.export(o.image, format: format, recipe: o.recipe).write(to: URL(fileURLWithPath: outPath))
         try o.recipe.prettyJSON().write(toFile: outPath + ".recipe.json", atomically: true, encoding: .utf8)
         log(String(format: "wrote %@ (%.2fs)", outPath, Date().timeIntervalSince(t)))
     case "compare":
