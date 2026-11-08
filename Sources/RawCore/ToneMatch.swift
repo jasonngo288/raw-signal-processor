@@ -43,20 +43,25 @@ public enum ToneMatch {
     }
 
     /// Monotone curve (encoded luma in → encoded luma out) taking candidate quantiles to reference quantiles.
-    /// Each point's linear gain is limited to ±`maxStops`; (0,0) and (1,1) are kept so black and white stay put.
+    /// Each point's linear gain is limited to ±`maxStops`. Black stays at 0. The top is sampled densely (98.5, 99.5,
+    /// 99.9 %) and the curve continues to x = 1 with slope ≤ 1: forcing (1,1) after a compressed last point stretched
+    /// the top tones 2.3× and blew the wall's hotspot into a hard-edged white oval (CI 42491918370).
     public static func curve(candidate: [Double], reference: [Double], points: Int = 32, maxStops: Double = 1.5) -> [SIMD2<Double>] {
         var out: [SIMD2<Double>] = [SIMD2(0, 0)]
         let gMax = pow(2, maxStops)
-        for i in 1..<points {
-            let q = Double(i) / Double(points)
+        let qs = (1..<points).map { Double($0) / Double(points) } + [0.985, 0.995, 0.999]
+        for q in qs {
             let x = quantile(candidate, q)
             guard x > out.last!.x + 1e-3, x < 0.999 else { continue }
             let lx = ColorMath.decodeTransfer(x), lr = ColorMath.decodeTransfer(quantile(reference, q))
             let g = lx > 1e-6 ? min(max(lr / lx, 1 / gMax), gMax) : 1
-            let y = min(max(ColorMath.encodeTransfer(lx * g), out.last!.y), 0.999)
+            // Slope ≤ 2 per segment: where our top quantiles bunch up (clipped area) the reference spreads them, and
+            // a steep segment would posterise the highlight into a hard-edged patch.
+            let y = min(max(ColorMath.encodeTransfer(lx * g), out.last!.y), out.last!.y + 2 * (x - out.last!.x), 0.999)
             out.append(SIMD2(x, y))
         }
-        out.append(SIMD2(1, 1))
+        let last = out.last!
+        out.append(SIMD2(1, min(1, last.y + (1 - last.x))))
         return out
     }
 

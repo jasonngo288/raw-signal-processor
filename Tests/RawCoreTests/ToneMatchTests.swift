@@ -35,7 +35,9 @@ final class ToneMatchTests: XCTestCase {
         // Camera compresses highlights: our top quantiles map down, the curve stays monotone and keeps 0 and 1.
         let compressed = hist(scene.map { $0 < 0.2 ? $0 : 0.2 + ($0 - 0.2) * 0.4 })
         let c2 = ToneMatch.curve(candidate: h, reference: compressed)
-        XCTAssertEqual(c2.first!, SIMD2(0, 0)); XCTAssertEqual(c2.last!, SIMD2(1, 1))
+        XCTAssertEqual(c2.first!, SIMD2(0, 0)); XCTAssertEqual(c2.last!.x, 1)
+        // No stretched top segment (the white-oval bug): every segment's slope stays bounded.
+        for (a, b) in zip(c2, c2.dropFirst()) { XCTAssertLessThanOrEqual((b.y - a.y) / (b.x - a.x), 2.0001, "segment \(a) -> \(b)") }
         for (a, b) in zip(c2, c2.dropFirst()) { XCTAssertGreaterThanOrEqual(b.y, a.y); XCTAssertGreaterThan(b.x, a.x) }
         let l2 = ToneMatch.lut(c2, size: 33)
         var last: Float = -1

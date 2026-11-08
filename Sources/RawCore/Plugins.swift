@@ -127,21 +127,9 @@ public struct CameraMatchPlugin: DevelopPlugin {
         guard abs(off) >= 0.05 else { return [String(format: "camera HEIC mid-tones within %.2f EV: no exposure change", off)] }
         let before = settings.exposure ?? 0
         settings.exposure = before + Float(off)
-        var why = [String(format: "camera HEIC mid-tones %+.2f EV vs Apple's default render -> exposure %.2f -> %.2f (bounded -1...+0.5)", off, before, before + Float(off))]
-        // highlightRecovery decided its tone-map headroom at the old exposure. Rescale it; when the exposure change
-        // already brings the highlights under white, drop the tone map (it would map headroom that is no longer
-        // there: bright blotch on the wall in run 42490482126).
-        if let h = settings.toneMapSourceHeadroom {
-            let nh = h * pow(2, Float(off))
-            if Double(nh) < HighlightRecoveryRule.minHeadroom {
-                settings.toneMapSourceHeadroom = nil; settings.extendedDynamicRangeAmount = nil
-                settings.highlightClarity = nil; settings.highlightRecoveryLocal = nil
-                why.append(String(format: "highlight headroom %.2fx -> %.2fx after the exposure change: highlight tone map dropped (exposure already recovers them)", h, nh))
-            } else {
-                settings.toneMapSourceHeadroom = nh
-                why.append(String(format: "highlight tone-map headroom rescaled %.2fx -> %.2fx for the new exposure", h, nh))
-            }
-        }
+        let why = [String(format: "camera HEIC mid-tones %+.2f EV vs Apple's default render -> exposure %.2f -> %.2f (bounded -1...+0.5)", off, before, before + Float(off))]
+        // highlightRecovery's tone map (decided at the old exposure) is kept: dropping it after the exposure change
+        // brought clipping back from 0.3 % to 2-2.6 % (CI 42491918370), because Apple's SDR curve still clips there.
         return why
     }
 

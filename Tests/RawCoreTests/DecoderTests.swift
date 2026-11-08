@@ -118,12 +118,10 @@ final class DecoderTests: XCTestCase {
             let ca = ImageMetrics.measure(la).clippedFraction, cb = ImageMetrics.measure(lb).clippedFraction
             print("[cameraMatch] \(d.lastPathComponent) median EV vs HEIC \(mid(la)) -> \(mid(lb)), clipped \(ca) -> \(cb), \(b.recipe.decisions.filter { $0.hasPrefix("[cameraMatch]") })")
             XCTAssertTrue(b.recipe.plugins.contains("cameraMatch"))
-            if b.recipe.decisions.contains(where: { $0.contains("highlight tone map dropped") }) {
-                XCTAssertNil(b.recipe.settings.toneMapSourceHeadroom, "no tone map from headroom that is gone")
-            }
             XCTAssertLessThan(abs(mid(lb)), 0.15, d.lastPathComponent)
             XCTAssertLessThan(abs(mid(lb)), abs(mid(la)), d.lastPathComponent)
             XCTAssertLessThanOrEqual(cb, ca + 1e-4, d.lastPathComponent)
+            XCTAssertLessThan(cb, 0.01, "\(d.lastPathComponent): clipping near the HEIC's (0.2 %), not 2 %")
         }
     }
 

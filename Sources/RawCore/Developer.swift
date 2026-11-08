@@ -157,16 +157,22 @@ public final class Developer: @unchecked Sendable {
         let beforeLook = image
         var appliedLUT: CubeLUT?
         let off = st.lookIntensityOffset ?? 0
-        func intensity(_ base: Float) -> Float {
+        func intensity(_ base: Float, _ lut: CubeLUT) -> Float {
+            guard off != 0 else { return base }
+            // Black and white is all or nothing: 95 % mono is just washed-out colour (CI 42492412535, mooncake).
+            if lut.isMonochrome {
+                out.recipe.decisions.append("look intensity offset skipped: black-and-white look stays at full strength")
+                return base
+            }
             let v = min(max(base + off, 0), 1)
-            if off != 0 { out.recipe.decisions.append(String(format: "look intensity %.2f %+.2f (scene) -> %.2f", base, off, v)) }
+            out.recipe.decisions.append(String(format: "look intensity %.2f %+.2f (scene) -> %.2f", base, off, v))
             return v
         }
         if let lut = try renderer.resolveLook(st.look) {
-            image = try renderer.applyLook(lut, to: image, intensity: intensity(st.lookIntensity)); appliedLUT = lut
+            image = try renderer.applyLook(lut, to: image, intensity: intensity(st.lookIntensity, lut)); appliedLUT = lut
         } else if let stock {
             let lut = stock.lut()
-            image = try renderer.applyLook(lut, to: image, intensity: intensity(stock.lookIntensity)); appliedLUT = lut
+            image = try renderer.applyLook(lut, to: image, intensity: intensity(stock.lookIntensity, lut)); appliedLUT = lut
         }
         let looked = appliedLUT != nil
         // Skin / subject protection: on people, hold part of the look back — never for a black-and-white look
