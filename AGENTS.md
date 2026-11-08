@@ -28,8 +28,10 @@ An iPhone camera app (iPhone 12 → 18) that captures RAW and "develops film":
    Do not add other personal images. Do not commit bench outputs (CI prints a base64 preview tarball to its log instead).
    `output/` holds device captures from the demo app that the user pushed (private, like `USER_` files).
 7. **Update WORK_LOG.md in the same commit** as any change: what, why, evidence (CI run / numbers), what is unverified.
-8. No third-party dependencies without a written reason in WORK_LOG.md.
-9. **Anything not in docs/ROADMAP.md is a plugin** (`DevelopPlugin`, Plugins.swift): it must be removable with
+8. **Adding or removing a Swift file** in Sources/RawCore or Sources/CaptureKit means regenerating `App/RawFilmDemo.xcodeproj`
+   (`cd App && xcodegen generate`, or take it from the XCODEPROJ block of the CI log). CI fails on a stale project.
+9. No third-party dependencies without a written reason in WORK_LOG.md.
+10. **Anything not in docs/ROADMAP.md is a plugin** (`DevelopPlugin`, Plugins.swift): it must be removable with
    `plugins = []` without breaking the core, list itself in `recipe.plugins`, and be listed in the ROADMAP "EXTRAS" table.
    The bench always runs `auto` (default plugins) and `auto core` (no plugins) so the effect of the plugins is visible.
 

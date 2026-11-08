@@ -28,10 +28,17 @@ jobs:
           set -o pipefail
           brew install xcodegen >/dev/null
           cd App && xcodegen generate
+          # The committed project lists files one by one: new Swift files must be in it (user's Xcode build broke on
+          # Presets2026.swift / ToneMatch.swift). Fail if the committed project is stale.
+          if ! git diff --quiet -- RawFilmDemo.xcodeproj; then
+            echo "::error::App/RawFilmDemo.xcodeproj is stale: regenerate (cd App && xcodegen generate) or take it from XCODEPROJ in this log"
+            git diff --stat -- RawFilmDemo.xcodeproj; STALE=1
+          fi
           xcodebuild build -project RawFilmDemo.xcodeproj -scheme RawFilmDemo -destination 'generic/platform=iOS' \
             CODE_SIGNING_ALLOWED=NO -quiet 2>&1 | tail -40
           tar czf ../xcodeproj.tgz RawFilmDemo.xcodeproj RawFilmDemo/Info.plist
           echo "XCODEPROJ_BEGIN"; base64 -i ../xcodeproj.tgz | fold -w 4000; echo "XCODEPROJ_END"
+          [ -z "${STALE:-}" ]
       - name: Test
         run: |
           set -o pipefail

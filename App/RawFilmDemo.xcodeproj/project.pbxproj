@@ -9,10 +9,12 @@
 /* Begin PBXBuildFile section */
 		25F82EE03B64B49D259DDD2E /* ColorMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 413EA6473A1476FB86D562C5 /* ColorMath.swift */; };
 		317CBFF39A0022F28BFC8892 /* Renderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05F2D975851B757B4BC6EE6E /* Renderer.swift */; };
+		34555159314B5556FA3EB6B9 /* ToneMatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A6124EF90824DD6CAF22606 /* ToneMatch.swift */; };
 		4559F3AC457D564E7C267464 /* RawCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 1FE946699F10CFB2DB53F39F /* RawCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		481D26A08F470F3ACC097811 /* ImageMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B9FCCF144502B6CE31EEE65 /* ImageMetrics.swift */; };
 		6AE109991A1AC267DFE42A79 /* Look.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20D982FA8DFEE3CDDDB8A6C /* Look.swift */; };
 		7DE4A9ECF172149648CDA57E /* RenderSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 836F5F5A5A29E762D3633A6E /* RenderSettings.swift */; };
+		7DEB3063E3EE5960A2513E44 /* Presets2026.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E665446EEFCA624C9EB7D82 /* Presets2026.swift */; };
 		80DAF44AED1677A89420E66D /* CaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E76F9A995FEE177791EC26C3 /* CaptureService.swift */; };
 		875C60419A94846F4106D7D2 /* ContextAnalysis.swift in Sources */ = {isa = PBXBuildFile; fileRef = 532A340E102CD794F657DD29 /* ContextAnalysis.swift */; };
 		AE219C93C9B487EB62457EB2 /* Developer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CB4D2FFC28E45F108A39B3B /* Developer.swift */; };
@@ -67,9 +69,11 @@
 		2F3640B1EB1F14C45053141B /* RawFilmDemo.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RawFilmDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3AD9DD3EA982536591C39E44 /* RawFilmDemoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RawFilmDemoApp.swift; sourceTree = "<group>"; };
 		413EA6473A1476FB86D562C5 /* ColorMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorMath.swift; sourceTree = "<group>"; };
+		4A6124EF90824DD6CAF22606 /* ToneMatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToneMatch.swift; sourceTree = "<group>"; };
 		4CB4D2FFC28E45F108A39B3B /* Developer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Developer.swift; sourceTree = "<group>"; };
 		532A340E102CD794F657DD29 /* ContextAnalysis.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextAnalysis.swift; sourceTree = "<group>"; };
 		55DDCA8137C9D24EBA3BC89E /* Calibration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Calibration.swift; sourceTree = "<group>"; };
+		6E665446EEFCA624C9EB7D82 /* Presets2026.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Presets2026.swift; sourceTree = "<group>"; };
 		7B9FCCF144502B6CE31EEE65 /* ImageMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageMetrics.swift; sourceTree = "<group>"; };
 		836F5F5A5A29E762D3633A6E /* RenderSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenderSettings.swift; sourceTree = "<group>"; };
 		861CEAF1B9609C09FFA6106E /* LinearImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinearImage.swift; sourceTree = "<group>"; };
@@ -133,9 +137,11 @@
 				861CEAF1B9609C09FFA6106E /* LinearImage.swift */,
 				A20D982FA8DFEE3CDDDB8A6C /* Look.swift */,
 				199798B49C3F9C744946C8C0 /* Plugins.swift */,
+				6E665446EEFCA624C9EB7D82 /* Presets2026.swift */,
 				B469E3A41A484B6791CEF286 /* RawDecoder.swift */,
 				05F2D975851B757B4BC6EE6E /* Renderer.swift */,
 				836F5F5A5A29E762D3633A6E /* RenderSettings.swift */,
+				4A6124EF90824DD6CAF22606 /* ToneMatch.swift */,
 			);
 			name = RawCore;
 			path = ../Sources/RawCore;
@@ -280,9 +286,11 @@
 				F6B3AFADC091DA6AF4F4FC5B /* LinearImage.swift in Sources */,
 				6AE109991A1AC267DFE42A79 /* Look.swift in Sources */,
 				EF9183DB2B3DF3526837F434 /* Plugins.swift in Sources */,
+				7DEB3063E3EE5960A2513E44 /* Presets2026.swift in Sources */,
 				E91216BE2B48238B46815F83 /* RawDecoder.swift in Sources */,
 				7DE4A9ECF172149648CDA57E /* RenderSettings.swift in Sources */,
 				317CBFF39A0022F28BFC8892 /* Renderer.swift in Sources */,
+				34555159314B5556FA3EB6B9 /* ToneMatch.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
