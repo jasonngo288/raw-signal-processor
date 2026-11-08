@@ -18,6 +18,8 @@ final class CameraModel: ObservableObject {
     @Published var preview: UIImage?
     @Published var stock = "warm400"
     @Published var pluginsOn = true
+    @Published var proRAW = false
+    @Published var proRAWSupported = false
     @Published var busy = false
     @Published var lastFolder: String?
 
@@ -32,11 +34,18 @@ final class CameraModel: ObservableObject {
                 try service.configure()
                 service.session.startRunning()
                 let raw = service.bayerRawFormat.map { CaptureMetadata.fourCC($0) } ?? "none (fallback: HEIC only)"
-                Task { @MainActor in self.status = "Ready · Bayer RAW: \(raw)" }
+                let pro = service.proRAWSupported
+                Task { @MainActor in self.proRAWSupported = pro; self.status = "Ready · Bayer RAW: \(raw) · ProRAW: \(pro ? "available" : "not on this model")" }
             } catch {
                 Task { @MainActor in self.status = "Camera error: \(error)" }
             }
         }
+    }
+
+    /// Bayer (single frame) vs ProRAW (multi-frame fused) where the device supports it.
+    func setProRAW(_ on: Bool) {
+        let service = self.service
+        sessionQueue.async { service.setRawPreference(on ? .proRAWWhenSupported : .bayer) }
     }
 
     func shoot() {
@@ -135,7 +144,10 @@ struct ContentView: View {
                 }
             }
             Picker("Stock", selection: $model.stock) { ForEach(stocks, id: \.self) { Text($0) } }.pickerStyle(.menu)
-            Toggle("Plugins (highlight recovery, vignette)", isOn: $model.pluginsOn)
+            Toggle("Plugins (highlight recovery, camera match, vignette)", isOn: $model.pluginsOn)
+            Toggle("ProRAW (multi-frame, Pro models)", isOn: $model.proRAW)
+                .disabled(!model.proRAWSupported)
+                .onChange(of: model.proRAW) { _, on in model.setProRAW(on) }
             Button(action: model.shoot) {
                 Text(model.busy ? "Working…" : "Shoot RAW").frame(maxWidth: .infinity).padding()
             }

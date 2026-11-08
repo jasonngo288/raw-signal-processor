@@ -14,6 +14,8 @@ public struct CaptureMetadata: Codable, Equatable, Sendable {
     public var fallback: Bool
     /// The HEIC was produced by the same shutter press (same AVCapturePhotoSettings), so it is a valid reference.
     public var heicFromSamePress: Bool
+    /// "bayer" (single frame, roadmap default) or "proRAW" (Apple's multi-frame fused linear DNG, Pro models).
+    public var rawKind: String? = nil
 
     public static func fourCC(_ v: UInt32) -> String {
         let bytes = [UInt8((v >> 24) & 0xff), UInt8((v >> 16) & 0xff), UInt8((v >> 8) & 0xff), UInt8(v & 0xff)]
@@ -26,6 +28,25 @@ public struct CaptureMetadata: Codable, Equatable, Sendable {
         return withUnsafeBytes(of: &info.machine) { raw in
             String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
         }
+    }
+}
+
+/// Which RAW to ask for. Decided from what the device can do, never from a list of model names.
+public enum RawPreference: String, Codable, Sendable, CaseIterable {
+    /// Bayer RAW, single frame (roadmap default; every supported iPhone).
+    case bayer
+    /// Apple ProRAW where the device supports it (multi-frame fusion: Smart HDR / Deep Fusion merged into a linear
+    /// DNG; less noise and more highlight range in low light), Bayer elsewhere.
+    case proRAWWhenSupported
+}
+
+public enum RawKind: String, Codable, Sendable { case bayer, proRAW }
+
+/// Pure capture tier decision (testable without a camera).
+public enum RawTierPolicy {
+    public static func choose(_ preference: RawPreference, proRAWSupported: Bool, bayerAvailable: Bool) -> RawKind? {
+        if preference == .proRAWWhenSupported, proRAWSupported { return .proRAW }
+        return bayerAvailable ? .bayer : nil
     }
 }
 
@@ -52,6 +73,7 @@ public final class CaptureService: NSObject, AVCapturePhotoCaptureDelegate, @unc
         var raw: Data?
         var heic: Data?
         var rawFormat: OSType?
+        var rawKind: RawKind?
         var exif: [String: Any]?
         var errors: [String] = []
         var completion: (Result<CaptureResult, Error>) -> Void
@@ -78,16 +100,41 @@ public final class CaptureService: NSObject, AVCapturePhotoCaptureDelegate, @unc
         output.maxPhotoQualityPrioritization = .quality
     }
 
-    /// Bayer RAW format if the device offers one (ProRAW / linear formats are skipped on purpose).
+    /// Bayer RAW format if the device offers one.
     public var bayerRawFormat: OSType? {
         output.availableRawPhotoPixelFormatTypes.first { AVCapturePhotoOutput.isBayerRAWPixelFormat($0) }
+    }
+
+    /// Current preference (default Bayer, the roadmap). Change it with `setRawPreference` on the session queue.
+    public private(set) var rawPreference: RawPreference = .bayer
+    public var proRAWSupported: Bool { output.isAppleProRAWSupported }
+
+    /// Switch Bayer / ProRAW. Call on the session queue (after `configure`).
+    public func setRawPreference(_ p: RawPreference) {
+        session.beginConfiguration()
+        output.isAppleProRAWEnabled = (p == .proRAWWhenSupported) && output.isAppleProRAWSupported
+        session.commitConfiguration()
+        rawPreference = p
+    }
+
+    /// The RAW format the next capture asks for, and what kind it is.
+    public var selectedRaw: (format: OSType, kind: RawKind)? {
+        let kind = RawTierPolicy.choose(rawPreference, proRAWSupported: output.isAppleProRAWEnabled, bayerAvailable: bayerRawFormat != nil)
+        switch kind {
+        case .proRAW:
+            return output.availableRawPhotoPixelFormatTypes.first { AVCapturePhotoOutput.isAppleProRAWPixelFormat($0) }.map { ($0, .proRAW) }
+                ?? bayerRawFormat.map { ($0, .bayer) }
+        case .bayer: return bayerRawFormat.map { ($0, .bayer) }
+        case nil: return nil
+        }
     }
 
     /// Call on the session queue after `session.startRunning()`.
     public func capture(completion: @escaping (Result<CaptureResult, Error>) -> Void) {
         // capturePhoto without a running session / active connection raises an Objective-C exception: refuse instead.
         guard session.isRunning, output.connection(with: .video)?.isActive == true else { completion(.failure(CaptureError.notRunning)); return }
-        let raw = bayerRawFormat
+        let chosen = selectedRaw
+        let raw = chosen?.format
         let settings: AVCapturePhotoSettings
         if let raw {
             settings = AVCapturePhotoSettings(rawPixelFormatType: raw, processedFormat: [AVVideoCodecKey: AVVideoCodecType.hevc])
@@ -99,7 +146,7 @@ public final class CaptureService: NSObject, AVCapturePhotoCaptureDelegate, @unc
         // HEIC uses the output's default prioritisation.
         if raw == nil { settings.photoQualityPrioritization = .quality }
         settings.flashMode = .off
-        lock.lock(); pending[settings.uniqueID] = Pending(rawFormat: raw, completion: completion); lock.unlock()
+        lock.lock(); pending[settings.uniqueID] = Pending(rawFormat: raw, rawKind: chosen?.kind, completion: completion); lock.unlock()
         output.capturePhoto(with: settings, delegate: self)
     }
 
@@ -134,7 +181,7 @@ public final class CaptureService: NSObject, AVCapturePhotoCaptureDelegate, @unc
             exposureSeconds: (exif[kCGImagePropertyExifExposureTime as String] as? NSNumber)?.doubleValue,
             lensPosition: cam?.lensPosition,
             rawFormat: entry.rawFormat.map { CaptureMetadata.fourCC($0) },
-            fallback: entry.rawFormat == nil, heicFromSamePress: entry.raw != nil && entry.heic != nil)
+            fallback: entry.rawFormat == nil, heicFromSamePress: entry.raw != nil && entry.heic != nil, rawKind: entry.rawKind?.rawValue)
         entry.completion(.success(CaptureResult(dng: entry.raw, heic: entry.heic, metadata: meta)))
     }
 }

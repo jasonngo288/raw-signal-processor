@@ -183,6 +183,29 @@ final class LookAndSettingsTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(RenderSettings.self, from: data), s)
     }
 
+    /// Roadmap 13: the look's strength follows the scene, bounded; the stock never changes.
+    func testLookIntensityFollowsSceneBounded() {
+        func ctx(p50: Double, iso: Double = 100, people: Double = 0, labels: [String: Double]? = nil) -> SceneContext {
+            var c = SceneContext(logP1: -8, logP50: p50, logP99: 0, dynamicRangeStops: 6, clippedFraction: 0, iso: iso, faceCount: 0, labels: labels)
+            c.personFraction = people; return c
+        }
+        XCTAssertEqual(DecisionEngine.lookIntensityOffset(context: ctx(p50: -3)).0, 0, "ordinary daylight: no change")
+        XCTAssertEqual(DecisionEngine.lookIntensityOffset(context: ctx(p50: -6.4)).0, -0.10, accuracy: 1e-6, "night (NIGHT01 median)")
+        XCTAssertEqual(DecisionEngine.lookIntensityOffset(context: ctx(p50: -6.1, iso: 3200, people: 0.2)).0, -0.15, accuracy: 1e-6, "clamped at -0.15")
+        XCTAssertEqual(DecisionEngine.lookIntensityOffset(context: ctx(p50: -1, labels: ["sky": 0.95, "outdoor": 0.98])).0, 0.05, accuracy: 1e-6)
+        XCTAssertEqual(DecisionEngine.lookIntensityOffset(context: ctx(p50: -1, people: 0.3, labels: ["sky": 0.95])).0, -0.05, accuracy: 1e-6, "people win over landscape")
+        XCTAssertEqual(DecisionEngine.lookIntensityOffset(context: ctx(p50: -1, labels: ["sky": 0.3])).0, 0, "low-confidence label ignored")
+        // A caller lock (0) is respected.
+        let d = DecodeParameters(exposure: 0, baselineExposure: 0, shadowBias: 0, boostAmount: 1, boostShadowAmount: 1, localToneMapAmount: 0,
+                                 sharpnessAmount: 0.5, contrastAmount: 0, detailAmount: 0, luminanceNoiseReductionAmount: 0.2, colorNoiseReductionAmount: 0.2,
+                                 moireReductionAmount: 0, extendedDynamicRangeAmount: 0, lensCorrection: true, gamutMapping: true, neutralTemperature: 5000, neutralTint: 0)
+        let sup = DecoderSupport(localToneMap: false, sharpness: true, contrast: true, detail: true, luminanceNoiseReduction: true,
+                                 colorNoiseReduction: true, moireReduction: true, lensCorrection: false, maxExtendedDynamicRange: 2)
+        var locked = RenderSettings.explicit; locked.lookIntensityOffset = 0
+        XCTAssertEqual(DecisionEngine.decide(context: ctx(p50: -6.4), defaults: d, support: sup, base: locked).settings.lookIntensityOffset, 0)
+        XCTAssertEqual(DecisionEngine.decide(context: ctx(p50: -6.4), defaults: d, support: sup).settings.lookIntensityOffset!, -0.10, accuracy: 1e-6)
+    }
+
     func testSceneLinearOverridesIntent() {
         let d = DecodeParameters(exposure: 0, baselineExposure: -1.8, shadowBias: 0.02, boostAmount: 1, boostShadowAmount: 1,
                                  localToneMapAmount: 0.5, sharpnessAmount: 0.3, contrastAmount: 0.5, detailAmount: 0.5,
@@ -213,7 +236,8 @@ final class LookAndSettingsTests: XCTestCase {
         XCTAssertEqual(dec.settings.detailAmount, 0)
         XCTAssertEqual(dec.settings.lensCorrection, true)
         XCTAssertEqual(dec.settings.skinProtection, DecisionEngine.Threshold.skinProtection)
-        XCTAssertEqual(dec.reasons.count, 7)
+        XCTAssertEqual(dec.reasons.count, 9, "7 decode rules + 2 look-intensity reasons (ISO 3200, people)")
+        XCTAssertEqual(dec.settings.lookIntensityOffset!, -0.10, accuracy: 1e-6)
         XCTAssertNoThrow(try dec.settings.validate())
 
         // An explicit skinProtection (e.g. 0 = off) is respected.

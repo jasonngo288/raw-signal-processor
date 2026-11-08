@@ -67,6 +67,10 @@ public struct RenderSettings: Codable, Equatable, Sendable {
     public var useCalibration: Bool?
     /// Plugins to run (ids from `PluginRegistry`). nil = the developer's default set, [] = none.
     public var plugins: [String]?
+    /// Added to the look's intensity (stock or explicit look), clamped to 0...1. Set by DecisionEngine from the
+    /// scene (dark, people, landscape), bounded -0.15...+0.10. The preset itself never changes per photo (one roll,
+    /// one stock); 0 = lock the intensity exactly.
+    public var lookIntensityOffset: Float?
     /// Path of the camera's own HEIC from the same shutter press (CaptureKit `apple.heic`). With the cameraMatch
     /// plugin, our exposure and tones are matched to it. Not a decode override by itself.
     public var cameraReference: String?
@@ -94,6 +98,7 @@ public struct RenderSettings: Codable, Equatable, Sendable {
         if let p = skinProtection, !(0...1).contains(p) { throw RawCoreError.invalidSettings("skinProtection must be in 0...1") }
         if let e = linearExposureEV, !(-4...4).contains(e) { throw RawCoreError.invalidSettings("linearExposureEV must be in -4...4") }
         if let c = highlightClarity, !(0...1).contains(c) { throw RawCoreError.invalidSettings("highlightClarity must be in 0...1") }
+        if let o = lookIntensityOffset, !(-0.5...0.5).contains(o) { throw RawCoreError.invalidSettings("lookIntensityOffset must be in -0.5...0.5") }
         if let m = cameraMatchStrength, !(0...1).contains(m) { throw RawCoreError.invalidSettings("cameraMatchStrength must be in 0...1") }
         if !(0...1).contains(lookIntensity) { throw RawCoreError.invalidSettings("lookIntensity must be in 0...1") }
         if mode == .appleDefault && hasOverrides {

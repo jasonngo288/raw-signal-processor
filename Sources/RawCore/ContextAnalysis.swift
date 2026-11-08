@@ -86,6 +86,39 @@ public enum DecisionEngine {
         public static let faceArea = 0.01
         public static let personFraction = 0.03
         public static let skinProtection: Float = 0.5
+        /// Scene-linear median (log2, 0 = diffuse white) below which a frame counts as dark / night.
+        public static let darkMedianStops = -5.0
+        public static let veryHighISO = 1600.0
+        public static let landscapeLabelConfidence = 0.5
+        public static let landscapeLabels: Set<String> = ["sky", "land", "mountain", "hill", "beach", "grass", "field", "sunset", "sunrise", "ocean", "lake", "forest"]
+        public static let lookIntensityRange: ClosedRange<Float> = -0.15...0.10
+    }
+
+    /// Roadmap 13, context blending: how much of the (fixed) look this frame gets. Pure, bounded, every reason logged.
+    public static func lookIntensityOffset(context c: SceneContext) -> (Float, [String]) {
+        var off: Float = 0
+        var why: [String] = []
+        if c.logP50 < Threshold.darkMedianStops {
+            off -= 0.10
+            why.append(String(format: "dark scene (median %.1f stops < %.0f) -> look -0.10 (colour shifts and grain read as noise in the dark)", c.logP50, Threshold.darkMedianStops))
+        }
+        if let iso = c.iso, iso >= Threshold.veryHighISO {
+            off -= 0.05
+            why.append("ISO \(Int(iso)) >= \(Int(Threshold.veryHighISO)) -> look -0.05")
+        }
+        let people = (c.personFraction ?? 0) >= Threshold.personFraction || (c.largestFaceArea ?? 0) >= Threshold.faceArea
+        if people {
+            off -= 0.05
+            why.append("people in frame -> look -0.05 (on top of skin protection)")
+        } else if c.logP50 >= Threshold.darkMedianStops,
+                  let hit = (c.labels ?? [:]).filter({ Threshold.landscapeLabels.contains($0.key) && $0.value >= Threshold.landscapeLabelConfidence }).max(by: { $0.value < $1.value }) {
+            off += 0.05
+            why.append(String(format: "landscape (%@ %.2f), no people -> look +0.05", hit.key, hit.value))
+        }
+        let r = Threshold.lookIntensityRange
+        let clamped = min(max(off, r.lowerBound), r.upperBound)
+        if clamped != off { why.append(String(format: "look offset %.2f clamped to %.2f", off, clamped)) }
+        return (clamped, why)
     }
 
     public static func decide(context c: SceneContext, defaults d: DecodeParameters, support s: DecoderSupport,
@@ -138,6 +171,11 @@ public enum DecisionEngine {
             } else {
                 why.append(String(format: "%d small face(s) (largest %.2f%% of frame): detail kept", faces, (c.largestFaceArea ?? 0) * 100))
             }
+        }
+        // Look intensity from the scene (only matters when a look/stock is applied; the caller can lock it with 0).
+        if st.lookIntensityOffset == nil {
+            let (off, r) = lookIntensityOffset(context: c)
+            if off != 0 { st.lookIntensityOffset = off; why += r }
         }
         if why.isEmpty { why.append("no rule fired: Apple defaults kept (explicit)") }
         return Decision(settings: st, reasons: why)

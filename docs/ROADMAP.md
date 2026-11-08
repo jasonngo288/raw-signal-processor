@@ -36,14 +36,14 @@ Status legend: ✅ done and tested in CI · 🟡 partial · ⏳ needs a device /
 | 10 | linearSpaceFilter: per-model CCM + exposure | 🟡 ⏳ | `Calibration.swift`, `RawDecoder` | Mechanism + exact lookup (model identifier from DNG UniqueCameraModel, then camera name) + exposure inside the matrix done and tested; **no measured entries** (needs ColorChecker per model → Gate 3). |
 | 11 | Core Image on GPU, float16 | ✅ | `Renderer` (`RGBAh`, extended linear P3) | |
 | 12 | Skin / subject protection, CIBlendWithMask + person mask | ✅ | `Renderer.protectSkin`, DecisionEngine rule | Holds back 50 % of the look on people; skipped for black-and-white looks (judged from the LUT). Tested (`testSkinProtectionReducesLookOnPeople`). The Vision mask also covers held objects. Saliency not used yet. |
-| 13 | Look via CIColorCubeWithColorSpace, blended by context | 🟡 | `Renderer.applyLook` | Context blending = skin protection only; no scene-dependent intensity yet. |
+| 13 | Look via CIColorCubeWithColorSpace, blended by context | ✅ | `Renderer.applyLook`, `DecisionEngine.lookIntensityOffset` | Skin protection on people + scene-dependent intensity (dark −0.10, ISO ≥ 1600 −0.05, people −0.05, landscape +0.05; bounded −0.15…+0.10, logged). The stock itself never changes per photo (one roll = one stock); `lookIntensityOffset = 0` locks it. |
 | 14 | Grain / halation as Metal CIKernel | 🔁 | `FilmFinisher` | Built-in filter chain (CIRandomGenerator, blur, compositing), verified resolution-independent. Swap to a Metal kernel only if on-device profiling shows a need. |
 | 15 | heif10Representation, P3, recipe JSON | ✅ | `Renderer.export(recipe:)`, bench `save()` | Recipe embedded in EXIF UserComment by `Renderer.export`; the sidecar .recipe.json is written by the caller (bench/CLI). |
 
 ## Order of the remaining work
 1. Device: run CaptureService on an iPhone (14 Pro / 15 Pro first), keep DNG + HEIC pairs; bench against the paired HEIC.
 2. Lab: ColorChecker under D65 / A per model → fill `calibration/models.json` → Gate 3 (ΔE00 < 2 across models).
-3. Context-driven look intensity (scene labels, night, saliency).
+3. ~~Context-driven look intensity~~ done 2026-11-08 (saliency still unused).
 4. On-device performance (iPhone 12 floor) → decide on Metal kernels for grain/halation.
 
 ---
@@ -60,5 +60,11 @@ Status legend: ✅ done and tested in CI · 🟡 partial · ⏳ needs a device /
 | `highlightRecovery` | Where Apple's tone curve clips data the RAW still holds: EDR decode → highlight clarity → `CIToneMapHeadroom` → blended back only near white. Skips itself (logged) where `CIToneMapHeadroom` does not exist (iOS 17). | IMG_1901 clipped 60 % → 45 %, ΔE on unclipped pixels 0.41; mooncake 6.7 % → 2.2 % (run 42365269279) | +1 analysis decode, +1 full decode when it fires |
 | `cameraMatch` | With `settings.cameraReference` (the same-press camera HEIC): exposure offset in the CIRAWFilter decode from mid-tone quantiles, then a monotone luminance curve (ToneMatch, quantile matching) as a LUT before the look. Does nothing without a reference. | First device pairs (iPhone 14 Pro): before, +0.63 / +0.31 EV brighter and 2.1 / 6.6 % clipped vs the HEIC's 0.1 %; Python prototype of the curve stage alone: mid EV → 0.00, ΔE76 9.9 → 3.7 (shot 1), clipping not recoverable after the decode (shot 2) → exposure stage. CI numbers: `raw-bench pairs` | 1 HEIC read at 512 px (×2), 1 LUT |
 | `vignette` | Corner darkening from the stock's `FilmFinish.vignette` | visual only | 1 filter |
+
+Capture option (CaptureKit, not a DevelopPlugin; off by default, Bayer stays the roadmap path):
+
+| Option | What it does | Evidence so far | Cost |
+|---|---|---|---|
+| `RawPreference.proRAWWhenSupported` | Ask for Apple ProRAW where `isAppleProRAWSupported` (Pro models): Apple's multi-frame fusion (Smart HDR / Deep Fusion) merged into a linear DNG, decoded by the same CIRAWFilter pipeline. Falls back to Bayer elsewhere. Decided from capabilities, never model names (`RawTierPolicy`). | none yet: needs ProRAW captures from the user's 14 Pro (`rawKind` in capture.json) | ~25 MB per 12 MP DNG, slower capture |
 
 Other extras that are tooling, not pipeline: `sceneLinear` mode, `raw-bench`, public corpus, metrics/gates.
