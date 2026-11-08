@@ -159,7 +159,7 @@ public final class Developer: @unchecked Sendable {
         if let lut = try renderer.resolveLook(st.look) {
             image = try renderer.applyLook(lut, to: image, intensity: st.lookIntensity); appliedLUT = lut
         } else if let stock {
-            let lut = stock.look.lut()
+            let lut = stock.lut()
             image = try renderer.applyLook(lut, to: image, intensity: stock.lookIntensity); appliedLUT = lut
         }
         let looked = appliedLUT != nil
@@ -167,9 +167,15 @@ public final class Developer: @unchecked Sendable {
         // (judged from the LUT actually applied, so a mono .cube counts too).
         let stockLookUsed = st.look == nil && stock != nil
         let noProtection = (appliedLUT?.isMonochrome ?? false) || (stockLookUsed && !(stock?.allowsSkinProtection ?? true))
-        if let s = st.skinProtection, s > 0, looked, noProtection {
+        // A preset with skinProtect (2026 spec) raises protection to at least its minimum.
+        var skin = st.skinProtection
+        if stockLookUsed, let m = stock?.minSkinProtection, (skin ?? 0) < m {
+            skin = m
+            out.recipe.decisions.append(String(format: "skin protection %.2f requested by %@ (skinProtect)", m, stock!.name))
+        }
+        if let s = skin, s > 0, looked, noProtection {
             out.recipe.decisions.append("skin protection skipped: the applied look is black and white (colour skin in a mono frame)")
-        } else if let s = st.skinProtection, s > 0, looked {
+        } else if let s = skin, s > 0, looked {
             if let personMask {
                 image = renderer.protectSkin(looked: image, base: beforeLook, mask: personMask, strength: s)
                 out.recipe.decisions.append(String(format: "skin protection %.2f through the Vision person mask (CIBlendWithMask)", s))

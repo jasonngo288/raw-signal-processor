@@ -26,6 +26,7 @@ An iPhone camera app (iPhone 12 → 18) that captures RAW and "develops film":
    Never claim "better than Apple" from a box ΔE alone; check black p1, halo ring, local contrast too.
 6. `originals/` holds the user's test RAWs (files prefixed `USER_` were added at the user's request from earlier chats).
    Do not add other personal images. Do not commit bench outputs (CI prints a base64 preview tarball to its log instead).
+   `output/` holds device captures from the demo app that the user pushed (private, like `USER_` files).
 7. **Update WORK_LOG.md in the same commit** as any change: what, why, evidence (CI run / numbers), what is unverified.
 8. No third-party dependencies without a written reason in WORK_LOG.md.
 9. **Anything not in docs/ROADMAP.md is a plugin** (`DevelopPlugin`, Plugins.swift): it must be removable with

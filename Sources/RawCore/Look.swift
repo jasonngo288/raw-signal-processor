@@ -216,16 +216,43 @@ public struct FilmFinish: Codable, Equatable, Sendable {
 
 /// A complete film stock = look LUT + finishing. Names are the app's own (no real film brand names).
 public struct FilmStock: Equatable, Sendable {
+    public enum Source: Equatable, Sendable {
+        case builtIn(BuiltInLook)
+        /// Parametric preset (Presets2026.swift).
+        case preset(PresetLookParams)
+    }
     public var name: String
-    public var look: BuiltInLook
+    public var source: Source
     public var lookIntensity: Float
     public var finish: FilmFinish
     public var summary: String
     /// false for looks where holding the look back on people breaks the image (black and white: colour skin in a
     /// mono frame). Skin protection is then skipped and the recipe says why.
     public var allowsSkinProtection: Bool = true
+    /// Preset asks for skin protection on people ("skinProtect: true" in the 2026 spec): at least this strength.
+    public var minSkinProtection: Float? = nil
 
-    public static let all: [FilmStock] = [
+    public init(name: String, source: Source, lookIntensity: Float, finish: FilmFinish, summary: String,
+                allowsSkinProtection: Bool = true, minSkinProtection: Float? = nil) {
+        self.name = name; self.source = source; self.lookIntensity = lookIntensity; self.finish = finish
+        self.summary = summary; self.allowsSkinProtection = allowsSkinProtection; self.minSkinProtection = minSkinProtection
+    }
+
+    public init(name: String, look: BuiltInLook, lookIntensity: Float, finish: FilmFinish, summary: String,
+                allowsSkinProtection: Bool = true) {
+        self.init(name: name, source: .builtIn(look), lookIntensity: lookIntensity, finish: finish, summary: summary,
+                  allowsSkinProtection: allowsSkinProtection)
+    }
+
+    public func lut(size: Int = 33) -> CubeLUT {
+        switch source {
+        case .builtIn(let l): return l.lut(size: size)
+        case .preset: return Preset26.named(name)?.lut(size: size) ?? .identity(size: size)
+        }
+    }
+
+    /// The original four stocks.
+    public static let classic: [FilmStock] = [
         FilmStock(name: "warm400", look: .warmNegative, lookIntensity: 0.85,
                   finish: FilmFinish(grainAmount: 0.45, grainSize: 0.07, halationAmount: 0.30, halationThreshold: 0.75, halationRadius: 0.5, vignette: 0.15),
                   summary: "warm colour negative, visible grain, soft glow on lights"),
@@ -239,6 +266,9 @@ public struct FilmStock: Equatable, Sendable {
                   finish: FilmFinish(grainAmount: 0.70, grainSize: 0.09, halationAmount: 0.50, halationThreshold: 0.6, halationRadius: 0.7, vignette: 0.10),
                   summary: "tungsten-balanced night stock, big grain, strong halation on lamps"),
     ]
+
+    /// Classic stocks + the 2026 drop (PRESET_26_*).
+    public static let all: [FilmStock] = classic + Preset26.all.map(\.stock)
 
     public static func named(_ n: String) -> FilmStock? { all.first { $0.name == n } }
 }

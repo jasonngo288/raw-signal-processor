@@ -132,7 +132,7 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing).padding(8)
                 }
             }
-            Picker("Stock", selection: $model.stock) { ForEach(stocks, id: \.self) { Text($0) } }.pickerStyle(.segmented)
+            Picker("Stock", selection: $model.stock) { ForEach(stocks, id: \.self) { Text($0) } }.pickerStyle(.menu)
             Toggle("Plugins (highlight recovery, vignette)", isOn: $model.pluginsOn)
             Button(action: model.shoot) {
                 Text(model.busy ? "Working…" : "Shoot RAW").frame(maxWidth: .infinity).padding()

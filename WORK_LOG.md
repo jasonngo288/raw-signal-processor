@@ -310,3 +310,15 @@ Defaults differ per model (sharpness, contrast, NR, shadowBias) → must be stor
 - **Evidence (user's device):** the demo app launched; pressing Shoot RAW crashed with `NSInvalidArgumentException: -[AVCapturePhotoSettings setPhotoQualityPrioritization:] Unsupported when capturing RAW`.
 - **Fix:** `photoQualityPrioritization = .quality` is now set only on the HEIC-only fallback. With RAW + HEIC, the HEIC uses AVFoundation's default prioritisation. Note: the paired HEIC is therefore not guaranteed to be Apple's maximum-quality ("Deep Fusion") render, which matters when comparing against it.
 - **Unverified:** the rest of the capture → develop path on device; awaiting the user's next run.
+
+## 2026-11-08 — First device captures audited (output/, iPhone 14 Pro, iOS 26.5.2)
+- **Data:** 2 shots pushed by the user (`output/2026-11-08T11-32-13Z`, `…11-33-23Z`): Bayer RAW `bgg4` 4032×3024 + same-press HEIC, ISO 200, no stock, plugins on (shot 1) / off (shot 2).
+- **Works:** capture → develop end to end on device; recipe complete (decoder 8 by policy, no calibration entry for iPhone15,2 → DNG matrices); export is 10-bit HEIC P3 (Apple's is 8-bit); Vision person mask found the person (3.6 %, 24.2 %), faces 0 % because the subject faces away (correct).
+- **Finding 1 (important):** our render is brighter than the camera HEIC: median +0.63 EV (shot 1) and +0.31 EV (shot 2) on mid-tones, +0.4 EV on highlights. Clipped pixels: 2.6 % (shot 1, highlightRecovery on) and 7.1 % (shot 2, plugins off) vs 0.35 % for the camera HEIC (ceiling light and upper wall blow out in shot 2). Cause: our reference for "≥ Apple" is the CIRAWFilter default decode, not the camera's own HEIC, which applies Smart HDR local tone mapping and a lower exposure. Next step proposed: use the same-press HEIC as a second reference (exposure/tone match), measured, before any change.
+- **Finding 2:** shot 2 shows exactly what the highlightRecovery plugin is for; it was unplugged there.
+- **Minor:** the recipe logs "skin protection 0.50" even when no look is applied (it has no effect then).
+
+## 2026-11-08 — Drop 2026 presets `PRESET_26_*` (7 stocks)
+- **What:** `Presets2026.swift`: 7 parametric presets from the brief (cpm35, portra-160, fuji-400h, kodachrome-64, grd-r, palm-springs, social-pop) as `FilmStock`s named `PRESET_26_*`. Spec params used as given; curve direction provisional (`curveLocked = false`). `FilmStock` now has a `source` (built-in look or preset) and `minSkinProtection` (spec `skinProtect`). App stock picker is a menu (11 stocks). Docs: docs/PRESETS_2026.md (mapping assumptions, open questions).
+- **Evidence:** LUT properties checked with a Python port before CI (monotone grey, white ≤ 0.98, cast ≤ 2 %, no shadow blow-up); Swift tests in Presets2026Tests. CI: pending.
+- **Unverified:** looks on real photos (bench renders all 7 on originals + corpus in CI); the 5-fixture tuning set.
