@@ -23,6 +23,15 @@ jobs:
           for scheme in RawCore CaptureKit; do
             xcodebuild build -scheme "$scheme" -destination 'generic/platform=iOS' -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO -quiet 2>&1 | tail -40
           done
+      - name: Demo app (XcodeGen → xcodebuild for iOS, no signing)
+        run: |
+          set -o pipefail
+          brew install xcodegen >/dev/null
+          cd App && xcodegen generate
+          xcodebuild build -project RawFilmDemo.xcodeproj -scheme RawFilmDemo -destination 'generic/platform=iOS' \
+            -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO -quiet 2>&1 | tail -40
+          tar czf ../xcodeproj.tgz RawFilmDemo.xcodeproj RawFilmDemo/Info.plist
+          echo "XCODEPROJ_BEGIN"; base64 -i ../xcodeproj.tgz | fold -w 4000; echo "XCODEPROJ_END"
       - name: Test
         run: |
           set -o pipefail

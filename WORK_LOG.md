@@ -2,6 +2,14 @@
 
 Newest first. Each entry: what changed, why, evidence, what is NOT verified yet.
 
+## 2026-11-08 — Demo iOS app to run the pipeline on a device (user: "how do I run it in Xcode")
+**What**: `App/` — XcodeGen spec (`project.yml`) + SwiftUI app RawFilmDemo: camera preview, stock picker,
+plugins toggle, "Shoot RAW" → CaptureService (Bayer RAW + HEIC, one press) → Developer (auto + stock) → per-shot folder in
+Documents (capture.dng, apple.heic, capture.json, developed.heic, developed.recipe.json), visible in the Files app
+(UIFileSharingEnabled). CI generates the project and builds it for iOS (no signing); the generated .xcodeproj is
+committed so XcodeGen is optional for the user.
+**Not verified**: until CI; never run on a device (needs the user's signing team and an iPhone).
+
 ## 2026-11-08 — Fixes from the second audit
 Second audit (subagent) found the ROADMAP broadly honest (items 6/12 slightly overstated) and these problems; fixed:
 - Calibration lookup used the marketing name and a substring fallback ("iPhone 13 Pro" could serve a Pro Max).

@@ -1,0 +1,35 @@
+# XcodeGen spec for the demo app. Generate with:  brew install xcodegen && cd App && xcodegen generate
+name: RawFilmDemo
+options:
+  bundleIdPrefix: com.example.rawfilm
+  deploymentTarget:
+    iOS: "17.0"
+packages:
+  RawSignalProcessor:
+    path: ..
+targets:
+  RawFilmDemo:
+    type: application
+    platform: iOS
+    sources: [RawFilmDemo]
+    dependencies:
+      - package: RawSignalProcessor
+        product: RawCore
+      - package: RawSignalProcessor
+        product: CaptureKit
+    info:
+      path: RawFilmDemo/Info.plist
+      properties:
+        CFBundleDisplayName: RawFilm
+        NSCameraUsageDescription: "The camera captures Bayer RAW photos that the app develops into film."
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIRequiredDeviceCapabilities: [arm64]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.rawfilm.demo
+        SWIFT_VERSION: "5.0"
+        CODE_SIGN_STYLE: Automatic
+        TARGETED_DEVICE_FAMILY: "1"
