@@ -63,7 +63,14 @@ public struct HighlightRecoveryPlugin: DevelopPlugin {
     public init() {}
 
     public func decide(context: SceneContext, settings: inout RenderSettings) -> [String] {
-        HighlightRecoveryRule.decide(context: context, settings: &settings)
+        // Without CIToneMapHeadroom (iOS 17) an EDR decode would only clip harder: do not ask for it at all,
+        // so the recipe stays truthful and no extra decodes are spent.
+        guard CIFilter(name: "CIToneMapHeadroom") != nil else {
+            var probe = settings
+            let would = HighlightRecoveryRule.decide(context: context, settings: &probe)
+            return probe.toneMapSourceHeadroom == nil ? would : ["would recover highlights but CIToneMapHeadroom is unavailable on this OS: skipped"]
+        }
+        return HighlightRecoveryRule.decide(context: context, settings: &settings)
     }
 
     public func afterDecode(_ image: CIImage, settings st: RenderSettings, ctx: PluginRenderContext) throws -> (CIImage, [String]) {

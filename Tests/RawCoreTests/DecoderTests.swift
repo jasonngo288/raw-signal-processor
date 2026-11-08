@@ -75,8 +75,10 @@ final class DecoderTests: XCTestCase {
         var coreSettings = RenderSettings.explicit
         coreSettings.plugins = []
         let core = try dev.develop(url: url, settings: coreSettings, auto: true, scaleFactor: scale, analysis: an)
-        XCTAssertEqual(full.recipe.plugins, ["highlightRecovery", "vignette"])
+        XCTAssertEqual(full.recipe.pluginsEnabled, ["highlightRecovery", "vignette"])
+        XCTAssertEqual(full.recipe.plugins, ["highlightRecovery"], "vignette had nothing to do without a stock")
         XCTAssertEqual(core.recipe.plugins, [])
+        XCTAssertEqual(core.recipe.pluginsEnabled, [])
         XCTAssertEqual(core.recipe.effective.extendedDynamicRangeAmount, 0, "no EDR without the plugin")
         XCTAssertFalse(core.recipe.decisions.contains { $0.hasPrefix("[highlightRecovery]") })
         XCTAssertEqual(core.recipe.decoderVersionSource, "policy")
@@ -104,6 +106,31 @@ final class DecoderTests: XCTestCase {
             maxChroma = max(maxChroma, max(r, g, b) - min(r, g, b))
         }
         XCTAssertLessThan(maxChroma, 0.02, "mono output stays neutral everywhere")
+    }
+
+    /// Skin protection must actually reduce how much a look changes people (and leave the rest alone).
+    func testSkinProtectionReducesLookOnPeople() throws {
+        let url = try XCTUnwrap(try files().first { $0.lastPathComponent == "USER_mooncake.dng" })
+        let dev = Developer(plugins: .none)
+        let an = try dev.analyze(url: url)
+        guard let mask = an.personMask, (an.context.personFraction ?? 0) > 0.03 else { throw XCTSkip("no person mask on this runner") }
+        let scale = try dev.decoder.scaleFactor(url: url, longEdge: 384)
+        let base = try dev.develop(url: url, settings: .explicit, auto: true, scaleFactor: scale, analysis: an)
+        var on = RenderSettings.explicit; on.stock = "warm400"; on.finish = .none
+        var off = on; off.skinProtection = 0
+        let a = try dev.develop(url: url, settings: on, auto: true, scaleFactor: scale, analysis: an)
+        let b = try dev.develop(url: url, settings: off, auto: true, scaleFactor: scale, analysis: an)
+        let e = base.image.extent
+        let size = (Int(e.width), Int(e.height))
+        let me = mask.extent
+        let m = try dev.renderer.linearImage(mask.transformed(by: CGAffineTransform(scaleX: e.width / me.width, y: e.height / me.height)), size: size)
+        let people = (0..<(size.0 * size.1)).map { m.pixels[$0 * 3] > 0.25 }
+        let ref = try dev.renderer.linearImage(base.image, size: size)
+        let ca = try ComparisonMetrics.compare(candidate: dev.renderer.linearImage(a.image, size: size), reference: ref, mask: people)
+        let cb = try ComparisonMetrics.compare(candidate: dev.renderer.linearImage(b.image, size: size), reference: ref, mask: people)
+        print("[skin] on: people \(ca.deltaE00MeanMasked ?? -1) rest \(ca.deltaE00MeanOutsideMask ?? -1); off: people \(cb.deltaE00MeanMasked ?? -1) rest \(cb.deltaE00MeanOutsideMask ?? -1)")
+        XCTAssertLessThan(try XCTUnwrap(ca.deltaE00MeanMasked), try XCTUnwrap(cb.deltaE00MeanMasked) * 0.85)
+        XCTAssertEqual(try XCTUnwrap(ca.deltaE00MeanOutsideMask), try XCTUnwrap(cb.deltaE00MeanOutsideMask), accuracy: 0.3)
     }
 
     func testLinearExposureAndCalibrationLookup() throws {

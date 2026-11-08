@@ -181,8 +181,10 @@ public struct DecodeRecipe: Codable, Equatable, Sendable {
     public var exposureTime: Double?
     public var osVersion: String
     public var decisions: [String]
-    /// Plugins that ran for this render (empty = core pipeline only).
+    /// Plugins that actually changed something in this render (empty = core pipeline result).
     public var plugins: [String] = []
+    /// Plugins that were enabled for this render (whether or not they had anything to do).
+    public var pluginsEnabled: [String] = []
     /// Calibration entry used ("iPhone14,3 v1"), or why none was used.
     public var calibration: String? = nil
     /// How the decoder version was chosen ("policy", "requested", "Apple default").

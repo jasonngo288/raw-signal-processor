@@ -37,10 +37,21 @@ public struct CalibrationTable: Codable, Equatable, Sendable {
         return t
     }
 
-    /// Exact match on the camera string, then on a contained model identifier.
-    public func entry(for camera: String?) -> ModelCalibration? {
-        guard let camera, !camera.isEmpty else { return nil }
-        return models.first { $0.model == camera } ?? models.first { camera.contains($0.model) }
+    /// Exact match only (no substring guessing: an "iPhone 13 Pro" entry must never serve a Pro Max).
+    /// Candidates, in order: model identifier ("iPhone14,3"), DNG UniqueCameraModel, "Make Model" camera string.
+    public func entry(forAny candidates: [String?]) -> ModelCalibration? {
+        for c in candidates.compactMap({ $0 }).filter({ !$0.isEmpty }) {
+            if let m = models.first(where: { $0.model == c }) { return m }
+        }
+        return nil
+    }
+
+    public func entry(for camera: String?) -> ModelCalibration? { entry(forAny: [camera]) }
+
+    /// Candidate keys for a file: identifier token of UniqueCameraModel ("iPhone14,3 back camera" → "iPhone14,3"),
+    /// the full UniqueCameraModel, then "Make Model".
+    public static func candidates(uniqueCameraModel: String?, camera: String?) -> [String?] {
+        [uniqueCameraModel.flatMap { $0.split(separator: " ").first.map(String.init) }, uniqueCameraModel, camera]
     }
 }
 

@@ -159,6 +159,7 @@ func benchFile(_ url: URL, entry: CorpusEntry?, outDir: URL, longEdge: Int, full
         return Variant(name: "auto+\(stock.name)", settings: st, auto: true)
     }
     let hasPeople = (analysis.context.personFraction ?? 0) >= DecisionEngine.Threshold.personFraction
+        || (analysis.context.largestFaceArea ?? 0) >= DecisionEngine.Threshold.faceArea
     if hasPeople {
         var st = RenderSettings(mode: .explicit)
         st.stock = "warm400"; st.skinProtection = 0
@@ -218,8 +219,11 @@ func benchFile(_ url: URL, entry: CorpusEntry?, outDir: URL, longEdge: Int, full
         for v in [Variant(name: "appleDefault", settings: .appleDefault, auto: false)] + variants.filter({ ["auto+warm400", "auto+night800"].contains($0.name) }) {
             let o = try dev.develop(url: url, settings: v.settings, auto: v.auto, scaleFactor: 1, analysis: analysis)
             let e = o.image.extent
-            let crop = o.image.cropped(to: CGRect(x: e.midX - 320, y: e.midY - 320, width: 640, height: 640))
-            _ = try save(crop, recipe: o.recipe, name: "\(stem)__crop100__\(v.name.replacingOccurrences(of: "+", with: "_"))", outDir: outDir, quality: 0.9)
+            let rect = CGRect(x: e.midX - 320, y: e.midY - 320, width: 640, height: 640)
+            let crop = o.image.cropped(to: rect)
+            var rec = o.recipe
+            rec.decisions.append("bench crop: 640x640 at (\(Int(rect.minX)), \(Int(rect.minY))) of the full-resolution render")
+            _ = try save(crop, recipe: rec, name: "\(stem)__crop100__\(v.name.replacingOccurrences(of: "+", with: "_"))", outDir: outDir, quality: 0.9)
         }
     }
     if full {
@@ -294,6 +298,8 @@ func run() throws -> Int32 {
     if let c = a.options["calibration"] { dev.calibration = try CalibrationTable.load(URL(fileURLWithPath: c)) }
     if let p = a.options["plugins"] {   // unplug from the CLI: --plugins none | id,id
         let ids = p == "none" ? [] : p.split(separator: ",").map(String.init)
+        let known = Set(dev.plugins.available.map(\.id))
+        if let bad = ids.first(where: { !known.contains($0) }) { throw RawCoreError.invalidSettings("unknown plugin \(bad)") }
         dev.plugins.defaultEnabled = ids
     }
     switch cmd {

@@ -31,7 +31,10 @@ public struct RawDecoder {
         var versionSource = settings.decoderVersion != nil ? "requested" : "Apple default"
         if settings.mode != .appleDefault {
             // Pin the version: requested, else the fixed DecoderPolicy list, never "whatever this OS defaults to".
-            if settings.decoderVersion == nil, let pinned = DecoderPolicy.pick(supported: supported) {
+            if settings.decoderVersion == nil {
+                guard let pinned = DecoderPolicy.pick(supported: supported) else {
+                    throw RawCoreError.unsupportedDecoderVersion(requested: "policy \(DecoderPolicy.preferred)", supported: supported)
+                }
                 versionSource = "policy"
                 if pinned != version { (filter, defaults, support, version, supported) = try inspect(url: url, decoderVersion: pinned) }
             }

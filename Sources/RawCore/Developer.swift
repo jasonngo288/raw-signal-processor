@@ -48,6 +48,9 @@ public final class Developer: @unchecked Sendable {
     /// explicit EDR 512 px (highlight headroom, only when the highlightRecovery plugin is available).
     public func analyze(url: URL, decoderVersion: String? = nil) throws -> Analysis {
         let t0 = Date()
+        // Measure on the same decoder version the render will use (requested, else DecoderPolicy).
+        let supported = try decoder.inspect(url: url).supported
+        let decoderVersion = decoderVersion ?? DecoderPolicy.pick(supported: supported)
         let s512 = try decoder.scaleFactor(url: url, longEdge: 512)
         let lin = try decoder.decode(url: url, settings: RenderSettings(mode: .sceneLinear, decoderVersion: decoderVersion), scaleFactor: s512)
         var c = SceneContext.measure(sceneLinear: try renderer.linearImage(lin.image), iso: lin.recipe.iso)
@@ -69,7 +72,7 @@ public final class Developer: @unchecked Sendable {
         }
         #endif
 
-        if plugins.available.contains(where: { $0.id == "highlightRecovery" }) {
+        if plugins.defaultEnabled.contains("highlightRecovery") {   // plugin work only when the plugin is on
             var edr = RenderSettings(mode: .explicit, decoderVersion: decoderVersion)
             edr.extendedDynamicRangeAmount = 1
             let e = try decoder.decode(url: url, settings: edr, scaleFactor: s512)
@@ -79,12 +82,15 @@ public final class Developer: @unchecked Sendable {
                         seconds: Date().timeIntervalSince(t0), personMask: mask)
     }
 
-    /// Camera string ("Apple iPhone 13 Pro Max") used to look up the calibration table.
-    func camera(_ url: URL) throws -> String? {
-        let tiff = try decoder.inspect(url: url).filter.properties[kCGImagePropertyTIFFDictionary as String] as? [String: Any]
-        let s = [tiff?[kCGImagePropertyTIFFMake as String] as? String, tiff?[kCGImagePropertyTIFFModel as String] as? String]
+    /// Calibration keys for a file: model identifier, DNG UniqueCameraModel, "Make Model".
+    func cameraKeys(_ url: URL) throws -> [String?] {
+        let props = try decoder.inspect(url: url).filter.properties
+        let tiff = props[kCGImagePropertyTIFFDictionary as String] as? [String: Any]
+        let dng = props[kCGImagePropertyDNGDictionary as String] as? [String: Any]
+        let cam = [tiff?[kCGImagePropertyTIFFMake as String] as? String, tiff?[kCGImagePropertyTIFFModel as String] as? String]
             .compactMap { $0 }.joined(separator: " ")
-        return s.isEmpty ? nil : s
+        return CalibrationTable.candidates(uniqueCameraModel: dng?[kCGImagePropertyDNGUniqueCameraModel as String] as? String,
+                                           camera: cam.isEmpty ? nil : cam)
     }
 
     /// Develop with fixed settings, or with `auto` (analysis + DecisionEngine + plugin rules on top of `settings`).
@@ -94,6 +100,7 @@ public final class Developer: @unchecked Sendable {
         var ctx: SceneContext?
         var personMask: CIImage?
         let active = try plugins.active(for: settings)
+        var ran = Set<String>()   // plugins that actually did something (recipe.plugins)
         if auto {
             let a = try analysis ?? analyze(url: url, decoderVersion: settings.decoderVersion)
             // Everything the caller set is kept; DecisionEngine only adds/overrides bounded decode values.
@@ -102,7 +109,12 @@ public final class Developer: @unchecked Sendable {
             let d = DecisionEngine.decide(context: a.context, defaults: a.defaults, support: a.support, base: base)
             st = d.settings
             reasons = d.reasons
-            for p in active { reasons += p.decide(context: a.context, settings: &st).map { "[\(p.id)] " + $0 } }
+            for p in active {
+                let before = st
+                let why = p.decide(context: a.context, settings: &st)
+                if st != before { ran.insert(p.id) }
+                reasons += why.map { "[\(p.id)] " + $0 }
+            }
             reasons.append(String(format: "analysis %.2fs", a.seconds))
             ctx = a.context
             personMask = a.personMask
@@ -111,18 +123,18 @@ public final class Developer: @unchecked Sendable {
         // Per-model calibration: CCM + exposure offset inside linearSpaceFilter (scene-linear).
         var calibrationNote: String?
         if st.mode != .appleDefault, st.useCalibration ?? true, st.ccm == nil, st.linearExposureEV == nil {
-            let cam = try camera(url)
-            if let entry = calibration.entry(for: cam) {
+            let keys = try cameraKeys(url)
+            if let entry = calibration.entry(forAny: keys) {
                 st.ccm = entry.ccm
                 st.linearExposureEV = entry.exposureOffsetEV
                 calibrationNote = "\(entry.model) \(entry.version) (\(entry.source))"
             } else {
-                calibrationNote = "none for \(cam ?? "unknown camera"): DNG matrices"
+                calibrationNote = "none for \(keys.compactMap { $0 }.joined(separator: " / ")): DNG matrices"
             }
         }
 
         var out = try decoder.decode(url: url, settings: st, scaleFactor: scaleFactor, decisions: reasons)
-        out.recipe.plugins = active.map(\.id)
+        out.recipe.pluginsEnabled = active.map(\.id)
         out.recipe.calibration = calibrationNote
         let decodedSettings = st
         let dec = decoder
@@ -136,22 +148,27 @@ public final class Developer: @unchecked Sendable {
         for p in active {
             let (img, why) = try p.afterDecode(image, settings: st, ctx: pctx)
             image = img
+            if !why.isEmpty { ran.insert(p.id) }
             out.recipe.decisions += why.map { "[\(p.id)] " + $0 }
         }
 
         // Look (stock supplies look, intensity and finish unless set explicitly).
         let stock = st.stock.flatMap(FilmStock.named)
         let beforeLook = image
-        var looked = false
+        var appliedLUT: CubeLUT?
         if let lut = try renderer.resolveLook(st.look) {
-            image = try renderer.applyLook(lut, to: image, intensity: st.lookIntensity); looked = true
+            image = try renderer.applyLook(lut, to: image, intensity: st.lookIntensity); appliedLUT = lut
         } else if let stock {
-            image = try renderer.applyLook(stock.look.lut(), to: image, intensity: stock.lookIntensity); looked = true
+            let lut = stock.look.lut()
+            image = try renderer.applyLook(lut, to: image, intensity: stock.lookIntensity); appliedLUT = lut
         }
-        // Skin / subject protection: on people, hold part of the look back.
-        let monoLook = st.look == BuiltInLook.mono.rawValue || (st.look == nil && stock?.look == .mono)
-        if let s = st.skinProtection, s > 0, looked, monoLook || !(stock?.allowsSkinProtection ?? true) {
-            out.recipe.decisions.append("skin protection skipped: \(stock?.name ?? "mono look") is black and white (colour skin in a mono frame)")
+        let looked = appliedLUT != nil
+        // Skin / subject protection: on people, hold part of the look back — never for a black-and-white look
+        // (judged from the LUT actually applied, so a mono .cube counts too).
+        let stockLookUsed = st.look == nil && stock != nil
+        let noProtection = (appliedLUT?.isMonochrome ?? false) || (stockLookUsed && !(stock?.allowsSkinProtection ?? true))
+        if let s = st.skinProtection, s > 0, looked, noProtection {
+            out.recipe.decisions.append("skin protection skipped: the applied look is black and white (colour skin in a mono frame)")
         } else if let s = st.skinProtection, s > 0, looked {
             if let personMask {
                 image = renderer.protectSkin(looked: image, base: beforeLook, mask: personMask, strength: s)
@@ -170,8 +187,10 @@ public final class Developer: @unchecked Sendable {
         for p in active {
             let (img, why) = try p.afterFinish(image, settings: st, finish: finish, ctx: pctx)
             image = img
+            if !why.isEmpty { ran.insert(p.id) }
             out.recipe.decisions += why.map { "[\(p.id)] " + $0 }
         }
+        out.recipe.plugins = active.map(\.id).filter { ran.contains($0) }
         return Output(image: image, recipe: out.recipe, context: ctx)
     }
 }

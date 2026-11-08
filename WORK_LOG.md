@@ -2,6 +2,24 @@
 
 Newest first. Each entry: what changed, why, evidence, what is NOT verified yet.
 
+## 2026-11-08 — Fixes from the second audit
+Second audit (subagent) found the ROADMAP broadly honest (items 6/12 slightly overstated) and these problems; fixed:
+- Calibration lookup used the marketing name and a substring fallback ("iPhone 13 Pro" could serve a Pro Max).
+  Now exact match on model identifier (from DNG UniqueCameraModel), full UniqueCameraModel, then camera name.
+- Analysis decodes used the OS default decoder while renders used the policy version: now the same pinned version;
+  explicit modes throw if the file supports no policy version.
+- highlightRecovery left a wrong recipe (EDR 1) when CIToneMapHeadroom is missing: the plugin now does not request
+  EDR at all there (logged).
+- Mono detection only knew the built-in name: now judged from the applied LUT (`CubeLUT.isMonochrome`).
+- `recipe.plugins` listed enabled plugins: now only the ones that changed something; `recipe.pluginsEnabled` added.
+  EDR analysis runs only when highlightRecovery is enabled. CLI rejects unknown plugin ids up front.
+- CaptureService: exposure facts from the photo's EXIF (not live device values), per-photo errors kept, a failed
+  RAW is an error, RAW format taken from the request, refuses to capture without a running session (avoids an
+  ObjC exception), `.quality` so the HEIC reference is Apple's best.
+- Bench: people check includes faces ≥ 1 %; crop recipes record the crop rectangle.
+- New test `testSkinProtectionReducesLookOnPeople` (the protection path was only tested for its skip case).
+**Not verified**: until the next CI run.
+
 ## 2026-11-08 — Roadmap = user's architecture; extras become plugins; gaps filled
 **Why**: user set the architecture (docs/ROADMAP.md) as the roadmap, asked to fill what is missing, keep extras
 highlighted for later, make extras pluggable, then re-audit and re-test. Audit (subagent, 2026-11-08) found:

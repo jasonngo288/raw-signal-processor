@@ -77,6 +77,12 @@ public struct CubeLUT: Equatable, Sendable {
         try parse(String(contentsOf: url, encoding: .utf8))
     }
 
+    /// True if the LUT maps saturated inputs to (near) neutral output: a black-and-white look.
+    public var isMonochrome: Bool {
+        let probes: [SIMD3<Float>] = [SIMD3(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1), SIMD3(0.8, 0.5, 0.3), SIMD3(0.2, 0.4, 0.7)]
+        return probes.allSatisfy { let o = apply($0); return o.max() - o.min() < 0.02 }
+    }
+
     /// Trilinear lookup (CPU reference for tests and previews).
     public func apply(_ c: SIMD3<Float>) -> SIMD3<Float> {
         let s = Float(size - 1)
