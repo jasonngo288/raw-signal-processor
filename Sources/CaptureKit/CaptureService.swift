@@ -94,9 +94,10 @@ public final class CaptureService: NSObject, AVCapturePhotoCaptureDelegate, @unc
         } else {
             settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.hevc])
         }
-        // .quality: the HEIC is the reference for "at least as good as Apple", so let Apple do its best.
-        // (Bayer RAW is a single frame either way.)
-        settings.photoQualityPrioritization = .quality
+        // AVFoundation raises NSInvalidArgumentException if photoQualityPrioritization is set on RAW settings
+        // (found on device 2026-11-08). Only the HEIC-only fallback asks for .quality; with RAW the processed
+        // HEIC uses the output's default prioritisation.
+        if raw == nil { settings.photoQualityPrioritization = .quality }
         settings.flashMode = .off
         lock.lock(); pending[settings.uniqueID] = Pending(rawFormat: raw, completion: completion); lock.unlock()
         output.capturePhoto(with: settings, delegate: self)
