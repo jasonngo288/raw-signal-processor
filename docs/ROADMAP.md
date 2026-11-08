@@ -24,8 +24,8 @@ Status legend: ✅ done and tested in CI · 🟡 partial · ⏳ needs a device /
 
 | # | Roadmap item | Status | Where | Notes / what is left |
 |---|---|---|---|---|
-| 1 | AVFoundation Bayer RAW, wide camera | 🟡 ⏳ | `Sources/CaptureKit/CaptureService.swift` | Compiles for iOS in CI; never run on a device yet. No app UI. Exposure facts come from the photo's own EXIF; a failed RAW is an error, not a silent fallback. |
-| 2 | HEIC from the same press as reference | 🟡 ⏳ | same (`processedFormat: hevc` in one `AVCapturePhotoSettings`) | Bench still uses Apple's CIRAWFilter decode as reference until device captures exist. |
+| 1 | AVFoundation Bayer RAW, wide camera | ✅ (device) | `Sources/CaptureKit/CaptureService.swift` | Compiles for iOS in CI; never run on a device yet. No app UI. Exposure facts come from the photo's own EXIF; a failed RAW is an error, not a silent fallback. |
+| 2 | HEIC from the same press as reference | ✅ (device, `raw-bench pairs`, cameraMatch) | same (`processedFormat: hevc` in one `AVCapturePhotoSettings`) | Bench still uses Apple's CIRAWFilter decode as reference until device captures exist. |
 | 3 | Analysis on a small render, in background | ✅ | `Developer.analyze`, `analyzeInBackground` | Stats + histogram at 512 px; **Vision at 1024 px** (faces/people missed at 512, WORK_LOG 2026-11-07). |
 | 4 | Vision: scene, faces, person mask, saliency | ✅ | `VisionAnalyzer.enrich` | Each request independent; failure leaves only its fields nil. |
 | 5 | CIAreaHistogram | ✅ | `Renderer.lumaHistogram` | 64 bins of display-encoded luminance (log-like). Pure-Swift percentiles kept for the rules. |
@@ -41,7 +41,7 @@ Status legend: ✅ done and tested in CI · 🟡 partial · ⏳ needs a device /
 | 15 | heif10Representation, P3, recipe JSON | ✅ | `Renderer.export(recipe:)`, bench `save()` | Recipe embedded in EXIF UserComment by `Renderer.export`; the sidecar .recipe.json is written by the caller (bench/CLI). |
 
 ## Order of the remaining work
-1. Device: run CaptureService on an iPhone (14 Pro / 15 Pro first), keep DNG + HEIC pairs; bench against the paired HEIC.
+1. ~~Device run + bench against the paired HEIC~~ done 2026-11-08 on iPhone 14 Pro (2 pairs; need ~30 incl. night, ProRAW).
 2. Lab: ColorChecker under D65 / A per model → fill `calibration/models.json` → Gate 3 (ΔE00 < 2 across models).
 3. ~~Context-driven look intensity~~ done 2026-11-08 (saliency still unused).
 4. On-device performance (iPhone 12 floor) → decide on Metal kernels for grain/halation.
