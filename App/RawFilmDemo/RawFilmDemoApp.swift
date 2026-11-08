@@ -91,6 +91,8 @@ final class CameraModel: ObservableObject {
         var settings = RenderSettings(mode: .explicit)
         settings.stock = stock == "none" ? nil : stock
         settings.plugins = pluginsOn ? nil : []
+        // Same-press camera HEIC as the brightness/tone reference (cameraMatch plugin).
+        if cap.heic != nil { settings.cameraReference = dir.appendingPathComponent("apple.heic").path }
         let out = try developer.develop(url: dngURL, settings: settings, auto: true, scaleFactor: 1)
         let data = try developer.renderer.export(out.image, format: .heic10, recipe: out.recipe)
         try data.write(to: dir.appendingPathComponent("developed.heic"))

@@ -328,3 +328,16 @@ Defaults differ per model (sharpness, contrast, NR, shadowBias) → must be stor
 - **Prototype first (Python, on the pairs' developed.heic vs apple.heic, 1008 px, aligned: best shift 0):** a global quantile tone curve alone gives mid EV 0.00 on both; shot 1 clipping 2.1 → 0 %, ΔE76 9.9 → 3.7; shot 2 clipping only 6.6 → 4.9 % (pixels already clipped in our SDR decode cannot come back). → Two stages: exposure offset **in the decode**, then the curve.
 - **What:** `ToneMatch.swift` (pure: histogram quantiles, mid-tone exposure offset bounded −1…+0.5 EV, monotone gain-bounded curve, hue-preserving LUT). `CameraMatchPlugin` (plugin per AGENTS rule 9, default on, no-op without `RenderSettings.cameraReference`). `raw-bench pairs <dir>` compares renders with the camera HEIC; CI runs it on `output/`. Tests: ToneMatchTests (math, Python-checked) + `testCameraMatchOnDevicePairs` (median EV vs HEIC < 0.15 and closer than without; clipping not higher).
 - **Not done yet:** the demo app does not pass `cameraReference` yet (next commit, after CI numbers). Smart HDR is local tone mapping; this is global only, so local differences (sky vs face) remain.
+
+## 2026-11-08 — cameraMatch results + fix; app passes the HEIC
+- **CI 42490482126 (53/53 tests, Gates unchanged PASS), `raw-bench pairs output`:**
+  | pair | variant | mid EV vs HEIC | ΔE00 vs HEIC | clipped % (HEIC 0.20 / 0.18) |
+  |---|---|---|---|---|
+  | 11-32-13 | before (auto, no match) | +0.47 | 7.51 | 5.62 |
+  | 11-32-13 | auto+cameraMatch | +0.00 | 3.36 | 0.32 |
+  | 11-33-23 | before | +0.43 | 7.22 | 4.88 |
+  | 11-33-23 | auto+cameraMatch | +0.00 | 5.11 | 0.20 |
+  Exposure stage −0.42 / −0.47 EV; curve max shift 0.14 / 0.10.
+- **Artifact found in the previews:** a bright oval on the upper wall with cameraMatch only. highlightRecovery had decided a 1.36× tone-map headroom at the old exposure; after −0.42 EV that headroom no longer exists. **Fix:** cameraMatch rescales the planned headroom by 2^offset and drops the highlight tone map (logged) when it falls under 1.15×. Test asserts no tone map in that case. To verify in the next CI previews.
+- **App:** `settings.cameraReference = apple.heic` when the capture has a HEIC, so device renders use cameraMatch.
+- **Not solved:** Smart HDR is local; we are global. ΔE 3.4–5.1 left (local contrast, colour), black p1 slightly off.

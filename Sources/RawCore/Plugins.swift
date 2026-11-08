@@ -127,7 +127,22 @@ public struct CameraMatchPlugin: DevelopPlugin {
         guard abs(off) >= 0.05 else { return [String(format: "camera HEIC mid-tones within %.2f EV: no exposure change", off)] }
         let before = settings.exposure ?? 0
         settings.exposure = before + Float(off)
-        return [String(format: "camera HEIC mid-tones %+.2f EV vs Apple's default render -> exposure %.2f -> %.2f (bounded -1...+0.5)", off, before, before + Float(off))]
+        var why = [String(format: "camera HEIC mid-tones %+.2f EV vs Apple's default render -> exposure %.2f -> %.2f (bounded -1...+0.5)", off, before, before + Float(off))]
+        // highlightRecovery decided its tone-map headroom at the old exposure. Rescale it; when the exposure change
+        // already brings the highlights under white, drop the tone map (it would map headroom that is no longer
+        // there: bright blotch on the wall in run 42490482126).
+        if let h = settings.toneMapSourceHeadroom {
+            let nh = h * pow(2, Float(off))
+            if Double(nh) < HighlightRecoveryRule.minHeadroom {
+                settings.toneMapSourceHeadroom = nil; settings.extendedDynamicRangeAmount = nil
+                settings.highlightClarity = nil; settings.highlightRecoveryLocal = nil
+                why.append(String(format: "highlight headroom %.2fx -> %.2fx after the exposure change: highlight tone map dropped (exposure already recovers them)", h, nh))
+            } else {
+                settings.toneMapSourceHeadroom = nh
+                why.append(String(format: "highlight tone-map headroom rescaled %.2fx -> %.2fx for the new exposure", h, nh))
+            }
+        }
+        return why
     }
 
     public func afterDecode(_ image: CIImage, settings st: RenderSettings, ctx: PluginRenderContext) throws -> (CIImage, [String]) {
