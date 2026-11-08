@@ -67,6 +67,11 @@ public struct RenderSettings: Codable, Equatable, Sendable {
     public var useCalibration: Bool?
     /// Plugins to run (ids from `PluginRegistry`). nil = the developer's default set, [] = none.
     public var plugins: [String]?
+    /// Path of the camera's own HEIC from the same shutter press (CaptureKit `apple.heic`). With the cameraMatch
+    /// plugin, our exposure and tones are matched to it. Not a decode override by itself.
+    public var cameraReference: String?
+    /// 0...1 strength of the cameraMatch tone curve (nil = 1). The exposure offset is always applied in full.
+    public var cameraMatchStrength: Float?
 
     public init(mode: Mode = .appleDefault, decoderVersion: String? = nil, look: String? = nil, lookIntensity: Float = 1) {
         self.mode = mode
@@ -89,6 +94,7 @@ public struct RenderSettings: Codable, Equatable, Sendable {
         if let p = skinProtection, !(0...1).contains(p) { throw RawCoreError.invalidSettings("skinProtection must be in 0...1") }
         if let e = linearExposureEV, !(-4...4).contains(e) { throw RawCoreError.invalidSettings("linearExposureEV must be in -4...4") }
         if let c = highlightClarity, !(0...1).contains(c) { throw RawCoreError.invalidSettings("highlightClarity must be in 0...1") }
+        if let m = cameraMatchStrength, !(0...1).contains(m) { throw RawCoreError.invalidSettings("cameraMatchStrength must be in 0...1") }
         if !(0...1).contains(lookIntensity) { throw RawCoreError.invalidSettings("lookIntensity must be in 0...1") }
         if mode == .appleDefault && hasOverrides {
             throw RawCoreError.invalidSettings("appleDefault mode must not carry parameter overrides; use explicit")

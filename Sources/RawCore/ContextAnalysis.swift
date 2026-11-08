@@ -66,7 +66,7 @@ public struct SceneContext: Codable, Equatable, Sendable {
 }
 
 extension LinearImage {
-    func pixelsLuminanceUnclamped() -> [Float] {
+    public func pixelsLuminanceUnclamped() -> [Float] {
         (0..<pixelCount).map { ColorMath.luminance(r: max(pixels[$0 * 3], 0), g: max(pixels[$0 * 3 + 1], 0), b: max(pixels[$0 * 3 + 2], 0)) }
     }
 }

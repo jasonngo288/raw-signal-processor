@@ -75,7 +75,7 @@ final class DecoderTests: XCTestCase {
         var coreSettings = RenderSettings.explicit
         coreSettings.plugins = []
         let core = try dev.develop(url: url, settings: coreSettings, auto: true, scaleFactor: scale, analysis: an)
-        XCTAssertEqual(full.recipe.pluginsEnabled, ["highlightRecovery", "vignette"])
+        XCTAssertEqual(full.recipe.pluginsEnabled, ["highlightRecovery", "cameraMatch", "vignette"])
         XCTAssertEqual(full.recipe.plugins, ["highlightRecovery"], "vignette had nothing to do without a stock")
         XCTAssertEqual(core.recipe.plugins, [])
         XCTAssertEqual(core.recipe.pluginsEnabled, [])
@@ -87,6 +87,41 @@ final class DecoderTests: XCTestCase {
         let size = (Int(core.image.extent.width), Int(core.image.extent.height))
         let cmp = try ComparisonMetrics.compare(candidate: dev.renderer.linearImage(core.image, size: size), reference: dev.renderer.linearImage(again.image, size: size))
         XCTAssertLessThan(cmp.deltaE00Mean, 0.01)
+    }
+
+    /// Device pair (output/, iPhone 14 Pro, same press): cameraMatch brings our render to the camera HEIC's brightness
+    /// and clips less than without it (WORK_LOG 2026-11-08: +0.31 / +0.63 EV brighter before).
+    func testCameraMatchOnDevicePairs() throws {
+        let out = Self.originals.deletingLastPathComponent().appendingPathComponent("output")
+        let dirs = ((try? FileManager.default.contentsOfDirectory(atPath: out.path)) ?? []).sorted().map { out.appendingPathComponent($0) }
+            .filter { FileManager.default.fileExists(atPath: $0.appendingPathComponent("apple.heic").path) }
+        if dirs.isEmpty { throw XCTSkip("no device pairs in output/") }
+        let dev = Developer()
+        for d in dirs {
+            let dng = d.appendingPathComponent("capture.dng"), heicPath = d.appendingPathComponent("apple.heic").path
+            let heic = try XCTUnwrap(CIImage(contentsOf: URL(fileURLWithPath: heicPath), options: [.applyOrientationProperty: true]))
+            let an = try dev.analyze(url: dng)
+            let scale = try dev.decoder.scaleFactor(url: dng, longEdge: 512)
+            var off = RenderSettings.explicit; off.plugins = ["highlightRecovery", "vignette"]
+            var on = RenderSettings.explicit; on.cameraReference = heicPath
+            let a = try dev.develop(url: dng, settings: off, auto: true, scaleFactor: scale, analysis: an)
+            let b = try dev.develop(url: dng, settings: on, auto: true, scaleFactor: scale, analysis: an)
+            let e = a.image.extent
+            let hs = CameraMatchPlugin.small(heic, longEdge: max(e.width, e.height))
+            let w = Int(min(hs.extent.width, e.width, b.image.extent.width)), h = Int(min(hs.extent.height, e.height, b.image.extent.height))
+            let ref = try dev.renderer.linearImage(hs, size: (w, h))
+            func mid(_ img: LinearImage) -> Double {
+                let ya = img.pixelsLuminanceUnclamped().sorted(), yb = ref.pixelsLuminanceUnclamped().sorted()
+                return log2(Double(ya[ya.count / 2]) / Double(yb[yb.count / 2]))
+            }
+            let la = try dev.renderer.linearImage(a.image, size: (w, h)), lb = try dev.renderer.linearImage(b.image, size: (w, h))
+            let ca = ImageMetrics.measure(la).clippedFraction, cb = ImageMetrics.measure(lb).clippedFraction
+            print("[cameraMatch] \(d.lastPathComponent) median EV vs HEIC \(mid(la)) -> \(mid(lb)), clipped \(ca) -> \(cb), \(b.recipe.decisions.filter { $0.hasPrefix("[cameraMatch]") })")
+            XCTAssertTrue(b.recipe.plugins.contains("cameraMatch"))
+            XCTAssertLessThan(abs(mid(lb)), 0.15, d.lastPathComponent)
+            XCTAssertLessThan(abs(mid(lb)), abs(mid(la)), d.lastPathComponent)
+            XCTAssertLessThanOrEqual(cb, ca + 1e-4, d.lastPathComponent)
+        }
     }
 
     /// Regression (run 42431876319): mono400 + skin protection gave colour people (and the box they held) in a B&W frame.

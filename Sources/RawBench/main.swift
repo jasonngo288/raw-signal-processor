@@ -13,7 +13,8 @@ raw-bench — CIRAWFilter spike CLI
                    [--intensity 0..1] [--format heic10|png16|jpeg] [--scale 0..1] [--out FILE]
   raw-bench compare <raw> [--mode ...] [--look ...] [--long-edge N]   metrics + ΔE00 vs appleDefault
   raw-bench bench <dir>... --out <dir> [--manifest corpus.json] [--long-edge N] [--full] [--crops]
-  common options: --plugins none|highlightRecovery,vignette   --calibration models.json
+  raw-bench pairs <dir>... --out <dir> [--long-edge N]   device captures (<dir>/*/capture.dng + apple.heic): vs the camera HEIC
+  common options: --plugins none|highlightRecovery,cameraMatch,vignette   --calibration models.json
 
 Looks: \(BuiltInLook.allCases.map(\.rawValue).joined(separator: ", ")) or a .cube path.
 Stocks (--stock, look + grain/halation/vignette): \(FilmStock.all.map { "\($0.name) (\($0.summary))" }.joined(separator: "; "))
@@ -291,6 +292,70 @@ func markdown(_ files: [FileResult]) -> String {
     return md
 }
 
+/// Device pairs: our renders vs the camera's own HEIC from the same press (CaptureKit output folders).
+func midEV(_ a: LinearImage, vs b: LinearImage) -> Double {
+    let ya = a.pixelsLuminanceUnclamped().sorted(), yb = b.pixelsLuminanceUnclamped().sorted()
+    var d: [Double] = []
+    for q in stride(from: 0.30, through: 0.701, by: 0.05) {
+        let i = Int(q * Double(ya.count - 1)), j = Int(q * Double(yb.count - 1))
+        if ya[i] > 1e-4, yb[j] > 1e-4 { d.append(log2(Double(ya[i]) / Double(yb[j]))) }
+    }
+    d.sort()
+    return d.isEmpty ? 0 : d[d.count / 2]
+}
+
+func benchPairs(_ dirs: [String], outDir: URL, longEdge: Int) throws -> String {
+    var md = "# Device pairs: renders vs the camera HEIC (same shutter press)\n\n"
+    md += "Reference = `apple.heic` (Apple's camera pipeline). mid EV = render minus HEIC on mid-tone quantiles (alignment-free); "
+    md += "ΔE00 assumes the two images are pixel-aligned (same press, same size).\n\n"
+    var folders: [URL] = []
+    for d in dirs {
+        let base = URL(fileURLWithPath: d)
+        for n in ((try? FileManager.default.contentsOfDirectory(atPath: d)) ?? []).sorted() {
+            let f = base.appendingPathComponent(n)
+            if FileManager.default.fileExists(atPath: f.appendingPathComponent("capture.dng").path),
+               FileManager.default.fileExists(atPath: f.appendingPathComponent("apple.heic").path) { folders.append(f) }
+        }
+    }
+    for f in folders {
+        let name = f.lastPathComponent
+        log("pair \(name)")
+        let dng = f.appendingPathComponent("capture.dng"), heicPath = f.appendingPathComponent("apple.heic").path
+        guard let heic = CIImage(contentsOf: URL(fileURLWithPath: heicPath), options: [.applyOrientationProperty: true]) else {
+            md += "## \(name)\n\napple.heic unreadable\n\n"; continue
+        }
+        let scale = try decoder.scaleFactor(url: dng, longEdge: longEdge)
+        let an = try dev.analyze(url: dng)
+        var core = RenderSettings(mode: .explicit); core.plugins = []
+        var noMatch = RenderSettings(mode: .explicit); noMatch.plugins = ["highlightRecovery", "vignette"]
+        var match = RenderSettings(mode: .explicit); match.cameraReference = heicPath
+        var matchStock = match; matchStock.stock = "PRESET_26_CPM35"
+        let variants: [(String, RenderSettings, Bool)] = [("appleDefault", .appleDefault, false), ("auto core", core, true),
+            ("auto (no cameraMatch)", noMatch, true), ("auto+cameraMatch", match, true), ("auto+cameraMatch+PRESET_26_CPM35", matchStock, true)]
+        var outs: [(String, Developer.Output)] = []
+        for (n, st, auto) in variants { outs.append((n, try dev.develop(url: dng, settings: st, auto: auto, scaleFactor: scale, analysis: an))) }
+        let e = outs[0].1.image.extent
+        let hs = CameraMatchPlugin.small(heic, longEdge: max(e.width, e.height))
+        let w = Int(min(hs.extent.width, outs.map { $0.1.image.extent.width }.min()!)), h = Int(min(hs.extent.height, outs.map { $0.1.image.extent.height }.min()!))
+        let refLin = try renderer.linearImage(hs, size: (w, h))
+        let refM = ImageMetrics.measure(refLin)
+        _ = try save(hs, recipe: outs[0].1.recipe, name: "pair_\(name)__camera_heic", outDir: outDir)
+        md += "## \(name) — \(outs[0].1.recipe.camera ?? "?"), ISO \(outs[0].1.recipe.iso.map { String(Int($0)) } ?? "?")\n\n"
+        md += "| variant | mid EV vs HEIC | ΔE00 mean vs HEIC | ΔE00 p95 | clipped % | black p1 | mean Y |\n|---|---|---|---|---|---|---|\n"
+        md += String(format: "| camera HEIC | 0.00 | 0.00 | 0.00 | %.2f | %.4f | %.3f |\n", refM.clippedFraction * 100, refM.blackP1, refM.meanY)
+        for (n, o) in outs {
+            let lin = try renderer.linearImage(o.image, size: (w, h))
+            let cmp = try ComparisonMetrics.compare(candidate: lin, reference: refLin)
+            md += String(format: "| %@ | %+.2f | %.2f | %.2f | %.2f | %.4f | %.3f |\n", n, midEV(lin, vs: refLin), cmp.deltaE00Mean, cmp.deltaE00P95,
+                         cmp.candidate.clippedFraction * 100, cmp.candidate.blackP1, cmp.candidate.meanY)
+            _ = try save(o.image, recipe: o.recipe, name: "pair_\(name)__\(n.replacingOccurrences(of: "+", with: "_").replacingOccurrences(of: " ", with: "_").replacingOccurrences(of: "(", with: "").replacingOccurrences(of: ")", with: ""))", outDir: outDir)
+        }
+        let dec = outs.first { $0.0 == "auto+cameraMatch" }!.1.recipe.decisions.filter { $0.hasPrefix("[cameraMatch]") }
+        md += "\ncameraMatch: " + dec.joined(separator: "; ") + "\n\n"
+    }
+    return md
+}
+
 func run() throws -> Int32 {
     let a = Args(Array(CommandLine.arguments.dropFirst()))
     guard let cmd = a.positional.first else { print(usage); return 2 }
@@ -367,6 +432,13 @@ func run() throws -> Int32 {
         try md.write(to: outDir.appendingPathComponent("summary.md"), atomically: true, encoding: .utf8)
         print(md)
         // Unsupported RAW formats are reported, not fatal: the corpus is also a compatibility probe.
+    case "pairs":
+        guard !rest.isEmpty, let out = a.options["out"] else { print(usage); return 2 }
+        let outDir = URL(fileURLWithPath: out)
+        try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+        let md = try benchPairs(rest, outDir: outDir, longEdge: a.options["long-edge"].flatMap(Int.init) ?? 1024)
+        try md.write(to: outDir.appendingPathComponent("pairs.md"), atomically: true, encoding: .utf8)
+        print(md)
     default:
         print(usage); return 2
     }
