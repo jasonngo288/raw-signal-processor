@@ -304,4 +304,4 @@ Defaults differ per model (sharpness, contrast, NR, shadowBias) → must be stor
 ## 2026-11-08 — Demo app: frameworks instead of a local Swift package
 - **Why:** on the user's Mac (Xcode 16) the app showed "Couldn't load project at <repo>" / "Missing package product 'RawCore' / 'CaptureKit'", even after removing/re-adding the local package and with no other window open. Cause not reproducible here.
 - **What:** `App/project.yml` now builds `RawCore` and `CaptureKit` as iOS framework targets straight from `../Sources/...` (embedded in the app); no SwiftPM involved in the app project. Shared scheme `RawFilmDemo`. The SwiftPM package (CLI, tests) is unchanged.
-- **Evidence:** pending CI build of the regenerated project.
+- **Evidence:** CI run 42460834866 green: regenerated project builds for `generic/platform=iOS` (no signing); project committed from that run (no package references left in project.pbxproj).
