@@ -18,7 +18,13 @@ Second audit (subagent) found the ROADMAP broadly honest (items 6/12 slightly ov
   ObjC exception), `.quality` so the HEIC reference is Apple's best.
 - Bench: people check includes faces ≥ 1 %; crop recipes record the crop rectangle.
 - New test `testSkinProtectionReducesLookOnPeople` (the protection path was only tested for its skip case).
-**Not verified**: until the next CI run.
+**Evidence (run 42433089579, 44/44 tests, iOS build OK)**: Gate 1 + Gate 2 (auto) + Gate 2 (core) PASS on all 11
+decodable files (8 tuning, 3 holdout); decoder chosen by policy everywhere. Skin protection test: ΔE on people vs base
+3.01 → 1.86, rest 3.08 → 3.07. Bench (warm400, skin ΔE no-protection → protection): mooncake 3.34 → 2.50, NIGHT01
+2.76 → 1.93, NIGHT02 (holdout) 3.46 → 2.78. mono400 is now fully neutral (visual + test). `recipe.plugins` lists only
+plugins that changed something (e.g. [] for SKY01, ["highlightRecovery"] for IMG_1901). Numbers otherwise unchanged vs
+run 42388988000, except CAFE01 where display clipping is now measured at 512 px (3.1 % > 3 %), so highlightRecovery
+fires lightly (ΔE unclipped 0.07). CaptureKit still never ran on a device.
 
 ## 2026-11-08 — Roadmap = user's architecture; extras become plugins; gaps filled
 **Why**: user set the architecture (docs/ROADMAP.md) as the roadmap, asked to fill what is missing, keep extras
