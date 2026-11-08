@@ -24,7 +24,17 @@ the OS, no per-model calibration path, recipes missing for some outputs, auto dr
 - CaptureKit: AVFoundation wide camera, Bayer RAW + HEIC in one `AVCapturePhotoSettings`, metadata (model id, ISO,
   shutter, lens position, RAW FourCC, fallback). CI builds RawCore + CaptureKit for iOS.
 - Highlight parameter sweep removed from the bench (tuning finished, saves CI time).
-**Not verified**: until the next CI run; CaptureKit never ran on a device.
+**Evidence (run 42431876319, 42/42 tests, iOS build of RawCore + CaptureKit OK)**: Gate 1, Gate 2 (auto) and
+Gate 2 (core) PASS on all 11 decodable files. Decoder pinned by policy ("8" / "8.dng", same as before → numbers
+unchanged). Vision person mask: mooncake 29 %, NIGHT02 27 %, NIGHT01 10 %, others ≈ 0. Skin protection (warm400):
+ΔE on people vs auto base 3.34 → 2.50 (mooncake), 2.76 → 1.93 (NIGHT01), 3.46 → 2.78 (NIGHT02, holdout), rest unchanged.
+Plugins unplugged ("auto core"): IMG_1901 back to Apple's 60.4 % clipping, ΔE unclipped 0.00 — the plugin is the
+only thing changing it. TOKYO01 ΔE 0.04 → 0.27 from the new colour-NR rule (ISO 10 000).
+**Bug found visually**: mono400 + skin protection kept colour on the person, the hand and the box they hold (the
+person mask includes held objects). Fixed: `FilmStock.allowsSkinProtection` (false for mono400) and mono looks skip
+protection with a logged reason; regression test `testMonoStockSkipsSkinProtection`.
+**Not verified**: CaptureKit never ran on a device. The person mask also covers held objects; for colour stocks
+that only means the box gets less look, but it is not "skin only".
 
 ## 2026-11-08 — Film engine: stocks with grain, halation, vignette (plan step 4)
 **Direction**: user chose "Apple render as base, film on top" (docs/PLANNING.md, Decision 2026-11-08).

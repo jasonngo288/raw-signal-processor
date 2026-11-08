@@ -149,7 +149,10 @@ public final class Developer: @unchecked Sendable {
             image = try renderer.applyLook(stock.look.lut(), to: image, intensity: stock.lookIntensity); looked = true
         }
         // Skin / subject protection: on people, hold part of the look back.
-        if let s = st.skinProtection, s > 0, looked {
+        let monoLook = st.look == BuiltInLook.mono.rawValue || (st.look == nil && stock?.look == .mono)
+        if let s = st.skinProtection, s > 0, looked, monoLook || !(stock?.allowsSkinProtection ?? true) {
+            out.recipe.decisions.append("skin protection skipped: \(stock?.name ?? "mono look") is black and white (colour skin in a mono frame)")
+        } else if let s = st.skinProtection, s > 0, looked {
             if let personMask {
                 image = renderer.protectSkin(looked: image, base: beforeLook, mask: personMask, strength: s)
                 out.recipe.decisions.append(String(format: "skin protection %.2f through the Vision person mask (CIBlendWithMask)", s))

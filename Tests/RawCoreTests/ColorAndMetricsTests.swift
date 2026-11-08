@@ -148,6 +148,8 @@ final class LookAndSettingsTests: XCTestCase {
         XCTAssertEqual(Set(FilmStock.all.map(\.name)).count, FilmStock.all.count, "unique stock names")
         for stock in FilmStock.all { XCTAssertNoThrow(try stock.finish.validate(), stock.name) }
         XCTAssertTrue(FilmFinish.none.isNone)
+        XCTAssertEqual(FilmStock.named("mono400")?.allowsSkinProtection, false, "no colour skin in black and white")
+        XCTAssertEqual(FilmStock.named("warm400")?.allowsSkinProtection, true)
         XCTAssertThrowsError(try FilmFinish(grainAmount: 1.5).validate())
         XCTAssertThrowsError(try FilmFinish(grainSize: 0).validate())
         XCTAssertThrowsError(try FilmFinish(halationThreshold: 1).validate())

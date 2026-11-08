@@ -87,6 +87,25 @@ final class DecoderTests: XCTestCase {
         XCTAssertLessThan(cmp.deltaE00Mean, 0.01)
     }
 
+    /// Regression (run 42431876319): mono400 + skin protection gave colour people (and the box they held) in a B&W frame.
+    func testMonoStockSkipsSkinProtection() throws {
+        let url = try XCTUnwrap(try files().first { $0.lastPathComponent == "USER_mooncake.dng" })
+        let dev = Developer()
+        let an = try dev.analyze(url: url)
+        guard (an.context.personFraction ?? 0) > 0.03 else { throw XCTSkip("no person mask on this runner") }
+        var st = RenderSettings.explicit
+        st.stock = "mono400"
+        let o = try dev.develop(url: url, settings: st, auto: true, scaleFactor: try dev.decoder.scaleFactor(url: url, longEdge: 256), analysis: an)
+        XCTAssertTrue(o.recipe.decisions.contains { $0.hasPrefix("skin protection skipped") })
+        let lin = try dev.renderer.linearImage(o.image)
+        var maxChroma: Float = 0
+        for i in 0..<lin.pixelCount {
+            let r = lin.pixels[i * 3], g = lin.pixels[i * 3 + 1], b = lin.pixels[i * 3 + 2]
+            maxChroma = max(maxChroma, max(r, g, b) - min(r, g, b))
+        }
+        XCTAssertLessThan(maxChroma, 0.02, "mono output stays neutral everywhere")
+    }
+
     func testLinearExposureAndCalibrationLookup() throws {
         let url = try XCTUnwrap(try files().first)
         let cam = try XCTUnwrap(try RawDecoder().decode(url: url, settings: .appleDefault, scaleFactor: 0.1).recipe.camera)

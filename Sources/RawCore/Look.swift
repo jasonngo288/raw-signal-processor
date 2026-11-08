@@ -215,6 +215,9 @@ public struct FilmStock: Equatable, Sendable {
     public var lookIntensity: Float
     public var finish: FilmFinish
     public var summary: String
+    /// false for looks where holding the look back on people breaks the image (black and white: colour skin in a
+    /// mono frame). Skin protection is then skipped and the recipe says why.
+    public var allowsSkinProtection: Bool = true
 
     public static let all: [FilmStock] = [
         FilmStock(name: "warm400", look: .warmNegative, lookIntensity: 0.85,
@@ -225,7 +228,7 @@ public struct FilmStock: Equatable, Sendable {
                   summary: "cool, punchy slide film, fine grain"),
         FilmStock(name: "mono400", look: .mono, lookIntensity: 1,
                   finish: FilmFinish(grainAmount: 0.60, grainSize: 0.08, halationAmount: 0, vignette: 0.20),
-                  summary: "black and white, strong grain"),
+                  summary: "black and white, strong grain", allowsSkinProtection: false),
         FilmStock(name: "night800", look: .tungstenNight, lookIntensity: 0.9,
                   finish: FilmFinish(grainAmount: 0.70, grainSize: 0.09, halationAmount: 0.50, halationThreshold: 0.6, halationRadius: 0.7, vignette: 0.10),
                   summary: "tungsten-balanced night stock, big grain, strong halation on lamps"),
