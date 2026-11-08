@@ -9,7 +9,9 @@ final class Presets2026Tests: XCTestCase {
         XCTAssertEqual(Set(Preset26.all.map(\.name)).count, 7)
         for p in Preset26.all {
             XCTAssertTrue(p.name.hasPrefix("PRESET_26_"), p.name)
-            XCTAssertFalse(trademarks.contains { p.name.lowercased().contains($0) }, "trademark in \(p.name)")
+            // Whole words (letters only): "PORTRAIT160" is the spec's own non-trademark name, not "portra".
+            let words = p.name.lowercased().split { !$0.isLetter }.map(String.init)
+            XCTAssertFalse(words.contains { trademarks.contains($0) }, "trademark in \(p.name)")
             XCTAssertNoThrow(try p.finish.validate(), p.name)
             XCTAssertNotNil(FilmStock.named(p.name), "\(p.name) usable as a stock")
             var s = RenderSettings(mode: .explicit); s.stock = p.name

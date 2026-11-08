@@ -320,5 +320,5 @@ Defaults differ per model (sharpness, contrast, NR, shadowBias) → must be stor
 
 ## 2026-11-08 — Drop 2026 presets `PRESET_26_*` (7 stocks)
 - **What:** `Presets2026.swift`: 7 parametric presets from the brief (cpm35, portra-160, fuji-400h, kodachrome-64, grd-r, palm-springs, social-pop) as `FilmStock`s named `PRESET_26_*`. Spec params used as given; curve direction provisional (`curveLocked = false`). `FilmStock` now has a `source` (built-in look or preset) and `minSkinProtection` (spec `skinProtect`). App stock picker is a menu (11 stocks). Docs: docs/PRESETS_2026.md (mapping assumptions, open questions).
-- **Evidence:** LUT properties checked with a Python port before CI (monotone grey, white ≤ 0.98, cast ≤ 2 %, no shadow blow-up); Swift tests in Presets2026Tests. CI: pending.
+- **Evidence:** LUT properties checked with a Python port before CI (monotone grey, white ≤ 0.98, cast ≤ 2 %, no shadow blow-up). CI 42478109567: 48/49, the trademark test matched "portra" inside "PORTRAIT160" (substring); now checks whole words. Re-run pending.
 - **Unverified:** looks on real photos (bench renders all 7 on originals + corpus in CI); the 5-fixture tuning set.
