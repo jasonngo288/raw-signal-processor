@@ -12,6 +12,8 @@ public protocol DevelopPlugin: Sendable {
     var summary: String { get }
     /// After DecisionEngine: may change decode settings (bounded) and returns the reasons it logs.
     func decide(context: SceneContext, settings: inout RenderSettings) -> [String]
+    /// Same, with Apple's per-file decode defaults (for plugins that scale a default). Defaults to the call above.
+    func decide(context: SceneContext, defaults: DecodeParameters, settings: inout RenderSettings) -> [String]
     /// After CIRAWFilter decode, before the look. `ctx` can decode the plain SDR base on demand.
     func afterDecode(_ image: CIImage, settings: RenderSettings, ctx: PluginRenderContext) throws -> (CIImage, [String])
     /// After look + skin protection + grain/halation.
@@ -20,6 +22,9 @@ public protocol DevelopPlugin: Sendable {
 
 public extension DevelopPlugin {
     func decide(context: SceneContext, settings: inout RenderSettings) -> [String] { [] }
+    func decide(context: SceneContext, defaults: DecodeParameters, settings: inout RenderSettings) -> [String] {
+        decide(context: context, settings: &settings)
+    }
     func afterDecode(_ image: CIImage, settings: RenderSettings, ctx: PluginRenderContext) throws -> (CIImage, [String]) { (image, []) }
     func afterFinish(_ image: CIImage, settings: RenderSettings, finish: FilmFinish?, ctx: PluginRenderContext) throws -> (CIImage, [String]) { (image, []) }
 }
@@ -118,7 +123,7 @@ public struct CameraMatchPlugin: DevelopPlugin {
         return img.transformed(by: CGAffineTransform(translationX: -e.minX, y: -e.minY)).transformed(by: CGAffineTransform(scaleX: s, y: s))
     }
 
-    public func decide(context: SceneContext, settings: inout RenderSettings) -> [String] {
+    public func decide(context: SceneContext, defaults: DecodeParameters, settings: inout RenderSettings) -> [String] {
         guard let ref = settings.cameraReference else { return [] }
         guard let ours = context.lumaHistogram, let theirs = Self.referenceHistogram(ref, renderer: Renderer(), bins: ours.count) else {
             return ["camera reference \((ref as NSString).lastPathComponent) unreadable or no histogram: skipped"]
@@ -127,7 +132,21 @@ public struct CameraMatchPlugin: DevelopPlugin {
         guard abs(off) >= 0.05 else { return [String(format: "camera HEIC mid-tones within %.2f EV: no exposure change", off)] }
         let before = settings.exposure ?? 0
         settings.exposure = before + Float(off)
-        let why = [String(format: "camera HEIC mid-tones %+.2f EV vs Apple's default render -> exposure %.2f -> %.2f (bounded -1...+0.5)", off, before, before + Float(off))]
+        var why = [String(format: "camera HEIC mid-tones %+.2f EV vs Apple's default render -> exposure %.2f -> %.2f (bounded -1...+0.5)", off, before, before + Float(off))]
+        // Shadows: Apple's shadow boost (0.9 on ProRAW) keeps deep shadows ~1.5 stops above the camera HEIC after the
+        // exposure match, more than the curve can take back (its gain is bounded). Lower the boost in the decode, by
+        // how far our shadows sit above the HEIC's (WORK_LOG 2026-11-09). Only lowers, never raises.
+        let gap = ToneMatch.shadowGapEV(candidate: ours, reference: theirs, exposureOffsetEV: off)
+        do {
+            let d = settings.boostShadowAmount ?? defaults.boostShadowAmount
+            let b = ToneMatch.shadowBoost(default: Double(d), gapEV: gap)
+            if b < Double(d) - 0.01 {
+                settings.boostShadowAmount = Float(b)
+                why.append(String(format: "shadows %+.2f EV above camera HEIC after exposure match -> boostShadow %.2f -> %.2f", gap, d, b))
+            } else {
+                why.append(String(format: "shadows %+.2f EV vs camera HEIC after exposure match: boostShadow kept", gap))
+            }
+        }
         // highlightRecovery's tone map (decided at the old exposure) is kept: dropping it after the exposure change
         // brought clipping back from 0.3 % to 2-2.6 % (CI 42491918370), because Apple's SDR curve still clips there.
         return why

@@ -111,7 +111,7 @@ public final class Developer: @unchecked Sendable {
             reasons = d.reasons
             for p in active {
                 let before = st
-                let why = p.decide(context: a.context, settings: &st)
+                let why = p.decide(context: a.context, defaults: a.defaults, settings: &st)
                 if st != before { ran.insert(p.id) }
                 reasons += why.map { "[\(p.id)] " + $0 }
             }

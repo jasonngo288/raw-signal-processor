@@ -23,6 +23,25 @@ public enum ColorChecker {
                                "orange", "purplish blue", "moderate red", "purple", "yellow green", "orange yellow",
                                "blue", "green", "red", "yellow", "magenta", "cyan",
                                "white 9.5", "neutral 8", "neutral 6.5", "neutral 5", "neutral 3.5", "black 2"]
+    /// Reads a chart's own data sheet: 24 CIELAB D50 triplets in chart order (dark skin … black).
+    /// Each line that holds at least three numbers contributes its **last three** (so "1 dark skin 37.54 14.37 14.92",
+    /// "37.54,14.37,14.92" and "A1;37,54;14,37;14,92" after comma decimals are all accepted); lines with fewer are ignored
+    /// (headers, comments starting with #). Returns nil unless exactly 24 triplets with L in 0...100 are found.
+    public static func parseReference(_ text: String) -> [SIMD3<Double>]? {
+        var out: [SIMD3<Double>] = []
+        for raw in text.split(whereSeparator: \.isNewline) {
+            var line = String(raw).trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("#") || line.isEmpty { continue }
+            // Semicolon-separated sheets often use decimal commas.
+            if line.contains(";") { line = line.replacingOccurrences(of: ",", with: ".").replacingOccurrences(of: ";", with: " ") }
+            let nums = line.split(whereSeparator: { " \t,".contains($0) }).compactMap { Double($0) }
+            guard nums.count >= 3 else { continue }
+            out.append(SIMD3(nums[nums.count - 3], nums[nums.count - 2], nums[nums.count - 1]))
+        }
+        guard out.count == 24, out.allSatisfy({ (0...100).contains($0.x) && abs($0.y) < 150 && abs($0.z) < 150 }) else { return nil }
+        return out
+    }
+
     /// Patches used to normalise exposure (neutral 8, 6.5, 5: well exposed, never clipped).
     public static let exposureNeutrals = [19, 20, 21]
 
@@ -165,10 +184,10 @@ public enum ColorChecker {
     }
 
     /// Per-patch ΔE00 between two models' charts (each already corrected and exposure-normalised): Gate 3.
-    public static func compare(_ a: [SIMD3<Double>], _ b: [SIMD3<Double>]) -> [Double] {
+    public static func compare(_ a: [SIMD3<Double>], _ b: [SIMD3<Double>], referenceLab: [SIMD3<Double>] = referenceLabD50) -> [Double] {
         func norm(_ p: [SIMD3<Double>]) -> [SIMD3<Double>] {
             let n = exposureNeutrals.map { p[$0].y }.reduce(0, +)
-            let r = exposureNeutrals.map { referenceLinearP3(referenceLabD50[$0]).y }.reduce(0, +)
+            let r = exposureNeutrals.map { referenceLinearP3(referenceLab[$0]).y }.reduce(0, +)
             return p.map { $0 * (n > 0 ? r / n : 1) }
         }
         let na = norm(a), nb = norm(b)
@@ -188,10 +207,15 @@ public struct ChartMeasurement: Codable, Equatable, Sendable {
     public var fit: ColorChecker.Fit
     /// ΔE00 vs the reference after re-decoding with the CCM (checks that linearSpaceFilter acts where we measured).
     public var verifiedDeltaE: [Double]?
+    /// CIELAB D50 reference used for the fit when it was not the built-in X-Rite table (`--reference`); nil = built-in.
+    public var referenceLab: [SIMD3<Double>]?
+    public var referenceSource: String?
 
     public init(model: String, rawKind: String?, file: String, corners: ColorChecker.Corners, measured: [SIMD3<Double>],
-                corrected: [SIMD3<Double>]?, fit: ColorChecker.Fit, verifiedDeltaE: [Double]?) {
+                corrected: [SIMD3<Double>]?, fit: ColorChecker.Fit, verifiedDeltaE: [Double]?,
+                referenceLab: [SIMD3<Double>]? = nil, referenceSource: String? = nil) {
         self.model = model; self.rawKind = rawKind; self.file = file; self.corners = corners; self.measured = measured
         self.corrected = corrected; self.fit = fit; self.verifiedDeltaE = verifiedDeltaE
+        self.referenceLab = referenceLab; self.referenceSource = referenceSource
     }
 }

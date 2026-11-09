@@ -48,4 +48,23 @@ final class ToneMatchTests: XCTestCase {
         }
         XCTAssertLessThan(l2.apply(SIMD3(repeating: 0.8)).y, 0.79, "highlights pulled down")
     }
+
+    func testShadowGapLowersBoostOnlyWhenOursAreBrighter() {
+        // Histograms over encoded luma: ours has its deep shadows ~4 bins higher than the reference.
+        func hist(shadowBin: Int) -> [Double] {
+            var h = [Double](repeating: 0, count: 256)
+            h[shadowBin] = 0.06; for b in 80..<200 { h[b] = 0.94 / 120 }
+            return h
+        }
+        let ours = hist(shadowBin: 24), theirs = hist(shadowBin: 8)
+        let gap = ToneMatch.shadowGapEV(candidate: ours, reference: theirs, exposureOffsetEV: 0)
+        XCTAssertGreaterThan(gap, 1.5)
+        XCTAssertEqual(ToneMatch.shadowBoost(default: 0.9, gapEV: gap), 0, accuracy: 1e-9)
+        XCTAssertEqual(ToneMatch.shadowBoost(default: 0.9, gapEV: 1.0), 0.45, accuracy: 1e-9)
+        XCTAssertEqual(ToneMatch.shadowBoost(default: 0.9, gapEV: 0.3), 0.9, accuracy: 1e-9, "small gap: kept")
+        XCTAssertEqual(ToneMatch.shadowBoost(default: 0.9, gapEV: -1), 0.9, accuracy: 1e-9, "never raised")
+        // The exposure offset is part of the gap: darkening ours by the same amount closes it.
+        XCTAssertLessThan(ToneMatch.shadowGapEV(candidate: ours, reference: theirs, exposureOffsetEV: -gap), 0.01)
+        XCTAssertEqual(ToneMatch.shadowGapEV(candidate: ours, reference: ours, exposureOffsetEV: 0), 0, accuracy: 1e-9)
+    }
 }

@@ -14,7 +14,7 @@ raw-bench — CIRAWFilter spike CLI
   raw-bench compare <raw> [--mode ...] [--look ...] [--long-edge N]   metrics + ΔE00 vs appleDefault
   raw-bench bench <dir>... --out <dir> [--manifest corpus.json] [--long-edge N] [--full] [--crops]
   raw-bench pairs <dir>... --out <dir> [--long-edge N]   device captures (<dir>/*/capture.dng + apple.heic): vs the camera HEIC
-  raw-bench chart <raw> --corners x1,y1,x2,y2,x3,y3,x4,y4 [--model KEY] [--calibration-out models.json] [--out chart.json]
+  raw-bench chart <raw> --corners x1,y1,x2,y2,x3,y3,x4,y4 [--model KEY] [--reference sheet.txt] [--calibration-out models.json] [--out chart.json]
                    ColorChecker Classic: corners = centres of dark skin (top-left), bluish green (top-right), black (bottom-right),
                    white (bottom-left), normalised 0..1 from the image's top-left. Fits the model's CCM, re-decodes to verify.
   raw-bench gate3 <chart.json> <chart.json>...    Gate 3: ΔE00 between models' corrected charts (pass: mean < 2)
@@ -361,7 +361,14 @@ func benchPairs(_ dirs: [String], outDir: URL, longEdge: Int) throws -> String {
 }
 
 /// Gate 3 tooling: chart → CCM (verified by re-decoding with it) → calibration entry + chart file.
-func chartCommand(_ url: URL, corners: ColorChecker.Corners, model: String?, calibrationOut: String?, out: String?) throws -> ChartMeasurement {
+func chartCommand(_ url: URL, corners: ColorChecker.Corners, model: String?, referencePath: String?, calibrationOut: String?, out: String?) throws -> ChartMeasurement {
+    var refLab = ColorChecker.referenceLabD50
+    if let referencePath {
+        guard let r = ColorChecker.parseReference(try String(contentsOfFile: referencePath, encoding: .utf8)) else {
+            throw RawCoreError.invalidSettings("--reference \(referencePath): need exactly 24 'L a b' (D50) lines in chart order")
+        }
+        refLab = r
+    }
     let scale = try decoder.scaleFactor(url: url, longEdge: 2048)
     let version = DecoderPolicy.pick(supported: try decoder.inspect(url: url).supported)
     func measure(_ ccm: [Float]?) throws -> [SIMD3<Double>] {
@@ -371,15 +378,17 @@ func chartCommand(_ url: URL, corners: ColorChecker.Corners, model: String?, cal
         return ColorChecker.sample(try renderer.linearImage(o.image), corners: corners)
     }
     let measured = try measure(nil)
-    guard let fit = ColorChecker.fit(measured: measured) else { throw RawCoreError.invalidSettings("chart fit failed: check --corners (patches not found)") }
+    guard let fit = ColorChecker.fit(measured: measured, reference: refLab.map(ColorChecker.referenceLinearP3)) else { throw RawCoreError.invalidSettings("chart fit failed: check --corners (patches not found)") }
     let corrected = try measure(fit.ccm.map(Float.init))
-    let ref = ColorChecker.referenceLabD50.map(ColorChecker.referenceLinearP3).map(ColorChecker.labD65)
+    let ref = refLab.map(ColorChecker.referenceLinearP3).map(ColorChecker.labD65)
     let verified = (0..<24).map { ColorChecker.deltaE(ColorChecker.labD65(corrected[$0] * fit.exposureScale), ref[$0]) }
     let fileKey = try dev.cameraKeys(url).compactMap { $0 }.first
     let key = model ?? fileKey ?? url.lastPathComponent
     let m = ChartMeasurement(model: key, rawKind: nil, file: url.lastPathComponent, corners: corners, measured: measured,
-                             corrected: corrected, fit: fit, verifiedDeltaE: verified)
+                             corrected: corrected, fit: fit, verifiedDeltaE: verified,
+                             referenceLab: referencePath == nil ? nil : refLab, referenceSource: referencePath.map { URL(fileURLWithPath: $0).lastPathComponent })
     var md = "# ColorChecker \(url.lastPathComponent) → model `\(key)`\n\n"
+    md += "reference: " + (referencePath.map { "`\(URL(fileURLWithPath: $0).lastPathComponent)` (--reference)" } ?? "built-in X-Rite post-2014 table") + "\n\n"
     md += String(format: "exposure scale %.3f (%.2f EV) · ΔE00 vs reference: before %.2f, fitted %.2f (max %.2f), **re-decoded with the CCM %.2f (max %.2f)**\n\n",
                  fit.exposureScale, log2(fit.exposureScale), fit.meanBefore, fit.meanAfter, fit.maxAfter,
                  verified.reduce(0, +) / 24, verified.max() ?? 0)
@@ -397,7 +406,8 @@ func chartCommand(_ url: URL, corners: ColorChecker.Corners, model: String?, cal
         var table = (try? CalibrationTable.load(u)) ?? .empty
         table.models.removeAll { $0.model == key }
         table.models.append(ModelCalibration(model: key, ccm: fit.ccm.map(Float.init), exposureOffsetEV: 0, version: "chart-\(ISO8601DateFormatter().string(from: Date()).prefix(10))",
-                                             source: String(format: "ColorChecker Classic, %@, ΔE00 re-decoded %.2f", url.lastPathComponent, verified.reduce(0, +) / 24)))
+                                             source: String(format: "ColorChecker Classic, %@, reference %@, ΔE00 re-decoded %.2f", url.lastPathComponent,
+                                                            referencePath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "built-in", verified.reduce(0, +) / 24)))
         try table.prettyJSON().write(to: u, atomically: true, encoding: .utf8)
         log("calibration entry \(key) written to \(calibrationOut)")
     }
@@ -411,8 +421,10 @@ func gate3Command(_ paths: [String]) throws -> Bool {
     for i in 0..<charts.count {
         for j in (i + 1)..<charts.count {
             let a = charts[i], b = charts[j]
-            let d = ColorChecker.compare(a.corrected ?? a.measured, b.corrected ?? b.measured)
-            let raw = ColorChecker.compare(a.measured, b.measured)
+            if a.referenceLab != b.referenceLab { print("note: \(a.model) and \(b.model) were fitted to different reference tables") }
+            let rl = a.referenceLab ?? ColorChecker.referenceLabD50
+            let d = ColorChecker.compare(a.corrected ?? a.measured, b.corrected ?? b.measured, referenceLab: rl)
+            let raw = ColorChecker.compare(a.measured, b.measured, referenceLab: rl)
             let mean = d.reduce(0, +) / Double(d.count)
             pass = pass && mean < 2
             print(String(format: "%@ vs %@: before CCM mean %.2f (max %.2f) → after CCM mean %.2f (max %.2f, %@) %@",
@@ -501,7 +513,7 @@ func run() throws -> Int32 {
         // Unsupported RAW formats are reported, not fatal: the corpus is also a compatibility probe.
     case "chart":
         guard let f = rest.first, let c = a.options["corners"].flatMap(ColorChecker.Corners.init) else { print(usage); return 2 }
-        _ = try chartCommand(URL(fileURLWithPath: f), corners: c, model: a.options["model"], calibrationOut: a.options["calibration-out"], out: a.options["out"])
+        _ = try chartCommand(URL(fileURLWithPath: f), corners: c, model: a.options["model"], referencePath: a.options["reference"], calibrationOut: a.options["calibration-out"], out: a.options["out"])
     case "gate3":
         guard rest.count >= 2 else { print(usage); return 2 }
         return try gate3Command(rest) ? 0 : 1

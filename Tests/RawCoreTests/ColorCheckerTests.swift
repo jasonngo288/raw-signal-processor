@@ -57,4 +57,27 @@ final class ColorCheckerTests: XCTestCase {
         var shifted = ref; shifted[14] = SIMD3(ref[14].x, ref[14].y * 1.3, ref[14].z)
         XCTAssertGreaterThan(ColorChecker.compare(ref, shifted)[14], 1)
     }
+
+    func testParseReferenceSheetFormats() throws {
+        let built = ColorChecker.referenceLabD50
+        // X-Rite-style sheet: header, comment, "n name L a b" rows.
+        var sheet = "# my chart, Lab D50 2 deg\nPatch Name L* a* b*\n"
+        for (i, l) in built.enumerated() { sheet += "\(i + 1)\t\(ColorChecker.names[i])\t\(l.x)\t\(l.y)\t\(l.z)\n" }
+        XCTAssertEqual(try XCTUnwrap(ColorChecker.parseReference(sheet)), built)
+        // European CSV with decimal commas.
+        let euro = built.map { "\($0.x);\($0.y);\($0.z)".replacingOccurrences(of: ".", with: ",") }.joined(separator: "\n")
+        XCTAssertEqual(try XCTUnwrap(ColorChecker.parseReference(euro)), built)
+        // Wrong count or out-of-range L is rejected.
+        XCTAssertNil(ColorChecker.parseReference(built.dropLast().map { "\($0.x) \($0.y) \($0.z)" }.joined(separator: "\n")))
+        XCTAssertNil(ColorChecker.parseReference(built.map { "\($0.x * 3) \($0.y) \($0.z)" }.joined(separator: "\n")))
+    }
+
+    func testFitFollowsACustomReference() throws {
+        var lab = ColorChecker.referenceLabD50; lab[14].y += 6   // a chart batch with a redder red
+        let custom = lab.map(ColorChecker.referenceLinearP3)
+        let fit = try XCTUnwrap(ColorChecker.fit(measured: custom.map { $0 * 0.5 }, reference: custom))
+        XCTAssertLessThan(fit.maxAfter, 1e-6, "measuring exactly the custom chart fits it with no error")
+        XCTAssertGreaterThan(try XCTUnwrap(ColorChecker.fit(measured: custom.map { $0 * 0.5 })).deltaEBefore[14], 1,
+                             "the built-in table would call the same chart wrong")
+    }
 }

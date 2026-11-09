@@ -42,6 +42,26 @@ public enum ToneMatch {
         return min(max(m, range.lowerBound), range.upperBound)
     }
 
+    /// Stops our deep shadows (quantiles 1–5 %) sit above the reference's once `exposureOffsetEV` is applied to ours.
+    /// Positive = ours brighter. Median of the per-quantile linear ratios; 0 when the shadows are empty.
+    public static func shadowGapEV(candidate: [Double], reference: [Double], exposureOffsetEV: Double) -> Double {
+        var d: [Double] = []
+        for q in [0.01, 0.02, 0.03, 0.05] {
+            let c = ColorMath.decodeTransfer(quantile(candidate, q)) * pow(2, exposureOffsetEV), r = ColorMath.decodeTransfer(quantile(reference, q))
+            if c > 1e-5, r > 1e-5 { d.append(log2(c / r)) }
+        }
+        guard !d.isEmpty else { return 0 }
+        d.sort()
+        return d.count % 2 == 1 ? d[d.count / 2] : (d[d.count / 2 - 1] + d[d.count / 2]) / 2
+    }
+
+    /// Apple's shadow boost scaled down by the shadow gap: kept below `+0.5` EV, zero at `+1.5` EV and beyond, linear
+    /// between. Never raised (a darker-than-HEIC shadow is left to the curve).
+    public static func shadowBoost(default d: Double, gapEV: Double) -> Double {
+        let t = min(max((gapEV - 0.5) / 1.0, 0), 1)
+        return d * (1 - t)
+    }
+
     /// Monotone curve (encoded luma in → encoded luma out) taking candidate quantiles to reference quantiles.
     /// Each point's linear gain is limited to ±`maxStops`. Black stays at 0. The top is sampled densely (98.5, 99.5,
     /// 99.9 %) and the curve continues to x = 1 with slope ≤ 1: forcing (1,1) after a compressed last point stretched
@@ -49,7 +69,7 @@ public enum ToneMatch {
     public static func curve(candidate: [Double], reference: [Double], points: Int = 32, maxStops: Double = 1.5) -> [SIMD2<Double>] {
         var out: [SIMD2<Double>] = [SIMD2(0, 0)]
         let gMax = pow(2, maxStops)
-        let qs = (1..<points).map { Double($0) / Double(points) } + [0.985, 0.995, 0.999]
+        let qs = [0.005, 0.01, 0.02] + (1..<points).map { Double($0) / Double(points) } + [0.985, 0.995, 0.999]
         for q in qs {
             let x = quantile(candidate, q)
             guard x > out.last!.x + 1e-3, x < 0.999 else { continue }
