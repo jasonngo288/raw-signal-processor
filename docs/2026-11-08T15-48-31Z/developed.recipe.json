@@ -1,0 +1,93 @@
+{
+  "calibration" : "none for iPhone16,1 \/ iPhone16,1 back camera \/ Apple iPhone 15 Pro: DNG matrices",
+  "camera" : "Apple iPhone 15 Pro",
+  "decisions" : [
+    "people 7.6% of frame, largest face 0.0% -> skin protection 0.50",
+    "dark scene (median -5.9 stops < -5) -> look -0.10 (colour shifts and grain read as noise in the dark)",
+    "people in frame -> look -0.05 (on top of skin protection)",
+    "[cameraMatch] camera HEIC mid-tones -0.83 EV vs Apple's default render -> exposure 0.00 -> -0.83 (bounded -1...+0.5)",
+    "analysis 2.77s",
+    "[cameraMatch] tone curve to camera HEIC (quantile match, max shift 0.194, strength 1.00): 0.00>0.00 0.29>0.24 0.44>0.41 0.56>0.58 0.62>0.68 0.67>0.78"
+  ],
+  "decoderVersion" : "8.dng",
+  "decoderVersionSource" : "policy",
+  "defaults" : {
+    "baselineExposure" : 3.494094,
+    "boostAmount" : 1,
+    "boostShadowAmount" : 0.9,
+    "colorNoiseReductionAmount" : 0.5,
+    "contrastAmount" : 0.1,
+    "detailAmount" : 0.5,
+    "exposure" : 0,
+    "extendedDynamicRangeAmount" : 0,
+    "gamutMapping" : true,
+    "lensCorrection" : false,
+    "localToneMapAmount" : 1,
+    "luminanceNoiseReductionAmount" : 0,
+    "moireReductionAmount" : 0,
+    "neutralTemperature" : 5101.167,
+    "neutralTint" : 30.258463,
+    "shadowBias" : 0,
+    "sharpnessAmount" : 1
+  },
+  "effective" : {
+    "baselineExposure" : 3.494094,
+    "boostAmount" : 1,
+    "boostShadowAmount" : 0.9,
+    "colorNoiseReductionAmount" : 0.5,
+    "contrastAmount" : 0.1,
+    "detailAmount" : 0.5,
+    "exposure" : -0.83189994,
+    "extendedDynamicRangeAmount" : 0,
+    "gamutMapping" : true,
+    "lensCorrection" : false,
+    "localToneMapAmount" : 1,
+    "luminanceNoiseReductionAmount" : 0,
+    "moireReductionAmount" : 0,
+    "neutralTemperature" : 5101.167,
+    "neutralTint" : 30.258463,
+    "shadowBias" : 0,
+    "sharpnessAmount" : 1
+  },
+  "exposureTime" : 0.02,
+  "file" : "capture.dng",
+  "iso" : 125,
+  "nativeSize" : [
+    4032,
+    3024
+  ],
+  "osVersion" : "Version 26.6 (Build 23G71)",
+  "plugins" : [
+    "cameraMatch"
+  ],
+  "pluginsEnabled" : [
+    "highlightRecovery",
+    "cameraMatch",
+    "vignette"
+  ],
+  "scaleFactor" : 1,
+  "settings" : {
+    "cameraReference" : "\/var\/mobile\/Containers\/Data\/Application\/111BE0CA-0847-4B9F-AEC6-F2A233CDC4D5\/Documents\/2026-11-08T15-48-31Z\/apple.heic",
+    "exposure" : -0.83189994,
+    "lookIntensity" : 1,
+    "lookIntensityOffset" : -0.15,
+    "mode" : "explicit",
+    "skinProtection" : 0.5
+  },
+  "support" : {
+    "colorNoiseReduction" : true,
+    "contrast" : true,
+    "detail" : true,
+    "lensCorrection" : false,
+    "localToneMap" : true,
+    "luminanceNoiseReduction" : true,
+    "maxExtendedDynamicRange" : 2,
+    "moireReduction" : true,
+    "sharpness" : true
+  },
+  "supportedDecoderVersions" : [
+    "6.dng",
+    "7.dng",
+    "8.dng"
+  ]
+}

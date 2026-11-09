@@ -1,0 +1,11 @@
+{
+  "exposureSeconds" : 0.02,
+  "fallback" : false,
+  "heicFromSamePress" : true,
+  "iso" : 125,
+  "lensPosition" : 0.5764706,
+  "modelIdentifier" : "iPhone16,1",
+  "rawFormat" : "l64r",
+  "rawKind" : "proRAW",
+  "systemVersion" : "Version 26.6 (Build 23G71)"
+}
