@@ -83,7 +83,7 @@ public final class Developer: @unchecked Sendable {
     }
 
     /// Calibration keys for a file: model identifier, DNG UniqueCameraModel, "Make Model".
-    func cameraKeys(_ url: URL) throws -> [String?] {
+    public func cameraKeys(_ url: URL) throws -> [String?] {
         let props = try decoder.inspect(url: url).filter.properties
         let tiff = props[kCGImagePropertyTIFFDictionary as String] as? [String: Any]
         let dng = props[kCGImagePropertyDNGDictionary as String] as? [String: Any]

@@ -14,6 +14,10 @@ raw-bench — CIRAWFilter spike CLI
   raw-bench compare <raw> [--mode ...] [--look ...] [--long-edge N]   metrics + ΔE00 vs appleDefault
   raw-bench bench <dir>... --out <dir> [--manifest corpus.json] [--long-edge N] [--full] [--crops]
   raw-bench pairs <dir>... --out <dir> [--long-edge N]   device captures (<dir>/*/capture.dng + apple.heic): vs the camera HEIC
+  raw-bench chart <raw> --corners x1,y1,x2,y2,x3,y3,x4,y4 [--model KEY] [--calibration-out models.json] [--out chart.json]
+                   ColorChecker Classic: corners = centres of dark skin (top-left), bluish green (top-right), black (bottom-right),
+                   white (bottom-left), normalised 0..1 from the image's top-left. Fits the model's CCM, re-decodes to verify.
+  raw-bench gate3 <chart.json> <chart.json>...    Gate 3: ΔE00 between models' corrected charts (pass: mean < 2)
   common options: --plugins none|highlightRecovery,cameraMatch,vignette   --calibration models.json
 
 Looks: \(BuiltInLook.allCases.map(\.rawValue).joined(separator: ", ")) or a .cube path.
@@ -356,6 +360,69 @@ func benchPairs(_ dirs: [String], outDir: URL, longEdge: Int) throws -> String {
     return md
 }
 
+/// Gate 3 tooling: chart → CCM (verified by re-decoding with it) → calibration entry + chart file.
+func chartCommand(_ url: URL, corners: ColorChecker.Corners, model: String?, calibrationOut: String?, out: String?) throws -> ChartMeasurement {
+    let scale = try decoder.scaleFactor(url: url, longEdge: 2048)
+    let version = DecoderPolicy.pick(supported: try decoder.inspect(url: url).supported)
+    func measure(_ ccm: [Float]?) throws -> [SIMD3<Double>] {
+        var st = RenderSettings(mode: .sceneLinear, decoderVersion: version)
+        st.ccm = ccm
+        let o = try decoder.decode(url: url, settings: st, scaleFactor: scale)
+        return ColorChecker.sample(try renderer.linearImage(o.image), corners: corners)
+    }
+    let measured = try measure(nil)
+    guard let fit = ColorChecker.fit(measured: measured) else { throw RawCoreError.invalidSettings("chart fit failed: check --corners (patches not found)") }
+    let corrected = try measure(fit.ccm.map(Float.init))
+    let ref = ColorChecker.referenceLabD50.map(ColorChecker.referenceLinearP3).map(ColorChecker.labD65)
+    let verified = (0..<24).map { ColorChecker.deltaE(ColorChecker.labD65(corrected[$0] * fit.exposureScale), ref[$0]) }
+    let fileKey = try dev.cameraKeys(url).compactMap { $0 }.first
+    let key = model ?? fileKey ?? url.lastPathComponent
+    let m = ChartMeasurement(model: key, rawKind: nil, file: url.lastPathComponent, corners: corners, measured: measured,
+                             corrected: corrected, fit: fit, verifiedDeltaE: verified)
+    var md = "# ColorChecker \(url.lastPathComponent) → model `\(key)`\n\n"
+    md += String(format: "exposure scale %.3f (%.2f EV) · ΔE00 vs reference: before %.2f, fitted %.2f (max %.2f), **re-decoded with the CCM %.2f (max %.2f)**\n\n",
+                 fit.exposureScale, log2(fit.exposureScale), fit.meanBefore, fit.meanAfter, fit.maxAfter,
+                 verified.reduce(0, +) / 24, verified.max() ?? 0)
+    md += "CCM (rows): " + (0..<3).map { r in (0..<3).map { String(format: "%.4f", fit.ccm[r * 3 + $0]) }.joined(separator: " ") }.joined(separator: " | ") + "\n\n"
+    md += "| # | patch | measured (lin P3) | ΔE before | ΔE re-decoded |\n|---|---|---|---|---|\n"
+    for i in 0..<24 {
+        let p = measured[i]
+        md += String(format: "| %d | %@ | %.3f %.3f %.3f%@ | %.2f | %.2f |\n", i + 1, ColorChecker.names[i], p.x, p.y, p.z, p.max() >= 0.98 ? " (clipped)" : "",
+                     fit.deltaEBefore[i], verified[i])
+    }
+    print(md)
+    if let out { try m.prettyJSON().write(to: URL(fileURLWithPath: out), atomically: true, encoding: .utf8) }
+    if let calibrationOut {
+        let u = URL(fileURLWithPath: calibrationOut)
+        var table = (try? CalibrationTable.load(u)) ?? .empty
+        table.models.removeAll { $0.model == key }
+        table.models.append(ModelCalibration(model: key, ccm: fit.ccm.map(Float.init), exposureOffsetEV: 0, version: "chart-\(ISO8601DateFormatter().string(from: Date()).prefix(10))",
+                                             source: String(format: "ColorChecker Classic, %@, ΔE00 re-decoded %.2f", url.lastPathComponent, verified.reduce(0, +) / 24)))
+        try table.prettyJSON().write(to: u, atomically: true, encoding: .utf8)
+        log("calibration entry \(key) written to \(calibrationOut)")
+    }
+    return m
+}
+
+func gate3Command(_ paths: [String]) throws -> Bool {
+    let charts = try paths.map { try JSONDecoder().decode(ChartMeasurement.self, from: Data(contentsOf: URL(fileURLWithPath: $0))) }
+    var pass = true
+    print("# Gate 3: cross-model ColorChecker ΔE00 after each model's CCM (pass: mean < 2)\n")
+    for i in 0..<charts.count {
+        for j in (i + 1)..<charts.count {
+            let a = charts[i], b = charts[j]
+            let d = ColorChecker.compare(a.corrected ?? a.measured, b.corrected ?? b.measured)
+            let raw = ColorChecker.compare(a.measured, b.measured)
+            let mean = d.reduce(0, +) / Double(d.count)
+            pass = pass && mean < 2
+            print(String(format: "%@ vs %@: before CCM mean %.2f (max %.2f) → after CCM mean %.2f (max %.2f, %@) %@",
+                         a.model, b.model, raw.reduce(0, +) / Double(raw.count), raw.max() ?? 0, mean, d.max() ?? 0,
+                         ColorChecker.names[d.firstIndex(of: d.max() ?? 0) ?? 0], mean < 2 ? "PASS" : "FAIL"))
+        }
+    }
+    return pass
+}
+
 func run() throws -> Int32 {
     let a = Args(Array(CommandLine.arguments.dropFirst()))
     guard let cmd = a.positional.first else { print(usage); return 2 }
@@ -432,6 +499,12 @@ func run() throws -> Int32 {
         try md.write(to: outDir.appendingPathComponent("summary.md"), atomically: true, encoding: .utf8)
         print(md)
         // Unsupported RAW formats are reported, not fatal: the corpus is also a compatibility probe.
+    case "chart":
+        guard let f = rest.first, let c = a.options["corners"].flatMap(ColorChecker.Corners.init) else { print(usage); return 2 }
+        _ = try chartCommand(URL(fileURLWithPath: f), corners: c, model: a.options["model"], calibrationOut: a.options["calibration-out"], out: a.options["out"])
+    case "gate3":
+        guard rest.count >= 2 else { print(usage); return 2 }
+        return try gate3Command(rest) ? 0 : 1
     case "pairs":
         guard !rest.isEmpty, let out = a.options["out"] else { print(usage); return 2 }
         let outDir = URL(fileURLWithPath: out)

@@ -33,7 +33,7 @@ Status legend: ✅ done and tested in CI · 🟡 partial · ⏳ needs a device /
 | 7 | DecisionEngine bounded + logged | ✅ | `DecisionEngine` | Every reason is in `recipe.decisions`. Labels, saliency, histogram and CCT are measured but no rule uses them yet. |
 | 8 | decoderVersion pinned, parameters explicit | ✅ | `DecoderPolicy`, `RawDecoder.decode`, `Developer.analyze` | Fixed preference list (8 → 8.dng → 7 …); analysis decodes use the same pinned version; explicit modes fail if no policy version exists. The `appleDefault` bench reference stays on the OS default on purpose. RAW 9 not added until benched. |
 | 9 | NR, sharpening, LTM, lens correction from DecisionEngine | ✅ | `DecisionEngine` | LTM and lens correction are reported as unsupported for all current test files on macOS 15.8. |
-| 10 | linearSpaceFilter: per-model CCM + exposure | 🟡 ⏳ | `Calibration.swift`, `RawDecoder` | Mechanism + exact lookup (model identifier from DNG UniqueCameraModel, then camera name) + exposure inside the matrix done and tested; **no measured entries** (needs ColorChecker per model → Gate 3). |
+| 10 | linearSpaceFilter: per-model CCM + exposure | 🟡 tooling ✅, data ⏳ | `Calibration.swift`, `ColorChecker.swift`, `raw-bench chart` / `gate3` | Mechanism + exact lookup done. Chart tool: samples the 24 patches in a scene-linear decode, fits a white-preserving 3×3 CCM (clipped patches left out), **re-decodes with it to verify**, writes the calibration entry. `gate3` compares models. Needs one ColorChecker shot per model. Open: ProRAW and Bayer of the same model share a key (separate key needed when both are calibrated). |
 | 11 | Core Image on GPU, float16 | ✅ | `Renderer` (`RGBAh`, extended linear P3) | |
 | 12 | Skin / subject protection, CIBlendWithMask + person mask | ✅ | `Renderer.protectSkin`, DecisionEngine rule | Holds back 50 % of the look on people; skipped for black-and-white looks (judged from the LUT). Tested (`testSkinProtectionReducesLookOnPeople`). The Vision mask also covers held objects. Saliency not used yet. |
 | 13 | Look via CIColorCubeWithColorSpace, blended by context | ✅ | `Renderer.applyLook`, `DecisionEngine.lookIntensityOffset` | Skin protection on people + scene-dependent intensity (dark −0.10, ISO ≥ 1600 −0.05, people −0.05, landscape +0.05; bounded −0.15…+0.10, logged). The stock itself never changes per photo (one roll = one stock); `lookIntensityOffset = 0` locks it. |
@@ -42,7 +42,7 @@ Status legend: ✅ done and tested in CI · 🟡 partial · ⏳ needs a device /
 
 ## Order of the remaining work
 1. ~~Device run + bench against the paired HEIC~~ done 2026-11-08 on iPhone 14 Pro (2 pairs; need ~30 incl. night, ProRAW).
-2. Lab: ColorChecker under D65 / A per model → fill `calibration/models.json` → Gate 3 (ΔE00 < 2 across models).
+2. Lab: ColorChecker under D65 / A per model → `raw-bench chart` → `calibration/models.json` → `raw-bench gate3` (ΔE00 < 2 across models). Tooling done 2026-11-09; shots pending.
 3. ~~Context-driven look intensity~~ done 2026-11-08 (saliency still unused).
 4. On-device performance (iPhone 12 floor) → decide on Metal kernels for grain/halation.
 

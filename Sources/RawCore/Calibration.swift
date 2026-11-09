@@ -14,6 +14,10 @@ public struct ModelCalibration: Codable, Equatable, Sendable {
     /// Where the numbers came from (lab session, chart, illuminant) — "unmeasured" for placeholders.
     public var source: String
 
+    public init(model: String, ccm: [Float], exposureOffsetEV: Float, version: String, source: String) {
+        self.model = model; self.ccm = ccm; self.exposureOffsetEV = exposureOffsetEV; self.version = version; self.source = source
+    }
+
     public func validate() throws {
         guard ccm.count == 9 else { throw RawCoreError.invalidSettings("calibration \(model): ccm needs 9 values") }
         guard (-4...4).contains(exposureOffsetEV) else { throw RawCoreError.invalidSettings("calibration \(model): exposure offset out of range") }

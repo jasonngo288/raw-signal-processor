@@ -30,15 +30,10 @@ jobs:
           cd App && xcodegen generate
           # The committed project lists files one by one: new Swift files must be in it (user's Xcode build broke on
           # Presets2026.swift / ToneMatch.swift). Fail if the committed project is stale.
-          if ! git diff --quiet -- RawFilmDemo.xcodeproj; then
-            echo "::error::App/RawFilmDemo.xcodeproj is stale: regenerate (cd App && xcodegen generate) or take it from XCODEPROJ in this log"
-            git diff --stat -- RawFilmDemo.xcodeproj; STALE=1
-          fi
           xcodebuild build -project RawFilmDemo.xcodeproj -scheme RawFilmDemo -destination 'generic/platform=iOS' \
             CODE_SIGNING_ALLOWED=NO -quiet 2>&1 | tail -40
           tar czf ../xcodeproj.tgz RawFilmDemo.xcodeproj RawFilmDemo/Info.plist
           echo "XCODEPROJ_BEGIN"; base64 -i ../xcodeproj.tgz | fold -w 4000; echo "XCODEPROJ_END"
-          [ -z "${STALE:-}" ]
       - name: Test
         run: |
           set -o pipefail
@@ -65,7 +60,7 @@ jobs:
         run: .build/release/raw-bench bench originals corpus-cache --manifest corpus/corpus.json --out bench-out --long-edge 1024 --crops
       - name: Device pairs (output/, our render vs the camera HEIC)
         if: always()
-        run: .build/release/raw-bench pairs output --out bench-out/pairs --long-edge 1024
+        run: .build/release/raw-bench pairs output docs --out bench-out/pairs --long-edge 1024
       - name: DNG tags of files CIRAWFilter could not open
         if: always()
         run: |
@@ -88,6 +83,14 @@ jobs:
           cp bench-out/summary.md bench-out/summary.json bench-out/pairs/pairs.md previews/ 2>/dev/null || true
           tar czf previews.tgz previews
           echo "PREVIEWS_BEGIN"; base64 -i previews.tgz | fold -w 4000; echo "PREVIEWS_END"
+      - name: Committed Xcode project is up to date (last, so tests and bench still run when it is stale)
+        if: always()
+        run: |
+          cd App
+          if ! git diff --quiet -- RawFilmDemo.xcodeproj; then
+            echo "::error::App/RawFilmDemo.xcodeproj is stale: regenerate (cd App && xcodegen generate) or take it from XCODEPROJ in this log"
+            git diff --stat -- RawFilmDemo.xcodeproj; exit 1
+          fi
       - name: Job summary
         if: always()
         run: |

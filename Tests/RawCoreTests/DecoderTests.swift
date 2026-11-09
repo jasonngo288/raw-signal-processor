@@ -89,6 +89,17 @@ final class DecoderTests: XCTestCase {
         XCTAssertLessThan(cmp.deltaE00Mean, 0.01)
     }
 
+    /// The chart sampler assumes row 0 of a rendered LinearImage is the TOP of the image (Core Image y is up).
+    func testLinearImageRowZeroIsTop() throws {
+        let r = Renderer()
+        let red = CIImage(color: CIColor(red: 1, green: 0, blue: 0)).cropped(to: CGRect(x: 0, y: 50, width: 40, height: 50))   // upper half
+        let blue = CIImage(color: CIColor(red: 0, green: 0, blue: 1)).cropped(to: CGRect(x: 0, y: 0, width: 40, height: 50))
+        let img = try r.linearImage(red.composited(over: blue))
+        XCTAssertGreaterThan(img.pixels[0], img.pixels[2], "row 0 is the top (red)")
+        let last = (img.height - 1) * img.width * 3
+        XCTAssertGreaterThan(img.pixels[last + 2], img.pixels[last], "last row is the bottom (blue)")
+    }
+
     /// Device pair (output/, iPhone 14 Pro, same press): cameraMatch brings our render to the camera HEIC's brightness
     /// and clips less than without it (WORK_LOG 2026-11-08: +0.31 / +0.63 EV brighter before).
     func testCameraMatchOnDevicePairs() throws {
