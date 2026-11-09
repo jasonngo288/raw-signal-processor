@@ -1,0 +1,11 @@
+{
+  "exposureSeconds" : 0.02,
+  "fallback" : false,
+  "heicFromSamePress" : true,
+  "iso" : 125,
+  "lensPosition" : 0.5137255,
+  "modelIdentifier" : "iPhone15,2",
+  "rawFormat" : "bgg4",
+  "rawKind" : "bayer",
+  "systemVersion" : "Version 26.5.2 (Build 23F84)"
+}
