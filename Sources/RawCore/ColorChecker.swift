@@ -188,4 +188,10 @@ public struct ChartMeasurement: Codable, Equatable, Sendable {
     public var fit: ColorChecker.Fit
     /// ΔE00 vs the reference after re-decoding with the CCM (checks that linearSpaceFilter acts where we measured).
     public var verifiedDeltaE: [Double]?
+
+    public init(model: String, rawKind: String?, file: String, corners: ColorChecker.Corners, measured: [SIMD3<Double>],
+                corrected: [SIMD3<Double>]?, fit: ColorChecker.Fit, verifiedDeltaE: [Double]?) {
+        self.model = model; self.rawKind = rawKind; self.file = file; self.corners = corners; self.measured = measured
+        self.corrected = corrected; self.fit = fit; self.verifiedDeltaE = verifiedDeltaE
+    }
 }
