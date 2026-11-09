@@ -15,6 +15,21 @@ An iPhone camera app (iPhone 12 → 18) that captures RAW and "develops film":
 - Looks: `CIColorCubeWithColorSpace` in encoded Display P3, parametric built-ins (`BuiltInLook`) or `.cube`.
 - Working space: extended linear Display P3, half float. Export HEIC 10-bit (primary), PNG16, JPEG.
 
+## Product integration (user decisions, 2026-11-09)
+This repo is **the image-processing core and the goal**. MoodRoll (`../MoodRollApp`, film-roll camera app) is only
+the host shell: UI, rolls, storage. **Priority: make the core pipeline solid here first, then integrate.**
+- **Packaging:** RawCore and CaptureKit ship as a Swift package; MoodRoll pins a tag. Bench and gates stay here.
+- **Capture:** MoodRoll keeps its UI; the backend is CaptureKit: Bayer DNG and HEIC from one press.
+- **Analyse at capture time:** every frame gets a background analyse job (serial, one frame at a time) right after
+  the press. Its result is stored next to the DNG, so develop never analyses again.
+- **Develop** (whole roll at the end) uses this repo's `Developer` with the stored analysis.
+- **Fallback:** a frame with no usable DNG goes through MoodRoll's current HEIC pipeline; the recipe says so.
+- What this asks of the core (not built yet): a stored analysis must be self-contained (person mask on disk,
+  the HEIC's histograms for cameraMatch, decoder version and plugin set it was made with; re-analyse if they
+  differ at develop time); per-stage timings in the recipe; analysis cost measured on device with the camera running.
+- **Open:** storage. A frame is DNG ≈ 10 MB (14 Pro Bayer) / 17 MB (15 Pro ProRAW) + HEIC ≈ 1.6 MB, kept until the
+  roll develops (36 Bayer frames ≈ 430 MB). Deleting the HEIC after analysis saves ≈ 13 % only; see WORK_LOG 2026-11-09.
+
 ## Hard rules
 1. **Every render writes a `DecodeRecipe`** (decoder version, defaults, effective values, support flags, decisions, OS).
 2. `appleDefault` mode must never carry overrides (validated). It is the reference, not a product mode.
