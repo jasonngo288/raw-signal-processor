@@ -103,9 +103,12 @@ final class DecoderTests: XCTestCase {
     /// Device pair (output/, iPhone 14 Pro, same press): cameraMatch brings our render to the camera HEIC's brightness
     /// and clips less than without it (WORK_LOG 2026-11-08: +0.31 / +0.63 EV brighter before).
     func testCameraMatchOnDevicePairs() throws {
-        let out = Self.originals.deletingLastPathComponent().appendingPathComponent("output")
-        let dirs = ((try? FileManager.default.contentsOfDirectory(atPath: out.path)) ?? []).sorted().map { out.appendingPathComponent($0) }
-            .filter { FileManager.default.fileExists(atPath: $0.appendingPathComponent("apple.heic").path) }
+        let root = Self.originals.deletingLastPathComponent()
+        let dirs = ["output", "docs"].flatMap { sub -> [URL] in
+            let base = root.appendingPathComponent(sub)
+            return ((try? FileManager.default.contentsOfDirectory(atPath: base.path)) ?? []).sorted().map { base.appendingPathComponent($0) }
+        }.filter { FileManager.default.fileExists(atPath: $0.appendingPathComponent("apple.heic").path)
+                   && FileManager.default.fileExists(atPath: $0.appendingPathComponent("capture.dng").path) }
         if dirs.isEmpty { throw XCTSkip("no device pairs in output/") }
         let dev = Developer()
         for d in dirs {

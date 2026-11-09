@@ -17,6 +17,7 @@
 		7DEB3063E3EE5960A2513E44 /* Presets2026.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E665446EEFCA624C9EB7D82 /* Presets2026.swift */; };
 		80DAF44AED1677A89420E66D /* CaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E76F9A995FEE177791EC26C3 /* CaptureService.swift */; };
 		875C60419A94846F4106D7D2 /* ContextAnalysis.swift in Sources */ = {isa = PBXBuildFile; fileRef = 532A340E102CD794F657DD29 /* ContextAnalysis.swift */; };
+		95955DAA3B35454516EE186A /* ColorChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8204A61DE5C29AAF96573C8B /* ColorChecker.swift */; };
 		AE219C93C9B487EB62457EB2 /* Developer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CB4D2FFC28E45F108A39B3B /* Developer.swift */; };
 		AEE6CCCECFCC9970E538528E /* Calibration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55DDCA8137C9D24EBA3BC89E /* Calibration.swift */; };
 		BE86DBF19BEECB2EBAB5BFF9 /* RawFilmDemoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AD9DD3EA982536591C39E44 /* RawFilmDemoApp.swift */; };
@@ -75,6 +76,7 @@
 		55DDCA8137C9D24EBA3BC89E /* Calibration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Calibration.swift; sourceTree = "<group>"; };
 		6E665446EEFCA624C9EB7D82 /* Presets2026.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Presets2026.swift; sourceTree = "<group>"; };
 		7B9FCCF144502B6CE31EEE65 /* ImageMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageMetrics.swift; sourceTree = "<group>"; };
+		8204A61DE5C29AAF96573C8B /* ColorChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorChecker.swift; sourceTree = "<group>"; };
 		836F5F5A5A29E762D3633A6E /* RenderSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenderSettings.swift; sourceTree = "<group>"; };
 		861CEAF1B9609C09FFA6106E /* LinearImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinearImage.swift; sourceTree = "<group>"; };
 		87AB576835F738501C46ABEF /* CaptureKit.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = CaptureKit.framework; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -129,6 +131,7 @@
 			isa = PBXGroup;
 			children = (
 				55DDCA8137C9D24EBA3BC89E /* Calibration.swift */,
+				8204A61DE5C29AAF96573C8B /* ColorChecker.swift */,
 				413EA6473A1476FB86D562C5 /* ColorMath.swift */,
 				532A340E102CD794F657DD29 /* ContextAnalysis.swift */,
 				4CB4D2FFC28E45F108A39B3B /* Developer.swift */,
@@ -278,6 +281,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				AEE6CCCECFCC9970E538528E /* Calibration.swift in Sources */,
+				95955DAA3B35454516EE186A /* ColorChecker.swift in Sources */,
 				25F82EE03B64B49D259DDD2E /* ColorMath.swift in Sources */,
 				875C60419A94846F4106D7D2 /* ContextAnalysis.swift in Sources */,
 				AE219C93C9B487EB62457EB2 /* Developer.swift in Sources */,
