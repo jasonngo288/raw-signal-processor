@@ -118,6 +118,9 @@ struct FileResult: Codable {
     var variants: [VariantResult]
     var gates: Gates?
     var error: String?
+    /// Scene-linear median log2 luminance (SceneContext.logP50): the input of the dark-scene rule, printed so its
+    /// threshold can be set from tuning files only.
+    var sceneMedianStops: Double? = nil
 }
 
 func gates(_ vs: [VariantResult]) -> Gates? {
@@ -240,7 +243,8 @@ func benchFile(_ url: URL, entry: CorpusEntry?, outDir: URL, longEdge: Int, full
         }
     }
     return FileResult(file: url.lastPathComponent, corpus: entry, camera: ref.recipe.camera, iso: ref.recipe.iso, analysisSize: [w, h],
-                      reference: refMetrics, variants: results, gates: gates(results), error: nil)
+                      reference: refMetrics, variants: results, gates: gates(results), error: nil,
+                      sceneMedianStops: analysis.context.logP50)
 }
 
 func f2(_ v: Double?) -> String { v.map { String(format: "%.2f", $0) } ?? "–" }
@@ -249,14 +253,14 @@ func markdown(_ files: [FileResult]) -> String {
     var md = "# raw-bench summary\n\n"
     md += "Reference = Apple's default CIRAWFilter decode of the same file (pixel-aligned). Metrics: docs/METRICS.md.\n"
     md += "OS: \(ProcessInfo.processInfo.operatingSystemVersionString)\n\n"
-    md += "## Gates\n\n| id | file | category | split | camera | Gate 1 | Gate 2 (auto) | Gate 2 (core) | auto decisions |\n|---|---|---|---|---|---|---|---|---|\n"
+    md += "## Gates\n\n| id | file | category | split | camera | scene median (stops) | Gate 1 | Gate 2 (auto) | Gate 2 (core) | auto decisions |\n|---|---|---|---|---|---|---|---|---|---|\n"
     for f in files {
         let c = f.corpus
         let g1 = f.gates.map { $0.gate1 ? "PASS" : "FAIL" } ?? (f.error == nil ? "–" : "ERROR")
         let g2 = f.gates.map { $0.gate2 ? "PASS" : "FAIL: " + $0.gate2Reasons.joined(separator: "; ") } ?? (f.error ?? "–")
         let dec = f.variants.first(where: { $0.name == "auto" })?.recipe.decisions.joined(separator: "; ") ?? ""
         let g2c = f.gates.map { $0.gate2Core ? "PASS" : "FAIL: " + $0.gate2CoreReasons.joined(separator: "; ") } ?? "–"
-        md += "| \(c?.id ?? "") | \(f.file) | \(c?.category ?? "") | \(c?.split ?? "") | \(f.camera ?? "?") | \(g1) | \(g2) | \(g2c) | \(dec) |\n"
+        md += "| \(c?.id ?? "") | \(f.file) | \(c?.category ?? "") | \(c?.split ?? "") | \(f.camera ?? "?") | \(f2(f.sceneMedianStops)) | \(g1) | \(g2) | \(g2c) | \(dec) |\n"
     }
     md += "\n"
     for f in files {

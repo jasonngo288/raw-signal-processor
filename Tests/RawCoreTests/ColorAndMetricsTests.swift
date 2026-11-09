@@ -191,6 +191,9 @@ final class LookAndSettingsTests: XCTestCase {
         }
         XCTAssertEqual(DecisionEngine.lookIntensityOffset(context: ctx(p50: -3)).0, 0, "ordinary daylight: no change")
         XCTAssertEqual(DecisionEngine.lookIntensityOffset(context: ctx(p50: -6.4)).0, -0.10, accuracy: 1e-6, "night (NIGHT01 median)")
+        // Threshold from tuning files only: CAFE01 (−6.13) is dark, MTN01 (−4.57) is not.
+        XCTAssertEqual(DecisionEngine.lookIntensityOffset(context: ctx(p50: -6.13)).0, -0.10, accuracy: 1e-6, "CAFE01")
+        XCTAssertEqual(DecisionEngine.lookIntensityOffset(context: ctx(p50: -4.57)).0, 0, "MTN01")
         XCTAssertEqual(DecisionEngine.lookIntensityOffset(context: ctx(p50: -6.1, iso: 3200, people: 0.2)).0, -0.15, accuracy: 1e-6, "clamped at -0.15")
         XCTAssertEqual(DecisionEngine.lookIntensityOffset(context: ctx(p50: -1, labels: ["sky": 0.95, "outdoor": 0.98])).0, 0.05, accuracy: 1e-6)
         XCTAssertEqual(DecisionEngine.lookIntensityOffset(context: ctx(p50: -1, people: 0.3, labels: ["sky": 0.95])).0, -0.05, accuracy: 1e-6, "people win over landscape")

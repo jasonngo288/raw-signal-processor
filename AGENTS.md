@@ -21,12 +21,12 @@ An iPhone camera app (iPhone 12 → 18) that captures RAW and "develops film":
 3. Pure-Swift code (`ColorMath`, `LinearImage`, `ImageMetrics`, `Look`, `RenderSettings`, `DecisionEngine`)
    must not import Core Image; Apple-framework code sits behind `#if canImport(...)`.
 4. **CI (macos-15) must be green** before merge: build, `swift test`, `raw-bench bench originals`.
-   This Linux dev container has no Swift toolchain (download.swift.org blocked) — CI is the compiler.
+   Cloud/Linux sessions have no Swift toolchain — there CI is the compiler. On the user's Mac (Swift 6, Xcode 16) build and test locally first.
 5. Quality claims need numbers from `raw-bench` (docs/METRICS.md), pixel-aligned vs `appleDefault` of the same file.
    Never claim "better than Apple" from a box ΔE alone; check black p1, halo ring, local contrast too.
 6. `originals/` holds the user's test RAWs (files prefixed `USER_` were added at the user's request from earlier chats).
    Do not add other personal images. Do not commit bench outputs (CI prints a base64 preview tarball to its log instead).
-   `output/` and `docs/<timestamp>/` hold device captures from the demo app that the user pushed (private, like `USER_` files).
+   `docs/<timestamp>/` (formerly `output/`) holds device captures from the demo app that the user pushed (private, like `USER_` files).
 7. **Update WORK_LOG.md in the same commit** as any change: what, why, evidence (CI run / numbers), what is unverified.
 8. **Adding or removing a Swift file** in Sources/RawCore or Sources/CaptureKit means regenerating `App/RawFilmDemo.xcodeproj`
    (`cd App && xcodegen generate`, or take it from the XCODEPROJ block of the CI log). CI fails on a stale project.
@@ -43,15 +43,15 @@ An iPhone camera app (iPhone 12 → 18) that captures RAW and "develops film":
 
 ## Layout
 ```
-Sources/RawCore/   ColorMath, LinearImage, ImageMetrics, RenderSettings, Look, ContextAnalysis (pure Swift)
+Sources/RawCore/   ColorMath, LinearImage, ImageMetrics, RenderSettings, Look, ContextAnalysis, ToneMatch, ColorChecker, Presets2026 (pure Swift)
                    Calibration (per-model CCM table, DecoderPolicy)
-                   RawDecoder, Renderer, Developer (analyse → decode → plugins → look → skin protection → finish), VisionAnalyzer,
-                   FilmFinisher, Plugins (highlightRecovery, vignette)
-Sources/CaptureKit AVFoundation Bayer RAW + HEIC capture (iOS; compiled in CI, not run)
+                   RawDecoder, Renderer, Developer (analyse → decode → plugins → look → skin protection → finish; Vision requests),
+                   FilmFinisher, Plugins (highlightRecovery, cameraMatch, vignette)
+Sources/CaptureKit AVFoundation Bayer RAW / ProRAW + HEIC capture (iOS; runs on device via App/)
 Sources/RawBench/  raw-bench CLI: info | render | compare | bench
 corpus/            corpus.json (public RAWs, fetched by CI, never committed) + README
 Tests/RawCoreTests unit tests (Sharma CIEDE2000, metrics, LUT, settings, decisions) + decoder tests on originals/
-docs/              PLANNING.md, METRICS.md
+docs/              ROADMAP.md, PLANNING.md, METRICS.md, PRESETS_2026.md; <timestamp>/ device captures
 ```
 
 ## How to run (macOS 14+, Xcode 16)

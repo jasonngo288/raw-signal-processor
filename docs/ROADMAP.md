@@ -24,15 +24,15 @@ Status legend: ✅ done and tested in CI · 🟡 partial · ⏳ needs a device /
 
 | # | Roadmap item | Status | Where | Notes / what is left |
 |---|---|---|---|---|
-| 1 | AVFoundation Bayer RAW, wide camera | ✅ (device) | `Sources/CaptureKit/CaptureService.swift` | Compiles for iOS in CI; never run on a device yet. No app UI. Exposure facts come from the photo's own EXIF; a failed RAW is an error, not a silent fallback. |
-| 2 | HEIC from the same press as reference | ✅ (device, `raw-bench pairs`, cameraMatch) | same (`processedFormat: hevc` in one `AVCapturePhotoSettings`) | Bench still uses Apple's CIRAWFilter decode as reference until device captures exist. |
+| 1 | AVFoundation Bayer RAW, wide camera | ✅ (device) | `Sources/CaptureKit/CaptureService.swift`, demo app `App/` | Runs on device (iPhone 14 Pro, iOS 26.5.2; iPhone 15 Pro, iOS 26.6). Demo app: capture → develop → HEIC + recipe in Files. Exposure facts come from the photo's own EXIF; a failed RAW is an error, not a silent fallback. |
+| 2 | HEIC from the same press as reference | ✅ (device, `raw-bench pairs`, cameraMatch) | same (`processedFormat: hevc` in one `AVCapturePhotoSettings`) | 4 device pairs (`docs/2026-…`, `raw-bench pairs`; CI scans `docs/`). Gate 2 still uses Apple's CIRAWFilter decode as reference (originals + corpus have no HEIC); the device path with cameraMatch has no gate yet (audit 2026-11-09). |
 | 3 | Analysis on a small render, in background | ✅ | `Developer.analyze`, `analyzeInBackground` | Stats + histogram at 512 px; **Vision at 1024 px** (faces/people missed at 512, WORK_LOG 2026-11-07). |
 | 4 | Vision: scene, faces, person mask, saliency | ✅ | `VisionAnalyzer.enrich` | Each request independent; failure leaves only its fields nil. |
 | 5 | CIAreaHistogram | ✅ | `Renderer.lumaHistogram` | 64 bins of display-encoded luminance (log-like). Pure-Swift percentiles kept for the rules. |
 | 6 | ImageContext: scene, faces, mask, saliency, histogram, CCT, ISO | ✅ | `SceneContext` (+ `Developer.Analysis.personMask`, the mask image itself is not serialised) | CCT/tint = the camera's white-balance estimate (CIRAWFilter neutral defaults), not a separate estimator. |
-| 7 | DecisionEngine bounded + logged | ✅ | `DecisionEngine` | Every reason is in `recipe.decisions`. Labels, saliency, histogram and CCT are measured but no rule uses them yet. |
+| 7 | DecisionEngine bounded + logged | ✅ | `DecisionEngine` | Every reason is in `recipe.decisions`. Labels are used by the look-intensity rule (landscape); saliency and CCT are measured but no rule uses them yet. Dark-scene threshold −5.35 set from tuning files only (audit 2026-11-09). |
 | 8 | decoderVersion pinned, parameters explicit | ✅ | `DecoderPolicy`, `RawDecoder.decode`, `Developer.analyze` | Fixed preference list (8 → 8.dng → 7 …); analysis decodes use the same pinned version; explicit modes fail if no policy version exists. The `appleDefault` bench reference stays on the OS default on purpose. RAW 9 not added until benched. |
-| 9 | NR, sharpening, LTM, lens correction from DecisionEngine | ✅ | `DecisionEngine` | LTM and lens correction are reported as unsupported for all current test files on macOS 15.8. |
+| 9 | NR, sharpening, LTM, lens correction from DecisionEngine | ✅ | `DecisionEngine` | LTM and lens correction are reported as unsupported for all current test files on macOS 15.8; on device (iOS 26) LTM is supported for ProRAW (15 Pro recipe), lens correction still not. |
 | 10 | linearSpaceFilter: per-model CCM + exposure | 🟡 tooling ✅, data ⏳ | `Calibration.swift`, `ColorChecker.swift`, `raw-bench chart` / `gate3` | Mechanism + exact lookup done. Chart tool: samples the 24 patches in a scene-linear decode, fits a white-preserving 3×3 CCM (clipped patches left out), **re-decodes with it to verify**, writes the calibration entry. `gate3` compares models. Needs one ColorChecker shot per model. Open: ProRAW and Bayer of the same model share a key (separate key needed when both are calibrated). |
 | 11 | Core Image on GPU, float16 | ✅ | `Renderer` (`RGBAh`, extended linear P3) | |
 | 12 | Skin / subject protection, CIBlendWithMask + person mask | ✅ | `Renderer.protectSkin`, DecisionEngine rule | Holds back 50 % of the look on people; skipped for black-and-white looks (judged from the LUT). Tested (`testSkinProtectionReducesLookOnPeople`). The Vision mask also covers held objects. Saliency not used yet. |
@@ -41,10 +41,11 @@ Status legend: ✅ done and tested in CI · 🟡 partial · ⏳ needs a device /
 | 15 | heif10Representation, P3, recipe JSON | ✅ | `Renderer.export(recipe:)`, bench `save()` | Recipe embedded in EXIF UserComment by `Renderer.export`; the sidecar .recipe.json is written by the caller (bench/CLI). |
 
 ## Order of the remaining work
-1. ~~Device run + bench against the paired HEIC~~ done 2026-11-08 on iPhone 14 Pro (2 pairs; need ~30 incl. night, ProRAW).
+1. ~~Device run + bench against the paired HEIC~~ done 2026-11-08/09 on iPhone 14 Pro + 15 Pro (4 pairs, all indoor; need ~30 incl. daylight, night, ProRAW).
 2. Lab: ColorChecker under D65 / A per model → `raw-bench chart` → `calibration/models.json` → `raw-bench gate3` (ΔE00 < 2 across models). Tooling done 2026-11-09; shots pending.
 3. ~~Context-driven look intensity~~ done 2026-11-08 (saliency still unused).
-4. On-device performance (iPhone 12 floor) → decide on Metal kernels for grain/halation.
+4. On-device performance (iPhone 12 floor, target < 1.5 s full-res develop, PLANNING phase 4) → decide on Metal kernels for grain/halation. Risk: analysis alone took 2.17 s (14 Pro) / 2.77 s (15 Pro) in the device recipes.
+5. Decide what the device path is (audit 2026-11-09): cameraMatch is on whenever a HEIC exists, so device output follows the camera HEIC (exposure up to −1 EV, shadow boost down to 0), and no gate covers it. Either add a device-pair gate or switch it off by default.
 
 ---
 
@@ -65,6 +66,6 @@ Capture option (CaptureKit, not a DevelopPlugin; off by default, Bayer stays the
 
 | Option | What it does | Evidence so far | Cost |
 |---|---|---|---|
-| `RawPreference.proRAWWhenSupported` | Ask for Apple ProRAW where `isAppleProRAWSupported` (Pro models): Apple's multi-frame fusion (Smart HDR / Deep Fusion) merged into a linear DNG, decoded by the same CIRAWFilter pipeline. Falls back to Bayer elsewhere. Decided from capabilities, never model names (`RawTierPolicy`). | none yet: needs ProRAW captures from the user's 14 Pro (`rawKind` in capture.json) | ~25 MB per 12 MP DNG, slower capture |
+| `RawPreference.proRAWWhenSupported` | Ask for Apple ProRAW where `isAppleProRAWSupported` (Pro models): Apple's multi-frame fusion (Smart HDR / Deep Fusion) merged into a linear DNG, decoded by the same CIRAWFilter pipeline. Falls back to Bayer elsewhere. Decided from capabilities, never model names (`RawTierPolicy`). | 1 ProRAW pair (iPhone 15 Pro, `docs/2026-11-08T15-48-31Z`): decodes through the pipeline; with cameraMatch ΔE00 2.09 vs its HEIC, black p1 0.0015 (HEIC 0.0013). ProRAW and Bayer of a model still share one calibration key. | ~25 MB per 12 MP DNG, slower capture |
 
 Other extras that are tooling, not pipeline: `sceneLinear` mode, `raw-bench`, public corpus, metrics/gates.

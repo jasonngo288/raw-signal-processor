@@ -87,7 +87,9 @@ public enum DecisionEngine {
         public static let personFraction = 0.03
         public static let skinProtection: Float = 0.5
         /// Scene-linear median (log2, 0 = diffuse white) below which a frame counts as dark / night.
-        public static let darkMedianStops = -5.0
+        /// Midpoint of the gap between the tuning files only (holdout never used): darkest non-dark MTN01 −4.57,
+        /// brightest dark CAFE01 −6.13 (NIGHT01 −6.36) → −5.35. Was −5.0, chosen with the holdout TOKYO01 in view.
+        public static let darkMedianStops = -5.35
         public static let veryHighISO = 1600.0
         public static let landscapeLabelConfidence = 0.5
         public static let landscapeLabels: Set<String> = ["sky", "land", "mountain", "hill", "beach", "grass", "field", "sunset", "sunrise", "ocean", "lake", "forest"]
@@ -100,7 +102,7 @@ public enum DecisionEngine {
         var why: [String] = []
         if c.logP50 < Threshold.darkMedianStops {
             off -= 0.10
-            why.append(String(format: "dark scene (median %.1f stops < %.0f) -> look -0.10 (colour shifts and grain read as noise in the dark)", c.logP50, Threshold.darkMedianStops))
+            why.append(String(format: "dark scene (median %.2f stops < %.2f) -> look -0.10 (colour shifts and grain read as noise in the dark)", c.logP50, Threshold.darkMedianStops))
         }
         if let iso = c.iso, iso >= Threshold.veryHighISO {
             off -= 0.05
