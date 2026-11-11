@@ -38,6 +38,12 @@ public struct SceneContext: Codable, Equatable, Sendable {
     /// stored at analysis time so cameraMatch does not need the HEIC file when the roll develops.
     public var cameraReferenceHistogram: [Double]? = nil
     public var cameraReferenceHistogramFine: [Double]? = nil
+    /// Sky mask (plugin `skyMask`): algorithm version it was made with (nil = not made: plugin off or older analysis).
+    public var skyMaskVersion: Int? = nil
+    /// Fraction of the frame the sky mask covers (0 = the label gate said no sky, nil = no decision possible).
+    public var skyFraction: Double? = nil
+    /// Why the mask is what it is: the label that opened the gate and the heuristic coverage, or why it stayed empty.
+    public var skyGate: String? = nil
 
     /// Clipped by Apple's tone curve but present in the RAW.
     public var recoverableClippedFraction: Double? {
@@ -221,5 +227,138 @@ public enum HighlightRecoveryRule {
                            disp * 100, rec * 100, head)]
         }
         return []
+    }
+}
+
+
+/// Pure-Swift heuristic sky mask (plugin `skyMask`, research `.orchestration/context/CONTEXT_ANALYSIS_LIMITS_2026-11-11.md`).
+/// On the 512 px scene-linear render: bright blue or bright neutral (cloud) pixels with low local texture, kept only
+/// where the region touches the top of the frame, then refined with a guided filter (luma guide) into a soft mask.
+/// It decides WHERE a look's `skyHold` may act; the hold itself stays colour-gated (`Preset26.skyWeight`), so blue-cast
+/// shade whites (textured), blue objects mid-frame (not connected to the top) and non-sky frames (label gate) are not held.
+public enum SkyMask {
+    /// Bumped when the algorithm or its thresholds change: a stored mask of another version is re-made.
+    public static let version = 1
+    /// Below this share of the frame the mask counts as empty (no sky in the frame).
+    public static let minCoverage = 0.01
+    public static let labelConfidence = 0.3
+    /// Vision labels that open the gate: sky itself plus the landscape labels `DecisionEngine` already uses.
+    /// "outdoor" is left out on purpose (it is high for streets, parked cars, balconies).
+    public static let gateLabels: Set<String> = DecisionEngine.Threshold.landscapeLabels.union(
+        ["blue_sky", "cloudy", "cloud", "sunset_sunrise", "horizon", "rainbow"])
+
+    public enum Gate: Equatable, Sendable {
+        case open(label: String, confidence: Double)
+        case closed(reason: String)        // classification exists and says no sky
+        case unavailable(reason: String)   // no classification: no decision
+    }
+
+    public static func gate(labels: [String: Double]?) -> Gate {
+        guard let labels else { return .unavailable(reason: "no classification (Vision unavailable)") }
+        if let hit = labels.filter({ gateLabels.contains($0.key) && $0.value >= labelConfidence }).max(by: { $0.value < $1.value }) {
+            return .open(label: hit.key, confidence: hit.value)
+        }
+        let top = labels.sorted { $0.value > $1.value }.prefix(3).map { String(format: "%@ %.2f", $0.key, $0.value) }.joined(separator: ", ")
+        return .closed(reason: String(format: "no sky / landscape label >= %.2f (top: %@)", labelConfidence, top.isEmpty ? "none" : top))
+    }
+
+    public struct Result: Sendable {
+        public var width: Int
+        public var height: Int
+        /// 0...1 per pixel, row 0 = top of the frame.
+        public var mask: [Float]
+        /// Mean of the mask.
+        public var coverage: Double
+    }
+
+    static func smooth(_ a: Float, _ b: Float, _ x: Float) -> Float { let t = min(max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t) }
+
+    /// Mean over a (2r+1)² window, window shrunk at the border (integral image).
+    static func boxMean(_ a: [Float], width w: Int, height h: Int, radius r: Int) -> [Float] {
+        var integral = [Double](repeating: 0, count: (w + 1) * (h + 1))
+        for y in 0..<h {
+            var row = 0.0
+            for x in 0..<w {
+                row += Double(a[y * w + x])
+                integral[(y + 1) * (w + 1) + x + 1] = integral[y * (w + 1) + x + 1] + row
+            }
+        }
+        var out = [Float](repeating: 0, count: w * h)
+        for y in 0..<h {
+            let y0 = max(0, y - r), y1 = min(h - 1, y + r)
+            for x in 0..<w {
+                let x0 = max(0, x - r), x1 = min(w - 1, x + r)
+                let s = integral[(y1 + 1) * (w + 1) + x1 + 1] - integral[y0 * (w + 1) + x1 + 1] - integral[(y1 + 1) * (w + 1) + x0] + integral[y0 * (w + 1) + x0]
+                out[y * w + x] = Float(s / Double((y1 - y0 + 1) * (x1 - x0 + 1)))
+            }
+        }
+        return out
+    }
+
+    /// Guided filter (He et al.), grey guide: edge-aware smoothing of `p` that follows the guide's edges.
+    static func guidedFilter(guide I: [Float], p: [Float], width w: Int, height h: Int, radius r: Int, eps: Float) -> [Float] {
+        let n = w * h
+        let mI = boxMean(I, width: w, height: h, radius: r), mp = boxMean(p, width: w, height: h, radius: r)
+        let mII = boxMean((0..<n).map { I[$0] * I[$0] }, width: w, height: h, radius: r)
+        let mIp = boxMean((0..<n).map { I[$0] * p[$0] }, width: w, height: h, radius: r)
+        var a = [Float](repeating: 0, count: n), b = [Float](repeating: 0, count: n)
+        for i in 0..<n {
+            let varI = mII[i] - mI[i] * mI[i], cov = mIp[i] - mI[i] * mp[i]
+            a[i] = cov / (varI + eps); b[i] = mp[i] - a[i] * mI[i]
+        }
+        let ma = boxMean(a, width: w, height: h, radius: r), mb = boxMean(b, width: w, height: h, radius: r)
+        return (0..<n).map { min(max(ma[$0] * I[$0] + mb[$0], 0), 1) }
+    }
+
+    /// The mask of one scene-linear image (Display P3 linear, row 0 = top). Pure and deterministic.
+    public static func compute(sceneLinear img: LinearImage) -> Result {
+        let w = img.width, h = img.height, n = w * h
+        var luma = [Float](repeating: 0, count: n), cand = [Float](repeating: 0, count: n)
+        var r = [Float](repeating: 0, count: n), g = r, b = r
+        for i in 0..<n {
+            r[i] = Preset26.encode(min(max(img.pixels[i * 3], 0), 1))
+            g[i] = Preset26.encode(min(max(img.pixels[i * 3 + 1], 0), 1))
+            b[i] = Preset26.encode(min(max(img.pixels[i * 3 + 2], 0), 1))
+            luma[i] = (r[i] * Preset26.lumaEncoded.x + g[i] * Preset26.lumaEncoded.y + b[i] * Preset26.lumaEncoded.z)
+        }
+        // Texture: local standard deviation of encoded luma (7x7). Sky is smooth; shade walls, foliage, cloth are not.
+        let rad = 3
+        let m1 = boxMean(luma, width: w, height: h, radius: rad)
+        let m2 = boxMean(luma.map { $0 * $0 }, width: w, height: h, radius: rad)
+        for i in 0..<n {
+            let std = max(m2[i] - m1[i] * m1[i], 0).squareRoot()
+            // Wider than Preset26.skyWeight on purpose (scene-linear input, hazy horizon sky): the mask only has to cover
+            // where the colour-gated hold could act on real sky; the hold itself stays colour-gated.
+            let blue = smooth(0.0, 0.05, b[i] - r[i]) * smooth(-0.12, -0.02, b[i] - g[i]) * smooth(0.12, 0.25, luma[i])
+            let chroma = max(r[i], g[i], b[i]) - min(r[i], g[i], b[i])
+            let cloud = (1 - smooth(0.04, 0.10, chroma)) * smooth(0.45, 0.60, luma[i])   // overcast / cloud: bridges blue patches
+            cand[i] = max(blue, cloud) * (1 - smooth(0.025, 0.06, std))
+        }
+        // Connected regions (4-neighbours) of candidates that touch the top rows and are not tiny.
+        var keep = [Float](repeating: 0, count: n)
+        var seen = [Bool](repeating: false, count: n)
+        let topRows = max(1, h / 50), minArea = max(1, Int(minCoverage * Double(n)))
+        var stack: [Int] = [], region: [Int] = []
+        for start in 0..<n where cand[start] > 0.5 && !seen[start] {
+            region.removeAll(keepingCapacity: true); stack.removeAll(keepingCapacity: true)
+            stack.append(start); seen[start] = true
+            var touchesTop = false
+            while let i = stack.popLast() {
+                region.append(i)
+                let x = i % w, y = i / w
+                if y < topRows { touchesTop = true }
+                if x > 0, cand[i - 1] > 0.5, !seen[i - 1] { seen[i - 1] = true; stack.append(i - 1) }
+                if x < w - 1, cand[i + 1] > 0.5, !seen[i + 1] { seen[i + 1] = true; stack.append(i + 1) }
+                if y > 0, cand[i - w] > 0.5, !seen[i - w] { seen[i - w] = true; stack.append(i - w) }
+                if y < h - 1, cand[i + w] > 0.5, !seen[i + w] { seen[i + w] = true; stack.append(i + w) }
+            }
+            if touchesTop, region.count >= minArea { for i in region { keep[i] = 1 } }
+        }
+        // Refine: guided filter with the luma as guide (edges of the sky follow the image), small feather.
+        let radius = max(2, Int((0.016 * Double(max(w, h))).rounded()))
+        var mask = guidedFilter(guide: luma, p: keep, width: w, height: h, radius: radius, eps: 1e-3)
+        for i in 0..<n where mask[i] < 0.02 { mask[i] = 0 }
+        let coverage = Double(mask.reduce(0, +)) / Double(n)
+        return Result(width: w, height: h, mask: mask, coverage: coverage)
     }
 }

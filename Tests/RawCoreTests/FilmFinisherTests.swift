@@ -77,7 +77,9 @@ final class FilmFinisherTests: XCTestCase {
 
     func testPluginRegistryUnplugs() throws {
         var st = RenderSettings.explicit
-        XCTAssertEqual(try PluginRegistry.standard.active(for: st).map(\.id), ["highlightRecovery", "cameraMatch", "vignette", "logLook", "filmDevelop"])
+        let ids = try PluginRegistry.standard.active(for: st).map(\.id)
+        XCTAssertEqual(Array(ids.prefix(5)), ["highlightRecovery", "cameraMatch", "vignette", "logLook", "filmDevelop"])
+        XCTAssertTrue(ids.contains("lightLeak"))
         st.plugins = []
         XCTAssertTrue(try PluginRegistry.standard.active(for: st).isEmpty)
         st.plugins = ["vignette"]

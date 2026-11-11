@@ -41,6 +41,9 @@ public struct PluginRenderContext {
     public var scene: SceneContext? = nil
     /// Decodes the same file scene-linear (Apple's tone removed) with this render's colour, white balance and exposure.
     public var decodeSceneLinear: (() throws -> CIImage)? = nil
+    /// Vision person mask of the analysis (any size), when the caller has one. Used by `lightLeak` (x0.4 inside it).
+    /// OPEN: Developer.swift does not fill it yet, so the leak is not attenuated on people until it does.
+    public var personMask: CIImage? = nil
 }
 
 public struct PluginRegistry: Sendable {
@@ -53,8 +56,8 @@ public struct PluginRegistry: Sendable {
     }
 
     /// Everything shipped so far, all enabled by default.
-    public static let standard = PluginRegistry(available: [HighlightRecoveryPlugin(), CameraMatchPlugin(), VignettePlugin(), LogLookPlugin(), FilmDevelopPlugin()],
-                                                defaultEnabled: ["highlightRecovery", "cameraMatch", "vignette", "logLook", "filmDevelop"])
+    public static let standard = PluginRegistry(available: [HighlightRecoveryPlugin(), CameraMatchPlugin(), VignettePlugin(), LogLookPlugin(), FilmDevelopPlugin(), LightLeakPlugin(), SkyMaskPlugin()],
+                                                defaultEnabled: ["highlightRecovery", "cameraMatch", "vignette", "logLook", "filmDevelop", "lightLeak", "skyMask"])
     /// Roadmap core only.
     public static let none = PluginRegistry(available: [], defaultEnabled: [])
 
@@ -182,9 +185,18 @@ public struct CameraMatchPlugin: DevelopPlugin {
         let dev = ToneMatch.deviation(c)
         guard dev > 0.005 else { return (image, [String(format: "tone curve vs camera HEIC within %.3f: not applied", dev)]) }
         let strength = st.cameraMatchStrength ?? 1
-        let out = try ctx.renderer.applyLook(ToneMatch.lut(c), to: image, intensity: strength)
-        let pts = stride(from: 0, to: c.count, by: max(1, c.count / 6)).map { String(format: "%.2f>%.2f", c[$0].x, c[$0].y) }.joined(separator: " ")
-        return (out, [String(format: "tone curve to camera HEIC (quantile match, max shift %.3f, strength %.2f): %@", dev, strength, pts)])
+        // A stock with a develop profile (RR roll stocks) keeps only part of the HEIC's tone: its Smart-HDR curve would
+        // otherwise be imported into the film stock (plan §5). Exposure match (decide) is not touched.
+        var curve = c
+        var stockNote = ""
+        if let name = st.stock, let stock = FilmStock.named(name), let fd = stock.develop {
+            curve = ToneMatch.blended(c, strength: Double(fd.cameraMatchCurveStrength))
+            stockNote = String(format: "; stock %@ (%@): curve blended toward identity at %.2f (max shift %.3f -> %.3f), exposure match unchanged",
+                               name, fd.profile, fd.cameraMatchCurveStrength, dev, ToneMatch.deviation(curve))
+        }
+        let out = try ctx.renderer.applyLook(ToneMatch.lut(curve), to: image, intensity: strength)
+        let pts = stride(from: 0, to: curve.count, by: max(1, curve.count / 6)).map { String(format: "%.2f>%.2f", curve[$0].x, curve[$0].y) }.joined(separator: " ")
+        return (out, [String(format: "tone curve to camera HEIC (quantile match, max shift %.3f, strength %.2f): %@%@", dev, strength, pts, stockNote)])
     }
 }
 
@@ -200,6 +212,34 @@ public struct FilmDevelopPlugin: DevelopPlugin {
         guard let name = settings.stock, let stock = FilmStock.named(name), let dev = stock.develop else { return [] }
         let why = dev.apply(context: context, defaults: defaults, settings: &settings)
         return why.isEmpty ? [] : why
+    }
+}
+
+/// Extra: light leak from the stock's `FilmFinish.lightLeak` (spec: `.orchestration/looks/RR_LOOKS_2026-11-11.md`).
+/// Needs the frame's place in the roll (`RenderSettings.rollID / rollFrameIndex / rollFrameCount`); a stock without a leak,
+/// or a render without a roll position, is left untouched (the second case says so in the recipe).
+/// Runs after grain/halation (the afterFinish hook): the leak is not grained. Unplugged = no leak at all.
+public struct LightLeakPlugin: DevelopPlugin {
+    public let id = "lightLeak"
+    public let summary = "light leak from the stock's finish, drawn per roll frame (seeded, deterministic)"
+    public init() {}
+
+    public func afterFinish(_ image: CIImage, settings: RenderSettings, finish: FilmFinish?, ctx: PluginRenderContext) throws -> (CIImage, [String]) {
+        guard let spec = finish?.lightLeak else { return (image, []) }
+        guard let frame = settings.rollFrameIndex, let count = settings.rollFrameCount else {
+            return (image, ["no leak: the frame's place in the roll is not set (rollFrameIndex / rollFrameCount)"])
+        }
+        let roll = settings.rollID ?? ""
+        guard let plan = LightLeakPlanner.plan(spec: spec, rollID: roll, frame: frame, count: count) else {
+            return (image, ["no leak: frame \(frame) is outside a roll of \(count)"])
+        }
+        var why = [LightLeakPlanner.describe(plan, frame: frame, count: count, rollID: roll)]
+        guard let leak = plan.leak else { return (image, why) }
+        let out = FilmFinisher.lightLeak(image, spec: spec, leak: leak, personMask: ctx.personMask)
+        why.append(String(format: "screen in linear light, peak add %.3f (%.2f x %.2f amount x %.2f strength), ceiling %.2f encoded, person mask %@",
+                          spec.peakAdd * spec.amount * leak.strength, spec.peakAdd, spec.amount, leak.strength, spec.encodedCap,
+                          ctx.personMask != nil ? String(format: "x%.2f", spec.personFactor) : "not available: no attenuation"))
+        return (out, why)
     }
 }
 

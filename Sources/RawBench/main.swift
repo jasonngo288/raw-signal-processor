@@ -23,7 +23,7 @@ raw-bench — CIRAWFilter spike CLI
   raw-bench looks <raw|dir>... --out <dir> [--looks a,b] [--long-edge N] [--manifest corpus.json]   film-look set: base once, every look, metrics (look review tool)
   raw-bench lut <in.cube|in.mrlut> --out <out.cube|out.mrlut>   convert LUTs (MoodRoll .mrlut packed format), print round-trip error
   raw-bench storage <raw>... [--stock NAME] [--out <dir>]   base render stored as HEIC10/PNG16/TIFF16/EXR/JPEG: size and ΔE00 vs in-memory
-  common options: --plugins none|highlightRecovery,cameraMatch,vignette   --calibration models.json
+  common options: --roll-id ID --frame N --frames COUNT (light leak)   --plugins none|highlightRecovery,cameraMatch,vignette   --calibration models.json
 
 Looks: \(BuiltInLook.allCases.map(\.rawValue).joined(separator: ", ")) or a .cube path.
 Stocks (--stock, look + grain/halation/vignette): \(FilmStock.all.map { "\($0.name) (\($0.summary))" }.joined(separator: "; "))
@@ -67,6 +67,11 @@ func variant(from a: Args) -> Variant {
     s.look = a.options["look"]
     s.stock = a.options["stock"]
     if let i = a.options["intensity"], let f = Float(i) { s.lookIntensity = f }
+    // Roll position for per-frame effects (light leak): --roll-id ID --frame N --frames COUNT
+    s.cameraReference = a.options["camera-reference"]   // camera HEIC of the same press (cameraMatch)
+    s.rollID = a.options["roll-id"]
+    s.rollFrameIndex = a.options["frame"].flatMap(Int.init)
+    s.rollFrameCount = a.options["frames"].flatMap(Int.init)
     return Variant(name: modeName, settings: s, auto: auto)
 }
 

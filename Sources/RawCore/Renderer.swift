@@ -139,6 +139,32 @@ public final class Renderer: @unchecked Sendable {
         ]).cropped(to: ext)
     }
 
+    static let linearGray = CGColorSpace(name: CGColorSpace.linearGray)!
+
+    /// A grey mask image (row 0 = top) from 0...1 values: the stored `sky-mask.png` is the same 8-bit linear grey.
+    public func maskImage(_ values: [Float], width: Int, height: Int) -> CIImage {
+        let bytes = values.map { UInt8(min(max($0, 0), 1) * 255 + 0.5) }
+        return CIImage(bitmapData: Data(bytes), bytesPerRow: width, size: CGSize(width: width, height: height),
+                       format: .L8, colorSpace: Renderer.linearGray)
+    }
+
+    /// `foreground` where `mask` is 1, `background` where it is 0 (CIBlendWithMask). The mask is any size, scaled to
+    /// the image and feathered by `feather` of the short edge.
+    public func blend(_ foreground: CIImage, over background: CIImage, mask: CIImage, feather: Double = 0.003) -> CIImage {
+        let ext = background.extent, m = mask.extent
+        guard m.width > 0, m.height > 0 else { return background }
+        let scaled = mask
+            .transformed(by: CGAffineTransform(translationX: -m.minX, y: -m.minY))
+            .transformed(by: CGAffineTransform(scaleX: ext.width / m.width, y: ext.height / m.height))
+            .transformed(by: CGAffineTransform(translationX: ext.minX, y: ext.minY))
+            .clampedToExtent()
+            .applyingGaussianBlur(sigma: Double(min(ext.width, ext.height)) * feather)
+            .cropped(to: ext)
+        return foreground.applyingFilter("CIBlendWithMask", parameters: [
+            kCIInputBackgroundImageKey: background, kCIInputMaskImageKey: scaled,
+        ]).cropped(to: ext)
+    }
+
     /// Mean of channel 0 over the image (CIAreaAverage on the GPU).
     public func areaMean(_ image: CIImage) -> Double {
         let e = image.extent

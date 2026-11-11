@@ -198,16 +198,19 @@ public struct FilmFinish: Codable, Equatable, Sendable {
     public var halationRadius: Float
     /// 0...1 corner darkening.
     public var vignette: Float
+    /// Light leak of the stock (plugin `lightLeak`, docs/ROADMAP.md EXTRAS). nil = none. Needs the roll position in
+    /// `RenderSettings` (rollFrameIndex / rollFrameCount) to be drawn.
+    public var lightLeak: LightLeakSpec? = nil
 
     public init(grainAmount: Float = 0, grainSize: Float = 0.07, grainSeed: UInt32 = 1, halationAmount: Float = 0,
-                halationThreshold: Float = 0.75, halationRadius: Float = 0.5, vignette: Float = 0) {
+                halationThreshold: Float = 0.75, halationRadius: Float = 0.5, vignette: Float = 0, lightLeak: LightLeakSpec? = nil) {
         self.grainAmount = grainAmount; self.grainSize = grainSize; self.grainSeed = grainSeed
         self.halationAmount = halationAmount; self.halationThreshold = halationThreshold
-        self.halationRadius = halationRadius; self.vignette = vignette
+        self.halationRadius = halationRadius; self.vignette = vignette; self.lightLeak = lightLeak
     }
 
     public static let none = FilmFinish()
-    public var isNone: Bool { grainAmount == 0 && halationAmount == 0 && vignette == 0 }
+    public var isNone: Bool { grainAmount == 0 && halationAmount == 0 && vignette == 0 && lightLeak == nil }
 
     public func validate() throws {
         for (name, v) in [("grainAmount", grainAmount), ("halationAmount", halationAmount), ("vignette", vignette)] where !(0...1).contains(v) {
@@ -216,6 +219,7 @@ public struct FilmFinish: Codable, Equatable, Sendable {
         guard (0.01...1).contains(grainSize) else { throw RawCoreError.invalidSettings("grainSize must be 0.01...1 % of the short edge") }
         guard (0.05...5).contains(halationRadius) else { throw RawCoreError.invalidSettings("halationRadius must be 0.05...5 % of the short edge") }
         guard (0.1...0.99).contains(halationThreshold) else { throw RawCoreError.invalidSettings("halationThreshold must be 0.1...0.99") }
+        try lightLeak?.validate()
     }
 }
 
@@ -240,9 +244,15 @@ public struct FilmDevelop: Codable, Equatable, Sendable {
     public var ltmScale: Float? = nil
     /// ProRAW only (default detail > this): detail is lowered to this.
     public var proRAWDetail: Float = 0.2
+    /// cameraMatch with this stock: how much of the HEIC's tone curve (ToneMatch stage 2) is kept, 0...1. The curve is
+    /// blended toward identity (1 = full curve, 0 = none); the exposure match (stage 1) is unchanged. The HEIC's Smart-HDR
+    /// tone would otherwise be imported into the film stock (plan §5; 0.5 asked by the user 2026-11-11).
+    public var cameraMatchCurveStrength: Float = 0.5
 
     public init(profile: String, sharpScale: Float, sharpFloor: Float = 0.30, faceSharpDelta: Float = 0.05,
-                clarityScale: Float = 0.4, lumaNRMaxDelta: Float? = nil, ltmScale: Float? = nil, proRAWDetail: Float = 0.2) {
+                clarityScale: Float = 0.4, lumaNRMaxDelta: Float? = nil, ltmScale: Float? = nil, proRAWDetail: Float = 0.2,
+                cameraMatchCurveStrength: Float = 0.5) {
+        self.cameraMatchCurveStrength = cameraMatchCurveStrength
         self.profile = profile; self.sharpScale = sharpScale; self.sharpFloor = sharpFloor; self.faceSharpDelta = faceSharpDelta
         self.clarityScale = clarityScale; self.lumaNRMaxDelta = lumaNRMaxDelta; self.ltmScale = ltmScale; self.proRAWDetail = proRAWDetail
     }
@@ -428,5 +438,209 @@ final class LookSpecCache: @unchecked Sendable {
         let l = spec.lut(size: size, title: name)
         items[key] = l
         return l
+    }
+}
+
+// MARK: - Light leak (pure Swift; plugin `lightLeak` draws it)
+
+/// Light leak of a stock, per `.orchestration/looks/RR_LOOKS_2026-11-11.md` ("Light leak spec"). Every number here is
+/// either quoted from that spec or marked `OPEN:` (the spec does not state it; see WORK_LOG 2026-11-11 for the list).
+public struct LightLeakSpec: Codable, Equatable, Sendable {
+    /// One row of the per-frame table: chance and strength range (strength 1 = the spec's peak add).
+    public struct Row: Codable, Equatable, Sendable {
+        public var chance: Float
+        public var strength: ClosedRange<Float>
+        public init(chance: Float, strength: ClosedRange<Float>) { self.chance = chance; self.strength = strength }
+    }
+    /// Global amount (spec: 0.35 for Lá Phong).
+    public var amount: Float = 0.35
+    /// Peak add in linear light at the core at strength 1 (spec: about +0.25).
+    public var peakAdd: Float = 0.25
+    /// Core colour, linear (spec: [1.0, 0.30, 0.06], "OKLCh hue about 35-45 degrees"). OPEN: these two do not agree. The
+    /// numbers give OKLCh hue 52 degrees in linear Display P3 (54 read as linear sRGB). The numbers are used as written, as
+    /// linear values in the working space (Display P3); the hue stays what they give.
+    public var coreColor: SIMD3<Float> = SIMD3(1.0, 0.30, 0.06)
+    /// OKLCh hue at the outer falloff (spec: about 70 degrees).
+    public var outerHue: Float = 70
+    /// Jitter per frame: hue +-degrees, size +-fraction (spec: +-8 degrees, +-30 %).
+    public var hueJitter: Float = 8
+    public var sizeJitter: Float = 0.30
+    /// Core distance outside the frame edge, fraction of the frame width (spec: 0 ... 10 %).
+    public var coreOutside: ClosedRange<Float> = 0...0.10
+    /// Falloff reach, fraction of the frame width, before the size jitter: the spec says 20-40 %; the middle (30 %)
+    /// with +-30 % jitter spans 21-39 %. OPEN: where the 20-40 % is measured from (here: from the core).
+    public var reach: Float = 0.30
+    /// OPEN (spec says "elliptical", no ratio): sigma along the edge / sigma into the frame.
+    public var aspect: Float = 1.5
+    /// OPEN (spec: reach is "about" 20-40 %): the Gaussian is taken as 5 % of its peak at `reach`, i.e. reach = 2.45 sigma.
+    public var reachSigmas: Float = 2.45
+    /// Optional vertical streak (spec: faint band, 5-12 % wide, from the same edge). OPEN: chance and strength.
+    public var streakChance: Float = 0.5
+    public var streakWidth: ClosedRange<Float> = 0.05...0.12
+    public var streakStrength: Float = 0.25
+    /// Factor inside the Vision person mask (spec: 0.4).
+    public var personFactor: Float = 0.4
+    /// Output ceiling, display-encoded (spec: 0.99, no new clip).
+    public var encodedCap: Float = 0.99
+    /// Frames 1-2: always, strong 0.6-0.9.
+    public var start = Row(chance: 1, strength: 0.6...0.9)
+    /// Frame 3: 50 %, 0.3-0.5.
+    public var third = Row(chance: 0.5, strength: 0.3...0.5)
+    /// Middle of the roll: about 12 % of frames, faint 0.15-0.35.
+    public var middle = Row(chance: 0.12, strength: 0.15...0.35)
+    /// Last frame: 60 %, "medium". OPEN: the spec gives no number; the gap between faint (0.35) and strong (0.6).
+    public var last = Row(chance: 0.6, strength: 0.35...0.6)
+
+    public init() {}
+
+    /// Spec preset for RR Lá Phong 100.
+    public static let laPhong = LightLeakSpec()
+
+    public func validate() throws {
+        guard (0...1).contains(amount), peakAdd > 0, peakAdd <= 1 else { throw RawCoreError.invalidSettings("lightLeak amount must be 0...1 and peakAdd 0...1") }
+        guard (0...1).contains(personFactor), (0.5...1).contains(encodedCap) else { throw RawCoreError.invalidSettings("lightLeak personFactor 0...1, encodedCap 0.5...1") }
+        guard reach > 0, aspect > 0, reachSigmas > 0 else { throw RawCoreError.invalidSettings("lightLeak reach, aspect, reachSigmas must be > 0") }
+    }
+}
+
+/// What the plugin decided for one frame. Everything the recipe logs.
+public struct LightLeakPlan: Equatable, Sendable {
+    public enum FrameClass: String, Sendable { case start, third, middle, last }
+    public enum Edge: String, Sendable { case left, right }
+    public var seed: UInt64
+    public var frameClass: FrameClass
+    /// Nil = this frame has no leak (the chance row said no).
+    public var leak: Leak?
+    public var chanceDraw: Float
+    public var chance: Float
+
+    public struct Leak: Equatable, Sendable {
+        public var strength: Float
+        public var edge: Edge
+        /// Core distance outside the edge, fraction of the frame width.
+        public var coreOutside: Float
+        /// Core position along the edge, 0 = top ... 1 = bottom of the frame (never in the central third).
+        public var position: Float
+        /// Gaussian sigma into the frame, fraction of the frame width.
+        public var sigma: Float
+        /// Core hue (OKLCh degrees) after jitter; outer hue likewise.
+        public var coreHue: Float
+        public var outerHue: Float
+        public var hueShift: Float
+        /// Streak width as a fraction of the frame width, nil = no streak.
+        public var streak: Float?
+    }
+}
+
+public enum LightLeakPlanner {
+    /// Deterministic: same (rollID, frame index) -> same plan. FNV-1a 64 of "rollID|frame" seeds SplitMix64
+    /// (Swift's own hashing is randomised per process, so it is not used).
+    public static func seed(rollID: String, frame: Int) -> UInt64 {
+        var h: UInt64 = 0xcbf29ce484222325
+        for b in "\(rollID)|\(frame)".utf8 { h = (h ^ UInt64(b)) &* 0x100000001b3 }
+        return h
+    }
+
+    struct Rng {
+        var state: UInt64
+        mutating func next() -> Float {
+            state &+= 0x9e3779b97f4a7c15
+            var z = state
+            z = (z ^ (z >> 30)) &* 0xbf58476d1ce4e5b9
+            z = (z ^ (z >> 27)) &* 0x94d049bb133111eb
+            z ^= z >> 31
+            return Float(z >> 40) / Float(1 << 24)   // 24 bits: exact in Float, [0, 1)
+        }
+        mutating func range(_ r: ClosedRange<Float>) -> Float { r.lowerBound + (r.upperBound - r.lowerBound) * next() }
+    }
+
+    /// Table row of a frame. Order of precedence when classes overlap (OPEN, the spec does not say): start, third, last, middle
+    /// (a 1- or 2-frame roll is all start; frame 3 of a 3-frame roll is the third; the last frame of a longer roll is last).
+    public static func frameClass(frame: Int, count: Int) -> LightLeakPlan.FrameClass {
+        if frame <= 2 { return .start }
+        if frame == 3 { return .third }
+        if frame == count { return .last }
+        return .middle
+    }
+
+    /// Returns nil for an impossible position (frame outside 1...count).
+    public static func plan(spec: LightLeakSpec, rollID: String, frame: Int, count: Int) -> LightLeakPlan? {
+        guard count >= 1, (1...count).contains(frame) else { return nil }
+        let cls = frameClass(frame: frame, count: count)
+        let row: LightLeakSpec.Row
+        switch cls { case .start: row = spec.start; case .third: row = spec.third; case .middle: row = spec.middle; case .last: row = spec.last }
+        let seed = seed(rollID: rollID, frame: frame)
+        // Fixed draw order whatever the class, so a frame's pattern does not depend on the other rows' numbers.
+        var r = Rng(state: seed)
+        let chanceDraw = r.next()
+        let strength = r.range(row.strength)
+        let edgeDraw = r.next(), sideDraw = r.next(), posDraw = r.next(), outDraw = r.range(spec.coreOutside)
+        let sizeDraw = r.range(-spec.sizeJitter...spec.sizeJitter), hueDraw = r.range(-spec.hueJitter...spec.hueJitter)
+        let streakDraw = r.next(), streakW = r.range(spec.streakWidth)
+        var plan = LightLeakPlan(seed: seed, frameClass: cls, leak: nil, chanceDraw: chanceDraw, chance: row.chance)
+        guard chanceDraw < row.chance else { return plan }
+        // Never the central third: 0...1/3 or 2/3...1 along the edge.
+        let pos = (sideDraw < 0.5 ? 0 : 2.0 / 3) + posDraw / 3
+        let hue0 = coreHue(spec) + hueDraw
+        plan.leak = .init(strength: strength, edge: edgeDraw < 0.5 ? .left : .right, coreOutside: outDraw, position: pos,
+                          sigma: spec.reach * (1 + sizeDraw) / spec.reachSigmas, coreHue: hue0, outerHue: spec.outerHue + hueDraw,
+                          hueShift: hueDraw, streak: streakDraw < spec.streakChance ? streakW : nil)
+        return plan
+    }
+
+    /// The core colour in the working space (used as written, see `LightLeakSpec.coreColor`).
+    public static func coreP3(_ spec: LightLeakSpec) -> SIMD3<Float> { spec.coreColor }
+
+    /// OKLCh hue of the core colour (degrees).
+    public static func coreHue(_ spec: LightLeakSpec) -> Float {
+        let lab = OKLab.fromLinearP3(coreP3(spec))
+        var h = atan2(lab.z, lab.y) * 180 / .pi
+        if h < 0 { h += 360 }
+        return h
+    }
+
+    /// Colour (max channel 1) at falloff depth t (0 core ... 1 outer): OKLCh hue from the core hue to the outer hue at
+    /// the core's lightness and chroma, then scaled so the largest channel is 1.
+    public static func colour(spec: LightLeakSpec, leak l: LightLeakPlan.Leak, t: Float) -> SIMD3<Float> {
+        let core = OKLab.fromLinearP3(coreP3(spec))
+        let chroma = (core.y * core.y + core.z * core.z).squareRoot()
+        let hue = (l.coreHue + (l.outerHue - l.coreHue) * min(max(t, 0), 1)) * .pi / 180
+        let rgb = OKLab.toLinearP3(SIMD3(core.x, chroma * cos(hue), chroma * sin(hue)))
+        let c = SIMD3(max(rgb.x, 0), max(rgb.y, 0), max(rgb.z, 0))
+        let m = max(c.x, c.y, c.z)
+        return m > 1e-6 ? c / m : SIMD3(repeating: 0)
+    }
+
+    /// Linear light added at a point, x and y in 0...1 of the frame (y = 0 top), `aspectWH` = width / height.
+    /// Peak = peakAdd * amount * strength at the core. Streak: raised cosine from the edge inward, `streakStrength` of the peak.
+    public static func addition(spec: LightLeakSpec, leak l: LightLeakPlan.Leak, x: Float, y: Float, aspectWH: Float) -> SIMD3<Float> {
+        let cx: Float = l.edge == .left ? -l.coreOutside : 1 + l.coreOutside
+        let dx = x - cx                                     // fractions of the width
+        let dy = (y - l.position) / aspectWH               // same unit (width) as dx
+        let sx = l.sigma, sy = l.sigma * spec.aspect
+        let g = exp(-0.5 * (dx * dx / (sx * sx) + dy * dy / (sy * sy)))
+        let peak = spec.peakAdd * spec.amount * l.strength
+        let c0: SIMD3<Float> = colour(spec: spec, leak: l, t: 1 - g)
+        var out: SIMD3<Float> = c0 * (peak * g)
+        if let w = l.streak {
+            let d = l.edge == .left ? x : 1 - x           // distance from the edge, fraction of width
+            if d < w {
+                let s = 0.5 * (1 + cos(.pi * d / w))
+                let c1: SIMD3<Float> = colour(spec: spec, leak: l, t: 0)
+                out += c1 * (peak * spec.streakStrength * s)
+            }
+        }
+        return out
+    }
+
+    /// Reason line for the recipe: seed, edge, position, strength and hue per frame (spec).
+    public static func describe(_ p: LightLeakPlan, frame: Int, count: Int, rollID: String) -> String {
+        let head = String(format: "frame %d/%d (%@), roll \"%@\", seed %016llx", frame, count, p.frameClass.rawValue, rollID, p.seed)
+        guard let l = p.leak else {
+            return head + String(format: ": no leak (draw %.3f >= chance %.2f)", p.chanceDraw, p.chance)
+        }
+        return head + String(format: ": leak (draw %.3f < chance %.2f) edge %@, core %.1f%% outside, position %.2f of the edge, strength %.2f, sigma %.1f%% of width, hue %.0f > %.0f deg (jitter %+.1f)%@",
+                             p.chanceDraw, p.chance, l.edge.rawValue, l.coreOutside * 100, l.position, l.strength, l.sigma * 100,
+                             l.coreHue, l.outerHue, l.hueShift, l.streak.map { String(format: ", streak %.1f%% wide", $0 * 100) } ?? ", no streak")
     }
 }

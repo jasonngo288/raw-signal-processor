@@ -37,14 +37,28 @@ public struct RollStock: Equatable, Sendable {
     public var openQuestions: [String] = []
 
     /// Film grain by ISO (amount, size): finer for slow film, coarser for fast film. The base look's grain is replaced.
+    /// Re-tuned 2026-11-11 for the filmDevelop decode (Apple sharpening x0.50-0.55), on native crops
+    /// (.orchestration/looks/RR_GRAIN_2026-11-11.md). Grain is the same on every frame of a roll (measured grain std
+    /// 0.063-0.080 log2 at ISO 800 on 5 files), so its flat-texture ratio vs Apple swings with the frame's own texture
+    /// (ISO 800: 1.01 on a noisy ISO 200 indoor frame, 2.07 on an ISO 32 sky). No constant grain keeps every frame in
+    /// 0.9-1.3; the table aims a typical frame at ~0.95 (100/160) / ~1.1 (400) / ~1.3 (800).
+    /// 400 0.38 -> 0.35 (clean daylight frames read noisy); 200 0.28 -> 0.27 keeps a clean lab 400 above any 200.
+    /// The 400 -> 800 step is mostly clump size: a bigger cell puts less energy in the fine band, so amount rises too.
     public static func grain(iso: Int, tungsten: Bool = false) -> (amount: Float, size: Float) {
         switch iso {
         case ..<130: return (0.18, 0.050)
         case ..<180: return (0.22, 0.055)
-        case ..<300: return (0.28, 0.060)
-        case ..<600: return (0.38, 0.070)
+        case ..<300: return (0.27, 0.060)
+        case ..<600: return (0.35, 0.070)
         default:     return tungsten ? (0.55, 0.085) : (0.50, 0.080)
         }
+    }
+
+    /// Per-look grain amount multiplier (size unchanged), so a stock's character can sit finer than its ISO class.
+    /// cleanLab x0.80: a clean lab scan at 400 is finer than the other 400s but still grainier than any 200
+    /// (0.28 vs 0.27); at 0.35 / 0.38 its flat texture on clean daylight frames was 1.4-1.8x Apple (noisy).
+    public static func grainScale(look: String) -> Float {
+        look == "cleanLab" ? 0.80 : 1
     }
 
     /// Decode profile (plan §4), from the stock's ISO class and character; plugin `filmDevelop` applies it.
@@ -73,7 +87,8 @@ public struct RollStock: Equatable, Sendable {
         }
         var finish = base.finish
         let g = RollStock.grain(iso: iso, tungsten: tungsten)
-        finish.grainAmount = g.amount; finish.grainSize = g.size
+        finish.grainAmount = g.amount * RollStock.grainScale(look: look); finish.grainSize = g.size
+        if id == "rr-la-phong-100" { finish.lightLeak = .laPhong }   // plugin lightLeak; spec RR_LOOKS_2026-11-11.md
         var stock = FilmStock(name: id, source: base.source, lookIntensity: intensity, finish: finish,
                               summary: "\(nameVi) · ISO \(iso)\(tungsten ? "T" : "") · \(vibe)",
                               allowsSkinProtection: base.allowsSkinProtection, minSkinProtection: base.minSkinProtection)
@@ -107,7 +122,7 @@ public enum RollStocks {
         s("rr-lang-kinh-200", "RR Lăng Kính 200", 200, "warmEvening", 0.70, "warm vintage, medium saturation and contrast"),
         s("rr-lang-kinh-400", "RR Lăng Kính 400", 400, "warmEvening", 0.80, "warm vintage 400, more grain"),
         s("rr-la-phong-100", "RR Lá Phong 100", 100, "mapleRed", 0.85, "warm, deep crimson reds with cyan-teal blues and shadows, low-medium contrast, fine grain",
-          open: ["light leak not built (no leak effect in the finisher yet; spec in .orchestration/looks/RR_LOOKS_2026-11-11.md)"]),
+          open: ["light leak built as plugin lightLeak (needs rollID / rollFrameIndex / rollFrameCount); open numbers listed in WORK_LOG 2026-11-11"]),
         s("rr-nang-100", "RR Nắng 100", 100, "brightTravel", 0.85, "bright sunny daylight, high saturation, clean whites, fine grain"),
         s("rr-ruc-ro-100", "RR Rực Rỡ 100", 100, "vividFine", 0.95, "very saturated, high contrast, strong reds, finest grain"),
         s("rr-da-mem-160", "RR Da Mềm 160", 160, "softPortrait", 0.85, "pastel warm, low contrast, best skin, fine grain"),

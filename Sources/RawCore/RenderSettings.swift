@@ -77,6 +77,12 @@ public struct RenderSettings: Codable, Equatable, Sendable {
     /// 0...1 strength of the cameraMatch tone curve (nil = 1). The exposure offset is always applied in full.
     public var cameraMatchStrength: Float?
 
+    /// Roll position, for per-frame effects (plugin `lightLeak`). `rollID` is part of the seed; frame index is 1-based.
+    /// nil index or count = the frame's place in the roll is unknown: no roll effect is drawn (and the recipe says so).
+    public var rollID: String?
+    public var rollFrameIndex: Int?
+    public var rollFrameCount: Int?
+
     public init(mode: Mode = .appleDefault, decoderVersion: String? = nil, look: String? = nil, lookIntensity: Float = 1) {
         self.mode = mode
         self.decoderVersion = decoderVersion
@@ -100,6 +106,10 @@ public struct RenderSettings: Codable, Equatable, Sendable {
         if let c = highlightClarity, !(0...1).contains(c) { throw RawCoreError.invalidSettings("highlightClarity must be in 0...1") }
         if let o = lookIntensityOffset, !(-0.5...0.5).contains(o) { throw RawCoreError.invalidSettings("lookIntensityOffset must be in -0.5...0.5") }
         if let m = cameraMatchStrength, !(0...1).contains(m) { throw RawCoreError.invalidSettings("cameraMatchStrength must be in 0...1") }
+        if let n = rollFrameCount, n < 1 { throw RawCoreError.invalidSettings("rollFrameCount must be >= 1") }
+        if let i = rollFrameIndex {
+            guard i >= 1, i <= (rollFrameCount ?? Int.max) else { throw RawCoreError.invalidSettings("rollFrameIndex must be 1...rollFrameCount") }
+        }
         if !(0...1).contains(lookIntensity) { throw RawCoreError.invalidSettings("lookIntensity must be in 0...1") }
         if mode == .appleDefault && hasOverrides {
             throw RawCoreError.invalidSettings("appleDefault mode must not carry parameter overrides; use explicit")

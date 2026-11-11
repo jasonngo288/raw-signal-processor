@@ -6,3 +6,6 @@ bench-out/
 corpus-cache/
 __pycache__/
 docs/outputs/
+# user LUTs that fail the licence / trademark contract stay local (Looks/README.md)
+Sources/RawCore/Looks/*.cube
+Sources/RawCore/Looks/*.manifest.json

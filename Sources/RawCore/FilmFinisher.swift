@@ -50,6 +50,68 @@ public enum FilmFinisher {
             .settingAlphaOne(in: ext).cropped(to: ext)
     }
 
+    // MARK: light leak (plugin `lightLeak`; the maths is pure Swift in `LightLeakPlanner`)
+
+    /// Long edge of the bitmap the leak is evaluated on; it is smooth, so it is scaled up with a B-spline.
+    static let leakLongEdge = 256
+
+    /// The leak layer (linear light, alpha 1), `extent` size, from the planned leak. Values are the light to add.
+    public static func lightLeakLayer(_ spec: LightLeakSpec, _ leak: LightLeakPlan.Leak, extent ext: CGRect) -> CIImage? {
+        let long = Double(max(ext.width, ext.height))
+        let lw = max(2, Int((Double(ext.width) / long * Double(leakLongEdge)).rounded()))
+        let lh = max(2, Int((Double(ext.height) / long * Double(leakLongEdge)).rounded()))
+        var px = [Float](repeating: 0, count: lw * lh * 4)
+        let aspect = Float(ext.width / ext.height)
+        for j in 0..<lh {
+            for i in 0..<lw {
+                let a = LightLeakPlanner.addition(spec: spec, leak: leak, x: (Float(i) + 0.5) / Float(lw), y: (Float(j) + 0.5) / Float(lh), aspectWH: aspect)
+                let o = (j * lw + i) * 4
+                px[o] = a.x; px[o + 1] = a.y; px[o + 2] = a.z; px[o + 3] = 1
+            }
+        }
+        let data = px.withUnsafeBufferPointer { Data(buffer: $0) }
+        let small = CIImage(bitmapData: data, bytesPerRow: lw * 16, size: CGSize(width: lw, height: lh), format: .RGBAf, colorSpace: nil)
+        let sx = ext.width / CGFloat(lw), sy = ext.height / CGFloat(lh)
+        guard let up = CIFilter(name: "CIBicubicScaleTransform", parameters: [
+            kCIInputImageKey: small.clampedToExtent(), kCIInputScaleKey: sy, "inputAspectRatio": sx / sy, "inputB": 1.0, "inputC": 0.0,
+        ])?.outputImage else { return nil }
+        return up.transformed(by: CGAffineTransform(translationX: ext.minX, y: ext.minY)).cropped(to: ext)
+    }
+
+    /// Screens the leak over `image` in linear light (the working space), ceiling `spec.encodedCap` encoded: a pixel
+    /// above the ceiling is left as it was, never pulled down; below it the result cannot pass it (no new clip).
+    /// `personMask` (any size, red channel) scales the leak by `spec.personFactor` inside it.
+    public static func lightLeak(_ image: CIImage, spec: LightLeakSpec, leak: LightLeakPlan.Leak, personMask: CIImage? = nil) -> CIImage {
+        let ext = image.extent
+        guard var layer = lightLeakLayer(spec, leak, extent: ext) else { return image }
+        if let m = personMask, m.extent.width > 0, m.extent.height > 0, spec.personFactor < 1 {
+            let e = m.extent
+            let scaled = m.transformed(by: CGAffineTransform(translationX: -e.minX, y: -e.minY))
+                .transformed(by: CGAffineTransform(scaleX: ext.width / e.width, y: ext.height / e.height))
+                .transformed(by: CGAffineTransform(translationX: ext.minX, y: ext.minY))
+                .clampedToExtent()
+                .applyingGaussianBlur(sigma: Double(min(ext.width, ext.height)) * 0.004)
+                .cropped(to: ext)
+            let k = CGFloat(1 - spec.personFactor)
+            let factor = scaled.applyingFilter("CIColorMatrix", parameters: [
+                "inputRVector": CIVector(x: -k, y: 0, z: 0, w: 0), "inputGVector": CIVector(x: -k, y: 0, z: 0, w: 0),
+                "inputBVector": CIVector(x: -k, y: 0, z: 0, w: 0), "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+                "inputBiasVector": CIVector(x: 1, y: 1, z: 1, w: 1),
+            ])
+            layer = layer.applyingFilter("CIMultiplyCompositing", parameters: [kCIInputBackgroundImageKey: factor]).cropped(to: ext)
+        }
+        let screened = layer.applyingFilter("CIScreenBlendMode", parameters: [kCIInputBackgroundImageKey: image])
+        let cap = CGFloat(ColorMath.decodeTransfer(Double(spec.encodedCap)))
+        let ceiling = image.applyingFilter("CIColorMatrix", parameters: [
+            "inputRVector": CIVector(x: 0, y: 0, z: 0, w: 0), "inputGVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+            "inputBVector": CIVector(x: 0, y: 0, z: 0, w: 0), "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+            "inputBiasVector": CIVector(x: cap, y: cap, z: cap, w: 0),
+        ])
+        return screened.applyingFilter("CIMinimumCompositing", parameters: [kCIInputBackgroundImageKey: ceiling])
+            .applyingFilter("CIMaximumCompositing", parameters: [kCIInputBackgroundImageKey: image])
+            .settingAlphaOne(in: ext).cropped(to: ext)
+    }
+
     public static func vignette(_ img: CIImage, _ amount: Float) -> CIImage {
         let ext = img.extent
         let radius = 0.35 * hypot(ext.width, ext.height)  // corners sit at ~1.4x radius

@@ -344,3 +344,46 @@ public enum FilmLooks2026 {
                   allowsSkinProtection: l.spec.monoWeights == nil, minSkinProtection: l.minSkin)
     }
 }
+
+// MARK: sky hold gated by the sky mask (plugin `skyMask`, Developer.finish)
+
+/// Look LUTs without the sky hold, built once per (name, size). The held and the unheld look differ only on bright blue
+/// pixels; the mask decides per pixel which one the image gets.
+final class SkyHoldLUTCache: @unchecked Sendable {
+    static let shared = SkyHoldLUTCache()
+    private let lock = NSLock()
+    private var items: [String: CubeLUT] = [:]
+    func lut(_ key: String, _ make: () -> CubeLUT) -> CubeLUT {
+        lock.lock(); defer { lock.unlock() }
+        if let l = items[key] { return l }
+        let l = make(); items[key] = l
+        return l
+    }
+}
+
+extension FilmStock {
+    /// Sky hold of this stock's look (0 = none; black-and-white looks never hold).
+    public var skyHoldAmount: Float {
+        switch source {
+        case .preset: return Preset26.named(name)?.params.skyHold ?? 0
+        case .spec(let s): return s.monoWeights == nil ? s.skyHold : 0
+        default: return 0
+        }
+    }
+
+    /// The same look with `skyHold` 0, same cube size as `lut()`; nil when the look has no sky hold.
+    public func lutWithoutSkyHold(size: Int = 33) -> CubeLUT? {
+        guard skyHoldAmount > 0 else { return nil }
+        switch source {
+        case .preset:
+            guard var p = Preset26.named(name) else { return nil }
+            p.params.skyHold = 0
+            return SkyHoldLUTCache.shared.lut("\(name)#nohold|\(size)") { p.lut(size: size) }
+        case .spec(var s):
+            s.skyHold = 0
+            let n = max(size, s.cubeSize)
+            return SkyHoldLUTCache.shared.lut("\(name)#nohold|\(n)") { s.lut(size: n, title: name) }
+        default: return nil
+        }
+    }
+}

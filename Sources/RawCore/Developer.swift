@@ -30,9 +30,10 @@ public final class Developer: @unchecked Sendable {
     /// unless `staleReason` says it no longer fits the render.
     public struct Analysis: Codable, @unchecked Sendable {
         /// Bumped when what an analysis measures changes; an older stored analysis is re-made.
-        public static let currentSchema = 3
+        public static let currentSchema = 4   // 4: sky mask (SkyMask.version, sky-mask.png)
         public static let fileName = "analysis.json"
         public static let maskFileName = "person-mask.png"
+        public static let skyMaskFileName = "sky-mask.png"
 
         public var schema: Int? = Analysis.currentSchema
         public var context: SceneContext
@@ -47,6 +48,9 @@ public final class Developer: @unchecked Sendable {
         public var sourceBytes: Int64? = nil
         /// Vision person mask (any size). Not in the JSON; stored as `person-mask.png` by `write(to:)`.
         public var personMask: CIImage? = nil
+        /// Heuristic sky mask (plugin `skyMask`, `SkyMask.version` in `context`), 8-bit grey. Stored as `sky-mask.png`;
+        /// absent when the frame has no sky or the plugin was off (the context says which).
+        public var skyMask: CIImage? = nil
 
         enum CodingKeys: String, CodingKey {
             case schema, context, defaults, support, seconds, decoderVersion, plugins, sourceFile, sourceBytes
@@ -64,6 +68,11 @@ public final class Developer: @unchecked Sendable {
             if plugins.contains("highlightRecovery"), context.edrHeadroom == nil, !(self.plugins ?? []).contains("highlightRecovery") {
                 return "highlightRecovery is on but the analysis has no EDR headroom"
             }
+            if plugins.contains("skyMask") {
+                if context.skyMaskVersion == nil { return "skyMask is on but the analysis has no sky mask decision" }
+            }
+            if let v = context.skyMaskVersion, v != SkyMask.version { return "sky mask version \(v) != \(SkyMask.version)" }
+            if (context.skyFraction ?? 0) >= SkyMask.minCoverage, skyMask == nil { return "sky mask image missing" }
             return nil
         }
 
@@ -73,15 +82,16 @@ public final class Developer: @unchecked Sendable {
             let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]
             enc.nonConformingFloatEncodingStrategy = .convertToString(positiveInfinity: "inf", negativeInfinity: "-inf", nan: "nan")
             try enc.encode(self).write(to: directory.appendingPathComponent(Self.fileName), options: .atomic)
-            let maskURL = directory.appendingPathComponent(Self.maskFileName)
-            if let m = personMask {
-                let grey = CGColorSpace(name: CGColorSpace.linearGray)!
-                guard let png = renderer.context.pngRepresentation(of: m.cropped(to: m.extent), format: .L8, colorSpace: grey) else {
-                    throw RawCoreError.renderFailed("person mask PNG failed")
+            for (mask, name) in [(personMask, Self.maskFileName), (skyMask, Self.skyMaskFileName)] {
+                let url = directory.appendingPathComponent(name)
+                if let m = mask {
+                    guard let png = renderer.context.pngRepresentation(of: m.cropped(to: m.extent), format: .L8, colorSpace: Renderer.linearGray) else {
+                        throw RawCoreError.renderFailed("\(name) failed")
+                    }
+                    try png.write(to: url, options: .atomic)
+                } else {
+                    try? FileManager.default.removeItem(at: url)
                 }
-                try png.write(to: maskURL, options: .atomic)
-            } else {
-                try? FileManager.default.removeItem(at: maskURL)
             }
         }
 
@@ -91,6 +101,8 @@ public final class Developer: @unchecked Sendable {
             var a = try dec.decode(Analysis.self, from: Data(contentsOf: directory.appendingPathComponent(fileName)))
             let maskURL = directory.appendingPathComponent(maskFileName)
             if FileManager.default.fileExists(atPath: maskURL.path) { a.personMask = CIImage(contentsOf: maskURL) }
+            let skyURL = directory.appendingPathComponent(skyMaskFileName)
+            if FileManager.default.fileExists(atPath: skyURL.path) { a.skyMask = CIImage(contentsOf: skyURL) }
             return a
         }
     }
@@ -110,6 +122,8 @@ public final class Developer: @unchecked Sendable {
         public var settings: RenderSettings
         public var context: SceneContext?
         public var personMask: CIImage?
+        /// Sky mask of the analysis (plugin `skyMask`); nil = none (see `context.skyFraction` / `skyGate` for why).
+        public var skyMask: CIImage? = nil
         /// Develop profile the decode was made with (`FilmStock.develop.profile`, "stock: profile"); nil = none applied.
         public var developedFor: String? = nil
         var active: [any DevelopPlugin]
@@ -133,7 +147,8 @@ public final class Developer: @unchecked Sendable {
         let decoderVersion = try decoder.pinnedVersion(url: url, requested: decoderVersion)
         let s512 = try decoder.scaleFactor(url: url, longEdge: 512)
         let lin = try decoder.decode(url: url, settings: RenderSettings(mode: .sceneLinear, decoderVersion: decoderVersion), scaleFactor: s512)
-        var c = SceneContext.measure(sceneLinear: try renderer.linearImage(lin.image), iso: lin.recipe.iso)
+        let sceneLin = try renderer.linearImage(lin.image)
+        var c = SceneContext.measure(sceneLinear: sceneLin, iso: lin.recipe.iso)
         c.exposureTime = lin.recipe.exposureTime
         c.cct = Double(lin.recipe.defaults.neutralTemperature)
         c.tint = Double(lin.recipe.defaults.neutralTint)
@@ -153,6 +168,27 @@ public final class Developer: @unchecked Sendable {
         }
         #endif
 
+        // Sky mask (plugin skyMask): the label gate first (Vision labels), then the heuristic on the scene-linear 512 px render.
+        var sky: CIImage?
+        if plugins.defaultEnabled.contains("skyMask") {
+            c.skyMaskVersion = SkyMask.version
+            switch SkyMask.gate(labels: c.labels) {
+            case .unavailable(let why):
+                c.skyFraction = nil; c.skyGate = "unavailable: " + why
+            case .closed(let why):
+                c.skyFraction = 0; c.skyGate = why
+            case .open(let label, let conf):
+                let r = SkyMask.compute(sceneLinear: sceneLin)
+                c.skyFraction = r.coverage
+                if r.coverage >= SkyMask.minCoverage {
+                    sky = renderer.maskImage(r.mask, width: r.width, height: r.height)
+                    c.skyGate = String(format: "label %@ %.2f, heuristic coverage %.1f%%", label, conf, r.coverage * 100)
+                } else {
+                    c.skyGate = String(format: "label %@ %.2f, but heuristic coverage %.2f%% < %.0f%%", label, conf, r.coverage * 100, SkyMask.minCoverage * 100)
+                }
+            }
+        }
+
         if plugins.defaultEnabled.contains("highlightRecovery") {   // plugin work only when the plugin is on
             var edr = RenderSettings(mode: .explicit, decoderVersion: decoderVersion)
             edr.extendedDynamicRangeAmount = 1
@@ -166,7 +202,7 @@ public final class Developer: @unchecked Sendable {
         let bytes = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value
         return Analysis(context: c, defaults: lin.recipe.defaults, support: lin.recipe.support,
                         seconds: Date().timeIntervalSince(t0), decoderVersion: decoderVersion, plugins: plugins.defaultEnabled,
-                        sourceFile: url.lastPathComponent, sourceBytes: bytes, personMask: mask)
+                        sourceFile: url.lastPathComponent, sourceBytes: bytes, personMask: mask, skyMask: sky)
     }
 
     /// Calibration keys for a file: model identifier, DNG UniqueCameraModel, "Make Model".
@@ -192,6 +228,7 @@ public final class Developer: @unchecked Sendable {
         var reasons: [String] = []
         var ctx: SceneContext?
         var personMask: CIImage?
+        var skyMask: CIImage?
         let active = try plugins.active(for: settings)
         var developedFor: String?
         var ran = Set<String>()   // plugins that actually did something (recipe.plugins)
@@ -227,6 +264,7 @@ public final class Developer: @unchecked Sendable {
             if !reused { reasons.append(String(format: "analysis %.2fs", a.seconds)) }
             ctx = a.context
             personMask = a.personMask
+            skyMask = a.skyMask
         }
 
         // Per-model calibration: CCM + exposure offset inside linearSpaceFilter (scene-linear).
@@ -269,8 +307,34 @@ public final class Developer: @unchecked Sendable {
             if !why.isEmpty { ran.insert(p.id) }
             out.recipe.decisions += why.map { "[\(p.id)] " + $0 }
         }
-        return Base(image: image, recipe: out.recipe, settings: st, context: ctx, personMask: personMask,
+        return Base(image: image, recipe: out.recipe, settings: st, context: ctx, personMask: personMask, skyMask: skyMask,
                     developedFor: developedFor, active: active, ran: ran, pluginContext: pctx)
+    }
+
+    /// A look with a sky hold (`FilmStock.skyHoldAmount` > 0). With the `skyMask` plugin and a mask decision from the
+    /// analysis the hold acts only inside the sky mask: the look is rendered with and without the hold (two cached LUTs)
+    /// and blended by the mask (CIBlendWithMask). Otherwise the hold stays colour-only, and the recipe says so.
+    func skyGatedLook(stock: FilmStock, lut: CubeLUT, image: CIImage, strength: Float, base: Base,
+                      decisions: inout [String], ran: inout Set<String>) throws -> CIImage {
+        func colourOnly(_ why: String) throws -> CIImage {
+            decisions.append((base.active.contains { $0.id == "skyMask" } ? "[skyMask] " : "") + "sky mask unavailable (\(why)): colour-only sky hold")
+            return try renderer.applyLook(lut, to: image, intensity: strength, colorSpace: stock.lookColorSpace)
+        }
+        guard base.active.contains(where: { $0.id == "skyMask" }) else { return try colourOnly("plugin skyMask off") }
+        guard let ctx = base.context, ctx.skyMaskVersion != nil else { return try colourOnly("render not analysed, or analysis without sky mask") }
+        guard let coverage = ctx.skyFraction else { return try colourOnly(ctx.skyGate ?? "no decision") }
+        guard let unheld = stock.lutWithoutSkyHold(size: lut.size) else { return try colourOnly("look has no unheld variant") }
+        ran.insert("skyMask")
+        let tag = String(format: "sky hold %.2f of %@", stock.skyHoldAmount, stock.name)
+        guard coverage >= SkyMask.minCoverage, let mask = base.skyMask else {
+            decisions.append("[skyMask] \(tag) switched off: no sky in the frame (\(ctx.skyGate ?? "coverage below minimum")); non-sky pixels are not held (colour-only would have held every bright blue pixel)")
+            return try renderer.applyLook(unheld, to: image, intensity: strength, colorSpace: stock.lookColorSpace)
+        }
+        let held = try renderer.applyLook(lut, to: image, intensity: strength, colorSpace: stock.lookColorSpace)
+        let plain = try renderer.applyLook(unheld, to: image, intensity: strength, colorSpace: stock.lookColorSpace)
+        decisions.append(String(format: "[skyMask] sky mask v%d: coverage %.1f%% (%@); %@ applied only inside the mask (CIBlendWithMask of the look with and without the hold)",
+                                SkyMask.version, coverage * 100, ctx.skyGate ?? "", tag))
+        return renderer.blend(held, over: plain, mask: mask)
     }
 
     /// Stage 2: look (stock supplies look, intensity and finish unless set explicitly) → skin protection → finish
@@ -324,7 +388,12 @@ public final class Developer: @unchecked Sendable {
                 if case .log(let c) = stock.lookInput {
                     out.recipe.decisions.append("\(stock.name) is a \(c.rawValue) look but no plugin applied it (logLook off): LUT applied to the display base")
                 }
-                image = try renderer.applyLook(lut, to: image, intensity: strength, colorSpace: stock.lookColorSpace)
+                if stock.lookInput == .display, stock.skyHoldAmount > 0 {
+                    image = try skyGatedLook(stock: stock, lut: lut, image: image, strength: strength, base: base,
+                                             decisions: &out.recipe.decisions, ran: &ran)
+                } else {
+                    image = try renderer.applyLook(lut, to: image, intensity: strength, colorSpace: stock.lookColorSpace)
+                }
             }
             if case .library(let n) = stock.source, let m = FilmStock.manifest(n) {
                 out.recipe.decisions.append("look \(n): \(m.source.author) \(m.source.version), \(m.license.id) (redistribution: \(m.license.redistributionInApp)), sha \(m.sha256.prefix(12))…, route \(m.route)")
@@ -359,8 +428,10 @@ public final class Developer: @unchecked Sendable {
                                                stock.map { " (\($0.name))" } ?? "", finish.grainAmount, finish.grainSize, finish.grainSeed,
                                                finish.halationAmount, finish.halationThreshold, finish.halationRadius))
         }
+        var finishCtx = base.pluginContext
+        finishCtx.personMask = base.personMask   // lightLeak holds the leak back on people (spec: x personFactor)
         for p in base.active {
-            let (img, why) = try p.afterFinish(image, settings: st, finish: finish, ctx: base.pluginContext)
+            let (img, why) = try p.afterFinish(image, settings: st, finish: finish, ctx: finishCtx)
             image = img
             if !why.isEmpty { ran.insert(p.id) }
             out.recipe.decisions += why.map { "[\(p.id)] " + $0 }
@@ -368,6 +439,17 @@ public final class Developer: @unchecked Sendable {
         out.recipe.plugins = base.active.map(\.id).filter { ran.contains($0) }
         return Output(image: image, recipe: out.recipe, context: base.context)
     }
+}
+
+/// Extra: sky mask for the look's sky hold. Analysis (Developer.analyze) makes a heuristic mask, gated by the Vision
+/// sky / landscape labels, and stores it as `sky-mask.png`; `Developer.finish` then applies a stock's `skyHold` only
+/// inside the mask (the look rendered with and without the hold, blended by the mask). Unplugged, or without a mask
+/// decision, the hold stays colour-only (`Preset26.skyWeight`) and the recipe says so. The work lives in Developer
+/// (analysis and finish), this type is the registry entry that switches it on.
+public struct SkyMaskPlugin: DevelopPlugin {
+    public let id = "skyMask"
+    public let summary = "sky hold only inside a heuristic sky mask (top-connected, smooth, bright blue / cloud) gated by Vision labels"
+    public init() {}
 }
 #endif
 

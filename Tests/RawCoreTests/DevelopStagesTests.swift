@@ -260,5 +260,92 @@ final class DevelopStagesTests: XCTestCase {
         XCTAssertLessThan(zip(lut.rgba, text.rgba).map { abs($0 - $1) }.max() ?? 1, 1e-6)
         XCTAssertThrowsError(try LUTBinaryFormat.decode(Data([1, 2, 3])))
     }
+
+    // MARK: sky mask (plugin skyMask)
+
+    /// Deterministic noise in -1...1.
+    private func noise(_ i: Int) -> Float {
+        var x = UInt32(truncatingIfNeeded: i) &* 2654435761 &+ 12345
+        x ^= x >> 13; x = x &* 1597334677; x ^= x >> 16
+        return Float(x % 20001) / 10000 - 1
+    }
+
+    private func scene(_ w: Int, _ h: Int, _ f: (Int, Int) -> SIMD3<Float>) -> LinearImage {
+        var p = [Float](repeating: 0, count: w * h * 3)
+        for y in 0..<h { for x in 0..<w { let c = f(x, y); let i = (y * w + x) * 3; p[i] = c.x; p[i + 1] = c.y; p[i + 2] = c.z } }
+        return LinearImage(width: w, height: h, pixels: p)
+    }
+
+    private func mean(_ r: SkyMask.Result, x: Range<Int>, y: Range<Int>) -> Float {
+        var s: Float = 0
+        for yy in y { for xx in x { s += r.mask[yy * r.width + xx] } }
+        return s / Float(x.count * y.count)
+    }
+
+    func testSkyMaskTopConnectedBlueIsSkyAndBlueObjectBelowIsNot() {
+        let w = 160, h = 120
+        // Smooth blue sky gradient on the top 45 %, textured grey ground, and a smooth bright blue "car" in the lower half.
+        let img = scene(w, h) { x, y in
+            if y < 54 { return SIMD3(0.20 + 0.0005 * Float(y), 0.38 + 0.001 * Float(y), 0.80) }
+            if (60..<100).contains(x), (80..<108).contains(y) { return SIMD3(0.15, 0.30, 0.75) }
+            let n = 0.12 * self.noise(y * w + x)
+            return SIMD3(0.22 + n, 0.20 + n, 0.18 + n)
+        }
+        let r = SkyMask.compute(sceneLinear: img)
+        XCTAssertGreaterThan(mean(r, x: 10..<150, y: 4..<46), 0.9, "top-connected smooth blue is sky")
+        XCTAssertLessThan(mean(r, x: 66..<94, y: 86..<102), 0.05, "a blue object in the lower half, not connected to the top, is not sky")
+        XCTAssertLessThan(mean(r, x: 5..<150, y: 70..<80), 0.05, "textured ground is not sky")
+        XCTAssertEqual(r.coverage, 54.0 / 120, accuracy: 0.06)
+    }
+
+    func testSkyMaskBlueCastTexturedShadeWallIsLow() {
+        let w = 160, h = 120
+        // A blue-cast white wall fills the frame, top included, with rough plaster / stucco texture (+-15 % per pixel).
+        let img = scene(w, h) { x, y in
+            let n = 0.15 * self.noise(y * w + x + 99)
+            return SIMD3(0.62 + n, 0.70 + n, 0.85 + n)
+        }
+        let r = SkyMask.compute(sceneLinear: img)
+        XCTAssertLessThan(r.coverage, 0.05, "textured shade wall must not be held like sky (coverage \(r.coverage))")
+        // The same wall, perfectly smooth and top-connected, is indistinguishable from sky by pixels: only the label gate stops it.
+        let smooth = scene(w, h) { _, _ in SIMD3(0.62, 0.70, 0.85) }
+        XCTAssertGreaterThan(SkyMask.compute(sceneLinear: smooth).coverage, 0.5)
+    }
+
+    func testSkyMaskLabelGate() {
+        XCTAssertEqual(SkyMask.gate(labels: ["sky": 0.82, "outdoor": 0.9]), .open(label: "sky", confidence: 0.82))
+        XCTAssertEqual(SkyMask.gate(labels: ["mountain": 0.5, "blue_sky": 0.6]), .open(label: "blue_sky", confidence: 0.6))
+        // Indoor mug / mooncake: classification exists and has no sky label -> closed with the reason.
+        if case .closed(let why) = SkyMask.gate(labels: ["cup": 0.8, "indoor": 0.6]) { XCTAssertTrue(why.contains("cup 0.80"), why) } else { XCTFail("gate must be closed") }
+        if case .closed = SkyMask.gate(labels: ["outdoor": 0.95, "car": 0.7]) {} else { XCTFail("outdoor alone is not a sky label") }
+        if case .closed = SkyMask.gate(labels: [:]) {} else { XCTFail("empty labels = no sky label") }
+        if case .unavailable = SkyMask.gate(labels: nil) {} else { XCTFail("no classification = no decision") }
+    }
+
+    func testSkyMaskBlendAndStockVariants() throws {
+        // Held look applied only inside the mask: left half mask 1 -> foreground, right half 0 -> background.
+        let r = Renderer()
+        let fg = CIImage(color: CIColor(red: 1, green: 0, blue: 0)).cropped(to: CGRect(x: 0, y: 0, width: 64, height: 32))
+        let bg = CIImage(color: CIColor(red: 0, green: 0, blue: 1)).cropped(to: CGRect(x: 0, y: 0, width: 64, height: 32))
+        var m = [Float](repeating: 0, count: 8 * 4)
+        for y in 0..<4 { for x in 0..<4 { m[y * 8 + x] = 1 } }
+        let out = try r.linearImage(r.blend(fg, over: bg, mask: r.maskImage(m, width: 8, height: 4), feather: 0.001))
+        XCTAssertGreaterThan(out.pixels[(16 * 64 + 5) * 3], 0.8, "inside the mask: held look (sRGB red = 0.82 in linear P3)")
+        XCTAssertLessThan(out.pixels[(16 * 64 + 5) * 3 + 2], 0.05)
+        XCTAssertGreaterThan(out.pixels[(16 * 64 + 58) * 3 + 2], 0.9, "outside the mask: look without the hold")
+        XCTAssertLessThan(out.pixels[(16 * 64 + 58) * 3], 0.05)
+        // Stocks with a hold have an unheld variant that differs only on blue; the others have none.
+        let soft = try XCTUnwrap(FilmStock.named("PRESET_26_SOFT400")), sp = try XCTUnwrap(FilmStock.named("softPortrait"))
+        XCTAssertGreaterThan(soft.skyHoldAmount, 0); XCTAssertGreaterThan(sp.skyHoldAmount, 0)
+        XCTAssertNil(try XCTUnwrap(FilmStock.named("goldenDay")).lutWithoutSkyHold())
+        func dist(_ a: SIMD3<Float>, _ b: SIMD3<Float>) -> Float { let d = a - b; return (d * d).sum().squareRoot() }
+        for s in [soft, sp] {
+            let held = s.lut(), plain = try XCTUnwrap(s.lutWithoutSkyHold(size: s.lut().size))
+            XCTAssertEqual(held.size, plain.size)
+            let sky = SIMD3<Float>(0.45, 0.62, 0.92), skin = SIMD3<Float>(0.85, 0.62, 0.52)
+            XCTAssertGreaterThan(dist(held.apply(sky), plain.apply(sky)), 0.02, "\(s.name): hold changes bright blue")
+            XCTAssertLessThan(dist(held.apply(skin), plain.apply(skin)), 0.004, "\(s.name): hold leaves skin alone")
+        }
+    }
 }
 #endif

@@ -2,6 +2,96 @@
 
 Newest first. Each entry: what changed, why, evidence, what is NOT verified yet.
 
+## 2026-11-11 — RR roll-stock grain re-tuned for the filmDevelop decode
+- **What** (`RollStocks.swift`, grain only; note `.orchestration/looks/RR_GRAIN_2026-11-11.md`):
+  - `RollStock.grain`: ISO 400 amount 0.38 -> 0.35, ISO 200 0.28 -> 0.27. 100 / 160 / 800 / 800T and all sizes are unchanged.
+  - New `RollStock.grainScale(look:)`: a per-look amount multiplier. cleanLab x0.80, so rr-chuan-400 goes 0.38 -> 0.28; every other look x1.
+  - `testGrainGrowsWithISO` extended. Every shipped stock is grainier (amount and size) than every stock of a lower box ISO,
+    chuan-400 is finer than chan-dung-400, and the multiplier stays in 0.7...1.0.
+- **Why:**
+  - rr-chuan-400 ("clean lab, medium grain") read noisy on clean daylight frames (flat texture 1.80x / 1.44x Apple).
+  - Finding: at a given stock the grain's flat std is nearly the same on every file (ISO 800: 0.063-0.080 log2). The
+    ratio vs Apple swings because Apple's own flat texture varies about 3x between files (0.042 on an ISO 32 sky,
+    0.129 on an ISO 200 indoor frame).
+  - So no constant grain keeps every frame in 0.9-1.3x. The table aims a typical frame at about 0.95x (100/160),
+    1.1x (400) and 1.3x (800).
+  - ISO 160 was not raised for mug (0.75x): 0.9x there would put the ISO 32 sky at about 2x.
+- **Evidence:** `raw-bench bench originals --native --native-stock <id>`, flat ratio after grain, BVQX / HDR01 / IMG_1901 / mooncake / mug:
+  - rr-chuan-400: 1.80 / 1.44 / 1.05 / 1.19 / 0.94 -> 1.43 / 1.25 / 0.96 / 1.01 / 0.86.
+  - rr-chan-dung-400: 1.79 / 1.44 / 1.04 / 1.18 / 0.95 -> 1.68 / 1.38 / 1.02 / 1.13 / 0.93.
+  - rr-da-mem-160 and rr-dem-mem-800 are identical before and after (1.30 / 1.16 / 0.87 / 0.95 / 0.75 and
+    2.07 / 1.59 / 1.11 / 1.32 / 1.01).
+  - Before-grain ratios are identical across builds.
+  - chuan-400 overshoot after grain: BVQX +24 -> +9 %, HDR01 +86 -> +26 %.
+  - Eye check on native crops (sky, cheek, white wall, faces, foliage, desk): the new chuan-400 reads as an even, fine lab
+    grain; the old one was mottled.
+  - `swift test --filter RollStocksTests`: 10 tests, 0 failures.
+- **Unverified:**
+  - Device; ISO ≥ 1600 and real low-light frames; ProRAW; holdout files (not run, not tuned on). The 100 / 200 stocks
+    were not benched.
+  - Bright sparkle dots on near-white walls at 400/800 come from the finisher's highlight fade (w floor 0.2), not from
+    the amount. This is left to the finisher owner.
+
+## 2026-11-11 — Plugin `lightLeak` (RR Lá Phong 100) and cameraMatch curve strength with a stock
+**What**: (1) `LightLeakSpec` / `LightLeakPlan` / `LightLeakPlanner` (Look.swift, pure Swift) per "Light leak spec" in
+`.orchestration/looks/RR_LOOKS_2026-11-11.md`; `FilmFinish.lightLeak`; `FilmFinisher.lightLeak` (256 px bitmap of the pure maths, B-spline
+upscale, screen in linear light, ceiling 0.99 encoded, person-mask x0.4 if a mask is given); plugin `lightLeak` (afterFinish, in
+`PluginRegistry.standard`, default on); `RenderSettings.rollID / rollFrameIndex / rollFrameCount` (1-based, validated, not decode
+overrides); one line in `RollStock.stock` enables it for `rr-la-phong-100` only. CLI: `raw-bench render ... --roll-id ID --frame N --frames COUNT`
+and `--camera-reference HEIC`. The recipe logs seed, class, chance draw, edge, position, strength, sigma, hue, streak. Same roll id + frame
+index = same plan (FNV-1a 64 -> SplitMix64, no Swift hashing). No roll position = no leak, logged. ROADMAP EXTRAS row.
+(2) cameraMatch with a stock that has `develop`: `ToneMatch.blended` takes the HEIC curve toward identity at
+`FilmDevelop.cameraMatchCurveStrength` (0.5); exposure match unchanged; no stock = unchanged; logged ("max shift a -> b").
+**Spec items built**: soft Gaussian ellipse from the left/right edge, core 0-10 % outside, reach 21-39 % of the width (30 % +-30 %), optional
+streak 5-12 % wide, red-orange [1,.30,.06] to hue 70, hue +-8, size +-30 %, never the central third along the edge, screen blend, peak add
+0.25 x amount 0.35 x strength, ceiling 0.99 encoded, frames 1-2 always 0.6-0.9, frame 3 50 % 0.3-0.5, middle 12 % 0.15-0.35 (never strong, so never two
+strong in a row), last 60 %, seed = roll id + frame index, removable with `plugins = []`.
+**OPEN (the spec does not say; the value used is in `LightLeakSpec`, all one-line changes)**:
+1. Core colour vs hue: [1.0, 0.30, 0.06] gives OKLCh hue 52 degrees (54 as linear sRGB), the text says 35-45. Used the numbers as written, linear in the working space (P3).
+2. "Medium" strength of the last frame: no number. Used 0.35-0.60 (the gap between faint 0.35 and strong 0.6).
+3. Ellipse aspect: no ratio. Used sigma along the edge = 1.5 x sigma into the frame.
+4. What "falls off to 20-40 % of the width" means: used reach = 2.45 sigma (5 % of peak), measured from the core, 30 % +-30 % size jitter.
+5. Streak: chance (0.5), strength (0.25 of the peak), full-height raised-cosine band from the edge: all invented, "optional" only.
+6. "Left or right in landscape": used left/right in every orientation (portrait too). Which edge of a portrait frame is the door side is not stated.
+7. "Along the long axis": read as the ellipse's long axis lying along the edge.
+8. Class precedence on short rolls: start (1-2), third (3), last, middle. A 3-frame roll's frame 3 uses the third row.
+9. Middle "about 12 %": an independent seeded draw per frame, so a roll has 12 % on average, not exactly; over 400 simulated 36-frame rolls 1557/12800 = 12.2 %.
+10. Without a `rollID` the seed uses "" (two rolls without ids share a pattern). No roll position = no leak (spec silent).
+11. The "user can turn it off": only via `plugins` (no separate amount setting).
+12. Visibility: at the spec's numbers the peak add is 0.25 x 0.35 x 0.86 = 0.076 linear; on IMG_1901 and mooncake frame 1 the leak is very faint. Whether 0.35 is meant to look that subtle is for the user to judge.
+13. The person mask: `PluginRenderContext.personMask` exists but Developer.swift does not fill it (not mine): to get the x0.4 on people, Developer.finish must set `base.pluginContext.personMask = base.personMask` before the afterFinish loop. Until then the recipe says "person mask not available: no attenuation".
+**Evidence**: `swift test --filter LightLeakTests` 10/10 (determinism, 400 rolls x 36 frame pattern: frames 1-2 always, frame 3 199/400, last 218/400,
+placement, hue range, peak add, screen lifts shadows more, no clip, person factor 0.40, plugin round trip, only la-phong has a leak, curve blend).
+Two plugin-list asserts (FilmFinisherTests, DecoderTests) now check the first five ids + `lightLeak` (skyMask is another agent's). `raw-bench bench originals --full`:
+Gate 1 / Gate 2 auto / Gate 2 core PASS on all 5 (no roll position there, so no leak). Renders (scale 0.5, roll "demo-roll", 36 frames; frames 1 and 2 leak, 18 and 36
+draw no leak): scratchpad `leak/`. `raw-bench pairs docs`: unchanged without a stock (ΔE00 vs HEIC 2.10 and 3.78 with cameraMatch). With stock rr-chuan-400 the
+curve max shift goes 0.192 -> 0.096 and 0.147 -> 0.074 on the two pairs (recipe line); ΔE00 vs HEIC with a stock was not measured (pairs has no stock variant).
+**Not verified**: a real roll, a device, the Vision person mask path, the look of the leak on a human review, ΔE00 vs HEIC of the 0.5 blend, CI, xcodeproj (no Swift file added in Sources/RawCore).
+
+## 2026-11-11 — Plugin `skyMask`: sky hold only inside a sky mask (user: "Mask trời + bật skyHold theo nhãn cảnh của Vision")
+**What**: Pure `SkyMask` (ContextAnalysis.swift, algorithm v1): on the 512 px scene-linear render, candidates = bright blue or bright
+neutral (cloud) pixels with low 7x7 luma texture; connected regions kept only if they touch the top rows and cover >= 1 % of the frame;
+guided filter (luma guide, r = 1.6 % of the long edge) -> soft mask. Gate: `SkyMask.gate(labels:)` (Vision sky / landscape labels >= 0.30,
+"outdoor" alone does not count): closed = mask empty, unavailable (no classification) = no decision. Analysis schema 3 -> 4: `sky-mask.png`
+next to `person-mask.png`, `SceneContext.skyMaskVersion / skyFraction / skyGate`; a stored analysis with another mask version, without a
+decision while the plugin is on, or with a missing mask image is re-made. `Developer.finish`: for a stock with `skyHold` > 0 (new
+`FilmStock.skyHoldAmount`, `lutWithoutSkyHold`, cached; FilmLooks.swift) the look is rendered with and without the hold and blended by the mask
+(`Renderer.blend`, CIBlendWithMask). Gate closed / coverage < 1 % = look without hold; plugin off, not analysed or no classification =
+colour-only as before, recipe: "sky mask unavailable (...): colour-only sky hold". Plugin `skyMask` registered (one-line edit in Plugins.swift),
+ROADMAP EXTRAS row. Tests: DevelopStagesTests +4 (top-connected blue = sky, blue object below = not, textured blue-cast wall low, label gate,
+blend + stock variants). No new Swift file, xcodeproj unchanged.
+**Evidence** (`raw-bench looks`, 1024 px, before = `--plugins` without skyMask = old colour-only; sky pixels as in Looks.swift, top 40 % blue-hue):
+frame fraction held (colour-only -> with mask): iPhone12Pro mountain/lake 65.7 % -> 10.9 %, IMG_1901 (stage lights, label music/people) 26.4 % -> 0,
+mug 2.8 % -> 0, mooncake 0.09 % -> 0, HDR01 0.02 % -> 0; BVQX5524 (sky 0.95) 69.4 % -> 69.1 %, 20250322 (land 0.92) 7.2 % -> 6.2 %, P1073242 7.0 % -> 6.6 %.
+Sky chroma / base in a hand-placed box of pure sky rows (before -> after): BVQX5524 PORTRAIT160 0.995 -> 0.992, SOFT400 0.997 -> 0.993, softPortrait 0.969 -> 0.959;
+20250322 (rows < 200) 0.790 -> 0.787 / 0.671 -> 0.664 / 0.442 -> 0.437; P1073242 (rows < 60) 0.963 -> 0.958 / 0.962 -> 0.953 / 0.881 -> 0.870;
+iPhone12Pro (rows < 60) 0.956 -> 0.921 / 0.947 -> 0.916 / 0.926 -> 0.880 (white cloud edges are textured, so they are not held; blue lake and rock slopes lost their hold on purpose).
+`raw-bench looks` skyL/skyChroma on iPhone12Pro drops for the same reason (its top 40 % contains bluish mountain rock, not sky). Gate 1 / 2 auto / 2 core PASS on all 5 originals;
+`swift test --filter DevelopStagesTests` 13 / 13.
+**Not verified**: overcast white sky and blue-cast smooth walls touching the top are indistinguishable from sky by pixels (only the label gate helps);
+label names ("blue_sky", "cloudy", ...) assumed from the Vision taxonomy and seen on 5 files only; no labelled sky corpus (IoU); analysis cost on device with the
+camera running (mask ~ pure Swift on 512 px, measured inside the 0.6-1.1 s analysis, not separately); no visual review by the user.
+
 ## 2026-11-11 — Plugin `filmDevelop`: soft film decode per roll stock (plan SMARTPHONE_LOOK_PLAN_2026-11-11)
 **What**: `FilmDevelop` (Look.swift, pure, Codable) + `FilmStock.develop`; `RollStock.develop` from stock ISO class and character
 (ISO<400 sharp x0.55, 400-1599 x0.45 + luma NR no higher than Apple's, >=1600 x0.35 + luma NR <= +0.05; vivid x0.70, portrait x0.45;
@@ -760,3 +850,19 @@ Defaults differ per model (sharpness, contrast, NR, shadowBias) → must be stor
 - **Evidence:** `swift build -c release` and `swift build --build-tests` green; `swift test --filter RollStocksTests`
   10/10 pass. The full suite was not re-run before this commit (user: commit when the build is green); CI runs it.
 - **Unverified:** legal check of the English names ("Portrait …" flagged).
+
+## 2026-11-11 — lightLeak gets the person mask; batch commit (skyMask, lightLeak, cameraMatch, grain)
+- **What:** `Developer.finish` passes `base.personMask` into the plugin context of the afterFinish stage, so
+  `lightLeak` scales the leak by personFactor (×0.40) on people. Before, the recipe said "person mask not
+  available". This is the one line the lightLeak agent left for the owner of Developer.swift.
+- **Evidence:**
+  - `swift build -c release` and `swift build --build-tests` green.
+  - `swift test --filter "LightLeakTests|DevelopStagesTests"` 23/23 pass.
+  - mooncake, frame 1/36, rr-la-phong-100: the recipe logs "person mask x0.40".
+  - The three agents each reported a full suite of 113/113 on their own builds. No full run was made on the combined
+    tree: per the user, commit when the build is green; CI runs the suite.
+- **Open:**
+  - Order: the leak is applied after grain (afterFinish). On film the leak is exposure, so grain should sit on top.
+    Not changed yet.
+  - The finisher's grain fades too little toward white (sparkle on near-white walls at 400 / 800, grain agent).
+  - The bench sky metric counts stage lights and blue rock as sky (sky-mask agent).

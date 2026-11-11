@@ -85,6 +85,13 @@ public enum ToneMatch {
         return out
     }
 
+    /// The curve blended toward identity: y = x + k (y_curve - x), k in 0...1. A convex mix of two monotone curves is
+    /// monotone, so the result stays a valid tone curve. k = 1 returns the curve, k = 0 the identity.
+    public static func blended(_ c: [SIMD2<Double>], strength k: Double) -> [SIMD2<Double>] {
+        let k = min(max(k, 0), 1)
+        return c.map { SIMD2($0.x, $0.x + k * ($0.y - $0.x)) }
+    }
+
     /// How far the curve is from identity (max |y − x|): small values mean there is nothing to correct.
     public static func deviation(_ c: [SIMD2<Double>]) -> Double { c.map { abs($0.y - $0.x) }.max() ?? 0 }
 

@@ -138,6 +138,18 @@ final class RollStocksTests: XCTestCase {
         }
         let night = RollStocks.named("rr-den-vang-800t")!.stock.finish, fine = RollStocks.named("rr-ruc-ro-100")!.stock.finish
         XCTAssertGreaterThan(night.grainAmount, fine.grainAmount)
+        // With the per-look multiplier, shipped stocks still order by box ISO: every stock is grainier than every
+        // stock of a lower ISO (a clean lab 400 is finer than the other 400s, not finer than a 200).
+        for a in RollStocks.all {
+            for b in RollStocks.all where a.iso < b.iso {
+                XCTAssertLessThan(a.stock.finish.grainAmount, b.stock.finish.grainAmount, "\(a.id) vs \(b.id)")
+                XCTAssertLessThan(a.stock.finish.grainSize, b.stock.finish.grainSize, "\(a.id) vs \(b.id)")
+            }
+        }
+        XCTAssertLessThan(RollStocks.named("rr-chuan-400")!.stock.finish.grainAmount,
+                          RollStocks.named("rr-chan-dung-400")!.stock.finish.grainAmount)
+        // The multiplier stays a gentle character offset (amount only, within 0.7...1.0).
+        for s in RollStocks.all { XCTAssert((0.7...1.0).contains(RollStock.grainScale(look: s.look)), s.id) }
     }
 
     // MARK: filmDevelop (pure rule)
