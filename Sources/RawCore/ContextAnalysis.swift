@@ -34,6 +34,10 @@ public struct SceneContext: Codable, Equatable, Sendable {
     /// Correlated colour temperature / tint the camera's white balance chose (CIRAWFilter neutral defaults).
     public var cct: Double? = nil
     public var tint: Double? = nil
+    /// Luminance histograms of the same-press camera HEIC (same measure as `lumaHistogram`; `…Fine` = 256 bins),
+    /// stored at analysis time so cameraMatch does not need the HEIC file when the roll develops.
+    public var cameraReferenceHistogram: [Double]? = nil
+    public var cameraReferenceHistogramFine: [Double]? = nil
 
     /// Clipped by Apple's tone curve but present in the RAW.
     public var recoverableClippedFraction: Double? {
@@ -165,13 +169,21 @@ public enum DecisionEngine {
             st.skinProtection = Threshold.skinProtection
             why.append(String(format: "people %.1f%% of frame, largest face %.1f%% -> skin protection %.2f", person * 100, face * 100, Threshold.skinProtection))
         }
-        // Visible faces: avoid crunchy skin. Tiny faces (crowd, stage) are left alone.
-        if let faces = c.faceCount, faces > 0, s.detail {
-            if (c.largestFaceArea ?? 0) >= Threshold.faceArea {
-                st.detailAmount = max(0, d.detailAmount - 0.1)
-                why.append(String(format: "%d face(s), largest %.1f%% of frame -> detail -0.10", faces, (c.largestFaceArea ?? 1) * 100))
+        // Visible faces: avoid crunchy skin. Tiny faces (crowd, stage) are left alone. Detail first; on Bayer files
+        // Apple's detail default is 0 (nothing to lower), so sharpness takes the -0.10 instead (was a dead rule).
+        if let faces = c.faceCount, faces > 0 {
+            let area = c.largestFaceArea ?? 0
+            if area >= Threshold.faceArea {
+                if s.detail, d.detailAmount >= 0.1 {
+                    st.detailAmount = max(0, d.detailAmount - 0.1)
+                    why.append(String(format: "%d face(s), largest %.1f%% of frame -> detail -0.10", faces, area * 100))
+                } else if s.sharpness {
+                    let cur = st.sharpnessAmount ?? d.sharpnessAmount
+                    st.sharpnessAmount = max(0, cur - 0.1)
+                    why.append(String(format: "%d face(s), largest %.1f%% of frame, detail default %.2f (nothing to lower) -> sharpness %.2f -> %.2f", faces, area * 100, d.detailAmount, cur, st.sharpnessAmount!))
+                }
             } else {
-                why.append(String(format: "%d small face(s) (largest %.2f%% of frame): detail kept", faces, (c.largestFaceArea ?? 0) * 100))
+                why.append(String(format: "%d small face(s) (largest %.2f%% of frame): sharpness/detail kept", faces, area * 100))
             }
         }
         // Look intensity from the scene (only matters when a look/stock is applied; the caller can lock it with 0).

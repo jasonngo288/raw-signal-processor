@@ -11,34 +11,106 @@ public struct RawDecoder {
         public var recipe: DecodeRecipe
     }
 
+    /// What a file says about itself (versions, size, metadata, Apple's per-version defaults). Read once per file and
+    /// reused, so a develop opens a `CIRAWFilter` only for the decodes it renders (a fresh filter per decode).
+    public struct FileInfo: @unchecked Sendable {
+        public var supported: [String]
+        public var defaultVersion: String
+        public var nativeSize: CGSize
+        public var properties: [AnyHashable: Any]
+        var perVersion: [String: (defaults: DecodeParameters, support: DecoderSupport)]
+    }
+
+    final class InfoCache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var items: [String: FileInfo] = [:]
+        private(set) var filtersCreated = 0
+        func get(_ k: String) -> FileInfo? { lock.lock(); defer { lock.unlock() }; return items[k] }
+        func set(_ k: String, _ v: FileInfo) {
+            lock.lock(); defer { lock.unlock() }
+            if items.count >= 64 { items.removeAll() }   // a roll is ≤ 36 files; keep memory bounded
+            items[k] = v
+        }
+        func countFilter() { lock.lock(); filtersCreated += 1; lock.unlock() }
+    }
+
+    let cache = InfoCache()
+
     public init() {}
+
+    /// Number of `CIRAWFilter`s this decoder has created (tests and benches count opens with it).
+    public var filtersCreated: Int { cache.filtersCreated }
+
+    /// Cache key: path + size + modification date, so a replaced file is never served stale facts.
+    static func key(_ url: URL) -> String {
+        let a = try? FileManager.default.attributesOfItem(atPath: url.path)
+        let size = (a?[.size] as? NSNumber)?.int64Value ?? -1
+        let date = (a?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        return "\(url.standardizedFileURL.path)|\(size)|\(date)"
+    }
+
+    func makeFilter(_ url: URL) throws -> CIRAWFilter {
+        guard let filter = CIRAWFilter(imageURL: url) else { throw RawCoreError.unsupportedRaw(url.path) }
+        cache.countFilter()
+        return filter
+    }
+
+    /// File facts, from the cache or from one filter (which also yields the defaults of the OS default version).
+    public func info(url: URL) throws -> FileInfo {
+        let k = Self.key(url)
+        if let i = cache.get(k) { return i }
+        let f = try makeFilter(url)
+        let v = f.decoderVersion.rawValue
+        let i = FileInfo(supported: f.supportedDecoderVersions.map(\.rawValue), defaultVersion: v, nativeSize: f.nativeSize,
+                         properties: f.properties, perVersion: [v: (Self.read(f), Self.support(f))])
+        cache.set(k, i)
+        return i
+    }
+
+    /// A fresh filter on `version` (nil = OS default) with Apple's defaults for it, recorded in the cache.
+    func filter(url: URL, version: String?) throws -> (filter: CIRAWFilter, defaults: DecodeParameters, support: DecoderSupport, version: String, supported: [String]) {
+        var i = try info(url: url)
+        if let v = version, !i.supported.contains(v) { throw RawCoreError.unsupportedDecoderVersion(requested: v, supported: i.supported) }
+        let f = try makeFilter(url)
+        if let v = version { f.decoderVersion = CIRAWDecoderVersion(rawValue: v) }
+        let used = f.decoderVersion.rawValue
+        if let known = i.perVersion[used] { return (f, known.defaults, known.support, used, i.supported) }
+        let d = Self.read(f), s = Self.support(f)   // read before anything is written to this filter
+        i.perVersion[used] = (d, s)
+        cache.set(Self.key(url), i)
+        return (f, d, s, used, i.supported)
+    }
 
     /// Open the file and return the filter plus what Apple would use by default.
     public func inspect(url: URL, decoderVersion: String? = nil) throws -> (filter: CIRAWFilter, defaults: DecodeParameters,
                                                                              support: DecoderSupport, version: String, supported: [String]) {
-        guard let filter = CIRAWFilter(imageURL: url) else { throw RawCoreError.unsupportedRaw(url.path) }
-        let supported = filter.supportedDecoderVersions.map(\.rawValue)
-        if let v = decoderVersion {
-            guard supported.contains(v) else { throw RawCoreError.unsupportedDecoderVersion(requested: v, supported: supported) }
-            filter.decoderVersion = CIRAWDecoderVersion(rawValue: v)
+        try filter(url: url, version: decoderVersion)
+    }
+
+    /// The decoder version a non-`appleDefault` render of this file will use (requested, else DecoderPolicy).
+    public func pinnedVersion(url: URL, requested: String?) throws -> String {
+        let supported = try info(url: url).supported
+        if let r = requested { return r }
+        guard let v = DecoderPolicy.pick(supported: supported) else {
+            throw RawCoreError.unsupportedDecoderVersion(requested: "policy \(DecoderPolicy.preferred)", supported: supported)
         }
-        return (filter, Self.read(filter), Self.support(filter), filter.decoderVersion.rawValue, supported)
+        return v
     }
 
     public func decode(url: URL, settings: RenderSettings, scaleFactor: Float = 1, decisions: [String] = []) throws -> Output {
         try settings.validate()
-        var (filter, defaults, support, version, supported) = try inspect(url: url, decoderVersion: settings.decoderVersion)
-        var versionSource = settings.decoderVersion != nil ? "requested" : "Apple default"
-        if settings.mode != .appleDefault {
+        let versionSource: String
+        let requested: String?
+        if settings.mode == .appleDefault {
+            requested = settings.decoderVersion
+            versionSource = settings.decoderVersion != nil ? "requested" : "Apple default"
+        } else {
             // Pin the version: requested, else the fixed DecoderPolicy list, never "whatever this OS defaults to".
-            if settings.decoderVersion == nil {
-                guard let pinned = DecoderPolicy.pick(supported: supported) else {
-                    throw RawCoreError.unsupportedDecoderVersion(requested: "policy \(DecoderPolicy.preferred)", supported: supported)
-                }
-                versionSource = "policy"
-                if pinned != version { (filter, defaults, support, version, supported) = try inspect(url: url, decoderVersion: pinned) }
-            }
-            filter.decoderVersion = CIRAWDecoderVersion(rawValue: version)
+            requested = try pinnedVersion(url: url, requested: settings.decoderVersion)
+            versionSource = settings.decoderVersion != nil ? "requested" : "policy"
+        }
+        let (filter, defaults, support, version, supported) = try self.filter(url: url, version: requested)
+        if settings.mode != .appleDefault {
             Self.write(defaults.applying(settings), to: filter, support: support)
             if settings.ccm != nil || settings.linearExposureEV != nil {
                 let base = settings.ccm ?? [1, 0, 0, 0, 1, 0, 0, 0, 1]
@@ -68,8 +140,7 @@ public struct RawDecoder {
 
     /// Scale factor that makes the long edge of the (oriented) output close to `longEdge` pixels.
     public func scaleFactor(url: URL, longEdge: Int) throws -> Float {
-        guard let filter = CIRAWFilter(imageURL: url) else { throw RawCoreError.unsupportedRaw(url.path) }
-        let s = filter.nativeSize
+        let s = try info(url: url).nativeSize
         return min(1, Float(longEdge) / Float(max(s.width, s.height)))
     }
 

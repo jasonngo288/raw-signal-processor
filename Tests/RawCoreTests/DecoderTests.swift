@@ -75,7 +75,7 @@ final class DecoderTests: XCTestCase {
         var coreSettings = RenderSettings.explicit
         coreSettings.plugins = []
         let core = try dev.develop(url: url, settings: coreSettings, auto: true, scaleFactor: scale, analysis: an)
-        XCTAssertEqual(full.recipe.pluginsEnabled, ["highlightRecovery", "cameraMatch", "vignette"])
+        XCTAssertEqual(full.recipe.pluginsEnabled, ["highlightRecovery", "cameraMatch", "vignette", "logLook", "filmDevelop"])
         XCTAssertEqual(full.recipe.plugins, ["highlightRecovery"], "vignette had nothing to do without a stock")
         XCTAssertEqual(core.recipe.plugins, [])
         XCTAssertEqual(core.recipe.pluginsEnabled, [])

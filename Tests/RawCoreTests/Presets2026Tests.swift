@@ -23,7 +23,7 @@ final class Presets2026Tests: XCTestCase {
         XCTAssertNil(FilmStock.named("PRESET_26_CHROME64")?.minSkinProtection)
         XCTAssertEqual(Preset26.named("PRESET_26_CPM35")?.finish.vignette, 0.25)
         XCTAssertEqual(Preset26.named("PRESET_26_CPM35")!.finish.grainSize, 0.084, accuracy: 1e-6)
-        XCTAssertEqual(FilmStock.classic.count + 7, FilmStock.all.count)
+        XCTAssertEqual(FilmStock.classic.count + 7 + FilmLooks2026.stocks.count, FilmStock.builtIn.count)   // `all` also holds run-time registered stocks (tests register some)
     }
 
     func testWhiteBalanceDirection() {
@@ -73,5 +73,39 @@ final class Presets2026Tests: XCTestCase {
                 XCTAssertLessThan(o.max() - o.min(), (c.max() - c.min()) * 2.5 + 0.03, "\(p.name) \(c) -> \(o)")
             }
         }
+    }
+
+    /// Sky hold (2026-11-11): bright blue keeps its chroma under the bright-airy presets and softPortrait; skin,
+    /// foliage and greys are not touched by it; recipes written before the field still decode.
+    func testSkyHoldKeepsSkyAndLeavesSkinAlone() throws {
+        let sky = SIMD3<Float>(0.55, 0.70, 0.90), paleSky = SIMD3<Float>(0.70, 0.80, 0.92)
+        let skin = SIMD3<Float>(0.80, 0.60, 0.50), leaf = SIMD3<Float>(0.35, 0.50, 0.25), grey = SIMD3<Float>(repeating: 0.6)
+        func chroma(_ v: SIMD3<Float>) -> Float { let l = OKLab.fromLinearP3(SIMD3(Preset26.decode(v.x), Preset26.decode(v.y), Preset26.decode(v.z))); return (l.y * l.y + l.z * l.z).squareRoot() }
+        XCTAssertEqual(Preset26.skyWeight(skin), 0); XCTAssertEqual(Preset26.skyWeight(leaf), 0); XCTAssertEqual(Preset26.skyWeight(grey), 0)
+        XCTAssertGreaterThan(Preset26.skyWeight(sky), 0.99)
+        for name in ["PRESET_26_PORTRAIT160", "PRESET_26_SOFT400"] {
+            let p = try XCTUnwrap(Preset26.named(name))
+            XCTAssertEqual(p.params.skyHold, 1, name)
+            var off = p.params; off.skyHold = 0
+            let gOn = Preset26.whiteBalanceGains(temperatureK: p.params.temperatureK, tint: p.params.tint) * pow(2, p.params.exposureEV)
+            for c in [sky, paleSky] {
+                let on = Preset26.apply(c, p.params, gains: gOn), without = Preset26.apply(c, off, gains: gOn)
+                XCTAssertGreaterThan(chroma(on), chroma(without), "\(name) \(c)")
+                XCTAssertGreaterThan(chroma(on), 0.93 * chroma(c), "\(name) sky keeps its chroma")
+            }
+            for c in [skin, leaf, grey] {
+                XCTAssertEqual(Preset26.apply(c, p.params, gains: gOn), Preset26.apply(c, off, gains: gOn), "\(name) \(c) untouched")
+            }
+        }
+        let soft = try XCTUnwrap(FilmLooks2026.looks.first { $0.name == "softPortrait" }).spec
+        var softOff = soft; softOff.skyHold = 0
+        let g = Preset26.whiteBalanceGains(temperatureK: soft.temperatureK, tint: soft.tint)
+        XCTAssertGreaterThan(chroma(soft.apply(sky, gains: g)), chroma(softOff.apply(sky, gains: g)))
+        XCTAssertEqual(soft.apply(skin, gains: g), softOff.apply(skin, gains: g))
+        // Older recipes (no skyHold key) decode with the hold off.
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(Preset26.all[0].params)) as? [String: Any])
+        json["skyHold"] = nil
+        let old = try JSONDecoder().decode(PresetLookParams.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(old.skyHold, 0)
     }
 }

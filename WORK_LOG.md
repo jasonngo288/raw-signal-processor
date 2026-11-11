@@ -2,6 +2,26 @@
 
 Newest first. Each entry: what changed, why, evidence, what is NOT verified yet.
 
+## 2026-11-11 — Plugin `filmDevelop`: soft film decode per roll stock (plan SMARTPHONE_LOOK_PLAN_2026-11-11)
+**What**: `FilmDevelop` (Look.swift, pure, Codable) + `FilmStock.develop`; `RollStock.develop` from stock ISO class and character
+(ISO<400 sharp x0.55, 400-1599 x0.45 + luma NR no higher than Apple's, >=1600 x0.35 + luma NR <= +0.05; vivid x0.70, portrait x0.45;
+floor 0.30; face >= 1 % extra -0.10; highlight clarity x0.4; ProRAW detail 0.5 -> 0.2; LTM untouched, `ltmScale` nil). Plugin `filmDevelop`
+(Plugins.swift, last in the registry so it runs after highlightRecovery; `auto` only; no stock / no develop = no-op; listed in
+`recipe.plugins` only when it changed something). `Developer.Base.developedFor`; `finish()` logs "base developed for X, finished as Y".
+DecisionEngine face rule fixed: Bayer detail default 0 made `-0.10 detail` a no-op, it now lowers sharpness (detail kept on ProRAW).
+ROADMAP EXTRAS row. Tests: RollStocksTests (+4), DevelopStagesTests (+1); two plugin-list asserts and the DecisionEngine bound test updated.
+**Why**: Bayer decode looks like a phone mostly from sharpness 0.89-0.96 and our own clarity (plan §1).
+**Evidence** (scratch dir, not committed): `raw-bench bench originals --full` Gate 1 / Gate 2 auto / Gate 2 core PASS on all 5; mooncake's
+face rule now fires (sharpness 0.96 -> 0.86). Plain `auto` has no stock, so it is unchanged otherwise. Native metrics (bench-qa
+`--native`, 5 crops, with filmDevelop, before grain; overshoot vs Apple / HF ratio / flat ratio):
+rr-chuan-400: BVQX -22 % / 0.69 / 0.77; HDR01 -11 / 0.94 / 0.96; IMG_1901 -39 / 0.76 / 0.84; mooncake -40 / 0.57 / 0.71; mug -25 / 0.68 / 0.73.
+rr-da-mem-160: -23 / 0.72 / 0.72; -11 / 0.98 / 0.89; -41 / 0.75 / 0.76; -40 / 0.58 / 0.67; -26 / 0.64 / 0.64.
+**Not verified / open**: plan targets only partly met: overshoot -30 % reached on 2 of 5 files (Pixel file -11 %, because its default is 0.5
+and the 0.30 floor bites); HF ratio 0.57-0.58 on mooncake (< 0.6, near mush); flat texture before grain 0.64-0.84 (< 0.9 target) on 4 of 5.
+Floor/scales need tuning on a human look. `raw-bench --native-stock` only finds `FilmStock.all` (not RR stocks): Native.swift should use
+`FilmStock.named` (verified in a scratch copy). Stock-ISO is used for the ISO class (not capture ISO). Not run: device, ProRAW file,
+CI holdout, full `swift test` after the last two test edits (filtered runs only), xcodeproj unchanged (no files added).
+
 ## 2026-11-08 — Demo iOS app to run the pipeline on a device (user: "how do I run it in Xcode")
 **What**: `App/` — XcodeGen spec (`project.yml`) + SwiftUI app RawFilmDemo: camera preview, stock picker,
 plugins toggle, "Shoot RAW" → CaptureService (Bayer RAW + HEIC, one press) → Developer (auto + stock) → per-shot folder in
@@ -391,3 +411,352 @@ Defaults differ per model (sharpness, contrast, NR, shadowBias) → must be stor
 - **Read of MoodRoll (`feature/pipeline-process-raw`, read only):** capture is a processed HEIC today (`AVCapturePhotoSettings()`), develop runs the whole roll in the foreground one frame at a time (LUT + tone + look + grain/halation + `EmulsionVariation`) to JPEG sRGB 8-bit; originals are deleted after develop. Open overlaps to settle before integration: grain/halation/look intensity exist in both engines (one owner each); LUTs were tuned on Apple's HEIC, so every stock needs a check on the RAW base; JPEG sRGB export vs our P3.
 - **Storage (user concern):** device captures here: DNG 10.4 MB (14 Pro Bayer) / 17.3 MB (15 Pro ProRAW), HEIC 1.6 MB. A 36-frame Bayer roll ≈ 430 MB until develop. Deleting the HEIC after analysis saves ≈ 1.6 MB/frame (≈ 13 %): possible, because cameraMatch only needs the HEIC's luminance histograms (store the 256-bin one; 64 bins = sums of 4), but it does not solve storage — the DNG is the bulk. Options for the DNG, not decided: develop each frame in the background right after analysis and keep only the hidden output (reveal unchanged, but no later re-develop); or keep DNGs and check free space for the whole roll before it starts.
 - **Unverified / not built:** self-contained stored analysis (mask file, reference histograms, decoder version check); analysis cost with the camera running; whether Bayer DNG can be written compressed. No code changed.
+
+## 2026-11-09 — Storage research (can the DNG go before develop?); `raw-bench storage`; agent roles
+- **What:** new `raw-bench storage <raw>... [--stock] [--out]` (Sources/RawBench/Storage.swift): develops the base render (auto, no look), stores it as HEIC10 q0.92/q1.0, PNG16, TIFF16 LZW, EXR half, JPEG8, reads it back and measures size and ΔE00 vs the in-memory base, for the base and for the final picture (look + halation → JPEG 8-bit). Research agent (web + one local check) on DNG compression, ProRAW options, Core Data, iOS file placement. Write-up: `.orchestration/storage/STORAGE_RESEARCH.md`.
+- **Why:** user asked whether the DNG can be stored in Core Data or decoded and deleted right after capture.
+- **Evidence (local, macOS 15.2, 4 files, stock slide100):** HEIC10 q0.92 base = 5.3–7.3 MB (31–70 % of the DNG), final ΔE00 mean 0.43–0.49, p95 1.47–1.73; lossless formats are 2–9× the DNG (EXR half 34–45 MB, PNG16 62–71 MB, TIFF16 LZW 77–100 MB). Bayer DNG is already lossless-JPEG compressed (no API to shrink it); Core Data external storage stores the same bytes. Per Bayer frame with the HEIC kept: 12.0 → 8.7 MB (−28 %); ProRAW 18.9 → 6.9 MB (−63 %).
+- **Recommendation (user decides):** Bayer keeps the DNG until develop (Application Support, free-space check per roll); ProRAW stores a HEIC10 base (or test JPEG-XL ProRAW first). Deleting the DNG gives up re-decoding with a later CCM (Gate 3 table still empty).
+- **Also:** `.claude/agents/` (pipeline-tech-lead, raw-core-engineer, capture-engineer, bench-qa, pipeline-research) and `.orchestration/README.md` routing, adapted from MoodRoll; AGENTS.md points to them.
+- **Unverified:** iOS HEVC encoder and EXR write on device; gradient banding after a contrasty look; other stocks; capture-time cost of a full-res decode with the camera running. `swift build -c release` OK; no RawCore change, so tests and xcodeproj unchanged.
+- **Decision (user, same day): keep the DNG until develop** (Bayer default, HEIC kept). Recorded in AGENTS.md "Product integration" and the storage note; ProRAW option left open.
+
+## 2026-11-09 — One filter per decode; stored analysis; develop in two stages; corpus 14 → 27 entries
+- **One filter per decode (`RawDecoder`):** file facts (supported versions, native size, metadata, Apple's per-version defaults) are read once and cached (key: path + size + mtime, ≤ 64 files); every decode opens one fresh `CIRAWFilter` on the pinned version directly. `scaleFactor`, `cameraKeys`, `pinnedVersion` no longer open the file. Opens for analysis + render: 7–11 → 5 (core, `testOneFilterPerDecode`); `filtersCreated` counter for tests. **Timing:** Mac analyse 1.1–1.7 s before vs 1.1–1.5 s after (noise): opening a filter is cheap; the decodes themselves are the cost, so step 1 (per-stage timing) still decides any merge.
+- **Stored analysis (`Developer.Analysis`):** schema 2 records decoder version, plugins, source file name and size; `write(to:)` / `read(from:)` = `analysis.json` + `person-mask.png` (8-bit grey); `staleReason` (schema, file, size, decoder version, highlightRecovery without EDR headroom) → develop re-analyses and logs why, else logs "stored analysis used". `analyze(cameraReference:)` stores the HEIC's 64- and 256-bin histograms (`SceneContext.cameraReferenceHistogram(Fine)`); cameraMatch uses them before the file, so the HEIC is not needed at develop. `PluginRenderContext.scene` added.
+- **Two stages:** `developBase` (decisions → decode → afterDecode plugins) and `finish` (look → skin → finish → afterFinish); `develop` = both. A `Base` can be finished with another stock without decoding (`testFinishBaseWithAnotherStock`: equal to a full develop, max diff < 2e-3).
+- **Evidence (local):** `swift test` 68 tests, 0 failures (4 new in `DevelopStagesTests`: opens, round trip + reuse + stale, stored HEIC histograms give the same exposure/boostShadow as the file, re-finish). `raw-bench bench originals`: Gates 1/2/2-core PASS on all 5, decisions unchanged. No RawCore file added/removed → xcodeproj unchanged.
+- **Corpus:** 13 public files added (research agent; discuss.pixls.us posts stating CC-BY-SA 4.0; sha256 pinned and re-checked): 6 phones (iPhone 17 Pro Max, 12 Pro, SE, 11, Pixel 6, S23 FE) + 7 cameras (restaurant, night street, food, portrait, sunset, snow, ISO 6400). 27 entries, 24 decodable (the three Canon EOS RP DNGs still fail, known since 2026-11-07), 8 holdout. Local bench of the 13: Gate 2 auto/core PASS on all; **Gate 1 FAIL on IPH04 (iPhone SE)**: the file supports `6.dng, 7.dng, 8.dng, 7`, Apple's default is `7`, DecoderPolicy picks `8.dng` → explicit ΔE00 1.99 vs appleDefault; with `--decoder 7` explicit = 0.00. Write-back is exact; the policy prefers the generic `.dng` decoder over the camera's own one on older files. Not changed (policy changes are deliberate): user decision.
+- **Unverified:** CI fetch of the 13 new URLs (one is a CloudFront URL, not a short-url); device timings; licences as stated in each post (checked by the agent, not re-read here).
+- **Decision (user, same day): keep DecoderPolicy as is.** IPH04's Gate 1 FAIL is a version difference (policy `8.dng` vs Apple default `7`), not lost control; the bench Gates table now prints "(policy X ≠ Apple default Y)" next to Gate 1 when the two versions differ, and `DecoderPolicy` documents the choice.
+
+## 2026-11-09 — Presets run on the 13 new corpus files (local, user request)
+- **What:** `raw-bench render` (scale 0.4, JPEG) × 13 files × {appleDefault, auto, auto + each of the 11 stocks} = 169 renders, 0 failures (2 min, 4 in parallel). Gallery + contact sheets in `bench-out/presets-gallery/` (ignored, not committed). Corpus PEOPLE01 description corrected (a man at a market stall, not "a boy").
+- **Findings (not fixed, need a decision):** (1) Person rule false positives on tuning files: FOOD01 croissants "people 28.4 %, face 0" and PHONE02 kitten "people 86.6 %, face 0" → skin protection 0.50 and look −0.05 with nobody in frame. `personFraction` is the mean of Vision's soft mask; a thresholded fraction and/or requiring a face or people label would avoid it. (2) Dark-scene rule fires on holdout SNOW01 (snow, median −5.44) and SUN01 (sunset, −5.92): reported only, holdout is never tuned on. Tuning IPH04 (backlit forest, −5.86) also counts as dark. (3) At thumbnail size most stocks differ only slightly from the auto base (2026 preset curves are still provisional).
+
+## 2026-11-09 — Project skill `hdr-tone-mapping` + agent `tone-mapping-expert`
+- **What:** `.claude/skills/hdr-tone-mapping/SKILL.md` — a summary in our own words of R. Mantiuk's lecture "High dynamic range and tone mapping" (Cambridge, 65 slides: dynamic range, scene- vs display-referred, multiply/power/add, display model + ambient light, sigmoid and histogram curves with a slope ceiling, colour transfer and gamut, base–detail separation (Gaussian/bilateral/WLS/Retinex/gradient domain), selective glare), each mapped to this repo (exposure/cameraMatch, black p1 gate, ToneMatch bounds, LTM + highlightClarity + halo metric, halation) plus a review checklist. `.claude/agents/tone-mapping-expert.md` (read-only advisor that loads the skill). Routing added to `.orchestration/README.md`.
+- **Why:** user asked for a skill and an agent for this document, for this project only.
+- **Not in the repo:** the PDF itself (copyrighted lecture; stays in the user's Downloads). No code change.
+
+## 2026-11-09 — User's colour-pipeline proposal reviewed (tone-mapping-expert); cameraMatch histograms at one size
+- **Review** (`.orchestration/tone/COLOR_PIPELINE_REVIEW.md`): the proposal describes the existing pipeline; 4 statements in it are wrong (who decides exposure/shadow boost, where the cameraMatch exposure is applied, when clarity runs, missing EDR/shadow-gap steps). Not done, with reasons: working space sRGB/2020 (P3 is decided, all masks use P3 weights), brand-named LUTs (trademark rule), AgX as a LUT (double tone map, would fail Gate 2 / Goal 3).
+- **Done (point 3):** every cameraMatch comparison and the analysis histogram/clipping use one size, `CameraMatchPlugin.histogramLongEdge = 1024`; the analysis reads them from the 1024 px Apple render Vision already decodes, so the separate 512 px Apple decode is gone (analysis = scene-linear 512 + Apple 1024 + EDR 512). `Analysis.currentSchema` 3 (older stored analyses are re-made). cameraMatch reason shows the size.
+- **Evidence (local):** bench before/after on originals + full corpus (27 files, 24 decode): Gates identical, 0 / 24 decision changes, auto metrics identical to 2 decimals; pairs: mid EV within 0.01, ΔE00 2.09 → 2.10 and 3.79 → 3.78, black p1 0.0015 → 0.0014 / 0.0040; analysis 1.37 → 1.16 s mean. Corrected an earlier line: the corpus has 24 decodable files, not 26.
+- **Unverified:** device timing; CI run.
+
+## 2026-11-09 — Demo app: capture → preview → develop → result → change look → new photo
+- **What:** `App/RawFilmDemo/RawFilmDemoApp.swift` rewritten as four screens. Camera (plugins / ProRAW toggles, Shoot RAW) → **Preview** (the camera HEIC of the press, look picker, Develop / Retake) → Developing → **Result** (developed image; hold it to compare with the camera HEIC; one chip per stock incl. "none" re-finishes the stored `Developer.Base` — no new decode; "Save this look"; "New photo" back to the camera).
+- **Pipeline use:** the press is written to its own Documents folder immediately (capture.dng, apple.heic, capture.json); a background analysis (`analyze(cameraReference:)`, utility priority) writes analysis.json + person-mask.png next to it; Develop awaits that analysis and calls `developBase` + `finish`, exporting developed.heic + .recipe.json; other saved looks go to developed_<stock>.heic + .recipe.json. Files app access unchanged (UIFileSharingEnabled).
+- **Evidence:** `xcodebuild build -scheme RawFilmDemo -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO` → BUILD SUCCEEDED, no warnings in the app file. No Swift file added (xcodeproj unchanged).
+- **Unverified (needs the user's iPhone):** camera, timings, memory with a full-res base held while switching looks, Files folder contents.
+
+## 2026-11-09 — User-supplied LUT "Cinematic Ice Blue" bundled as stock `iceBlue`
+- **What:** `Sources/RawCore/Looks/CinematicIceBlue.cube` (the user's file, 33³) shipped as a RawCore resource (`Package.swift` `resources: [.copy("Looks")]`; demo app framework via XcodeGen, project regenerated with XcodeGen 2.46.0 — only the resource lines changed). `BundledLook` (parsed once, cached) + `FilmStock.Source.bundled`; stock `iceBlue` in `FilmStock.bundled` (intensity 1, no grain/halation/vignette), so it appears in the app's look picker/chips and in `raw-bench --stock iceBlue`. Test `testBundledCubeLookLoads`; the stock-count test now includes bundled stocks.
+- **Observation (not changed):** the file's title is "Cinematic Ice Blue (LOG)": it expects log-encoded input. On our display-referred base it renders warm and contrasty (its neutral ramp maps grey 0.5 → (0.53, 0.51, 0.40)), not icy blue; an experiment through Apple Log on a scene-linear render gave a flat, desaturated result, also not blue — the intended log curve is unknown. A real log-input look path would be a new (plugin) stage: user decision.
+- **Licence:** user-supplied asset from their downloads; redistribution rights not checked — clear before any public release.
+- **Evidence:** `swift build` OK; look tests 6/6; `xcodebuild … generic/platform=iOS` BUILD SUCCEEDED with `CinematicIceBlue.cube` inside RawCore.framework of the app. Not seen on device.
+
+## 2026-11-09 — Log-input look path (`logLook` plugin) for LOG .cube files
+- **What:** `Sources/RawCore/LogLook.swift` (pure Swift): `LogCurve` (Apple Log, S-Log3, LogC3, V-Log encoders), `LookInput` (.display / .log), `LogLook.composite` = one 65³ cube: encoded P3 of scene-linear/4 → ×4 → Rec.2020 → log curve → the user's LUT → Rec.709 output as encoded Display P3. `FilmStock.lookInput`; `iceBlue` = `.log(.appleLog)` (the file does not say which log; Apple Log is the iPhone's own). New plugin hook `DevelopPlugin.look(stock:settings:ctx:)` and `PluginRenderContext.decodeSceneLinear` (same file, CCM/calibration, WB, NR, lens; Apple's tone and cameraMatch/decision exposure removed). `LogLookPlugin` (`logLook`, on by default) takes over the look of log stocks; `finish` blends it by the stock intensity (`Renderer.dissolve`); unplugged, the core applies the LUT to the display base and logs it. ROADMAP extras row added; xcodeproj regenerated (new Swift file).
+- **Why:** user asked for the log look branch after the bundled Ice Blue LUT rendered warm and harsh on the display base.
+- **Evidence:** tests `testLogCurvesAndComposite` (mid grey 0.18 → Apple Log 0.488, S-Log3 0.410, LogC3 0.391, V-Log 0.423; composite grey ramp monotone) and `testLogLookPluginAndFallback` (plugin path logged, fallback logged, images differ, display stocks never use it). Renders on 4 files (mooncake, IMG_0106, IMG_2407, IMG_1901): the log path keeps highlights (IMG_1901 sky not blown) and gives a muted, low-contrast grade; still warm neutrals and teal-grey skies — the LUT's own character on every log curve probed (Apple Log, S-Log3, LogC3, V-Log, F-Log). iOS app build OK. `swift test` 71 tests: 69 + the two plugin-list tests updated for `logLook` (re-run: pass). `raw-bench bench originals`: Gates 1/2/2-core PASS on all 5.
+- **Unverified:** which log the LUT was authored for; device timing (one extra full-res decode per log finish); look on device.
+
+## 2026-11-09 — `.cube` DOMAIN_MIN/MAX fixed (input range, not output scale)
+- **What:** `CubeLUT.parse` divided the OUTPUT values by the domain. Per the .cube format the domain is the INPUT range the lattice spans; outputs are as written. Now outputs are stored as written and a non-default domain is resampled onto the 0…1 input CIColorCube uses (inputs outside the domain clamp to its edge); DOMAIN_MAX ≤ DOMAIN_MIN is rejected.
+- **Why:** found while reviewing the user's LUTManager guideline (which ignores DOMAIN entirely). Files with the default 0…1 domain — every look in the repo incl. iceBlue — are unaffected (same code path as before).
+- **Evidence:** new `testCubeDomainIsInputRange` (constant 0.3 over 0.5…1 stays 0.3, was −0.4; 0.4·x + 0.1 over 0…2 gives 0.3 at 0.5, was 0.25; equal bounds rejected); existing identity-over-0…2 test still passes (linear outputs coincide). 35 look/stage tests pass.
+- **Note:** resampling keeps the file's lattice size; outputs above 1 are clamped by `CubeLUT.generate`, as for every LUT here.
+
+## 2026-11-09 — Reused MoodRoll's LUT code: `.mrlut` packed format + `.cube` writer
+- **Read (MoodRoll `Core/ImagePipeline/LUT`, `LUTProcessor`):** reused `LUTBinaryFormat` (`.mrlut`: "MRLT" header + half floats, ≈ 215 KB vs ≈ 970 KB of `.cube` text, no parsing) and `CubeLUTWriter` (serialise to `.cube`). Not reused: `LUTLoader` (clamps outputs, ignores DOMAIN, accepts 4+ token lines — `CubeLUT.parse` is stricter), `LUTColorCubeFilter` (plain CIColorCube in the working space; correct in MoodRoll only because its contexts work in sRGB-encoded space), `ImportedLUTStore`/`LUTExportPackageService`/`PresetLUTExporter` (app shell / MoodRoll presets), `ISO200DaylightCalibratedLUT` (a display-referred HEIC calibration cube; per-model colour here is the scene-linear CCM).
+- **What:** `Sources/RawCore/LUTBinaryFormat.swift` — `encode` (new, round-to-nearest-even float→half) / `decode` into `CubeLUT`, same file layout as MoodRoll; `CubeLUT.cubeText()` writer; `CubeLUT.load(any:)` (.cube or .mrlut). `Renderer.resolveLook` and `BundledLook` accept `.mrlut` (a packed file wins over the `.cube`). `raw-bench lut <in> --out <out>` converts either way and prints the round-trip error. xcodeproj regenerated (new Swift file; local signing team restored).
+- **Evidence:** `testMrlutAndCubeWriterRoundTrip` (half conversions, iceBlue packed 215 630 bytes with max error < 0.00025, `.cube` text re-parses within 1e-6, bad header rejected); look tests 18/18. `raw-bench lut` on MoodRoll's own `Resources/LUTs/phuyentrip_v2.mrlut` → `.cube`: 33³, round-trip error 0.000001 (files are compatible). iOS app build OK.
+- **For the integration (not done):** MoodRoll's stock LUTs were authored for sRGB-encoded input; RawCore applies looks in encoded Display P3. Using them in RawCore unchanged shifts saturated colours slightly; a per-look colour space (sRGB) would make them exact. Their distribution rights are still open in MoodRoll's AGENTS.md.
+
+## 2026-11-09 — Decision: RawCore film looks replace MoodRoll's
+- **User decision:** the film looks of this repo replace MoodRoll's (whose LUT/stock code is not final). Recorded in AGENTS.md "Product integration". Research on best practice and the most wanted looks started (`pipeline-research` → `.orchestration/looks/LOOKS_RESEARCH.md`). Consequence: the per-look sRGB option for MoodRoll's LUTs is no longer needed.
+- **Research done** (`.orchestration/looks/LOOKS_RESEARCH.md`): looks stay display-referred 33³ by default (log path only where highlight character needs it); proposed 12-look starter set with generic names and raw-bench acceptance checks; licensing: only CC0/MIT-style or own-generated looks can ship. Orchestrator review appended: halation already runs in linear light; Gate 2 does not gate look variants, so looks get their own checks. Popularity evidence is weak (no store analytics).
+
+## 2026-11-09 — 2026 film-look set (12 looks) + look review tool
+- **Looks:** `Sources/RawCore/FilmLooks.swift` — `LookSpec` (measurable parameters: white balance K/tint, black point, S-contrast around a pivot, soft shoulder/white, saturation with highlight/shadow desaturation, OKLCh hue bands (shift + chroma), split toning with zero weight at black, mono channel weights, declared exceptions `allowsClip`, `neutralDrift`, `skinTolerance`), generated in OKLab into a 33³ encoded-P3 cube with chroma-only gamut fit; `OKLab` helpers; `FilmLooks2026`: softPortrait, goldenDay, vividFine, pastelCool, everydayGreen, tungstenGlow, mutedChrome, cinemaNegative, monoSoft, monoPunch, flashDigicam + iceBlue (LOG cube). Generic names; families only in `.orchestration/looks/LOOKS_RESEARCH.md`. `FilmStock.Source.spec` + `LookSpecCache`. Demo app lists the set first (default softPortrait).
+- **Acceptance tests** (`FilmLooksTests`, 5): 12 generic names (trademark word list incl. ektacolor/velvia/provia/agfa/vsco); grey ramp monotone and within each look's neutral drift; mono looks truly mono; ColorChecker dark/light skin hue ≤ 8° and chroma ±20 % (tungstenGlow declares 25° — tungsten film in daylight cools skin — and must hold the look back on people, minSkin 0.5); white below 0.99 unless declared; black within its toe; saturated red keeps gradation. First run failed 7 checks (tungsten skin 21–26°, pastel/cinema skin chroma 0.55–0.8, coloured blacks from shadow tint) → shadow tint weight now 6.75·L·(1−L)², tungsten 4700 K + declared tolerance, pastel/cinema saturation raised, cinema skin band.
+- **Review tool:** `raw-bench looks <dirs> --out … [--looks] [--long-edge] [--manifest]` (base developed once, every look finished on it; per render clip %, black p1, mean Y, ΔE00 vs base, chroma ratio, skin hue shift on skin-coloured pixels inside the Vision person mask) and `tools/look-review/review.py` (stdlib only: `render` calls raw-bench, `serve` = local page on 127.0.0.1:8777 with 👍/👎, tags, notes per tile and per look → `bench-out/look-review/feedback.json`, git-ignored). Port 8765 was taken by another process on the Mac.
+- **First render (24 files × 14, 1400 px, 793 s):** all 11 generated looks: 0 files with skin hue > 8° on people, 0 with black p1 > base + 0.03; clip > base + 0.5 pt only tungstenGlow on 1 file (halation threshold already raised 0.6 → 0.85 after mooncake clipped 8 %). iceBlue (user's LOG cube): skin > 8° on 5 files, black p1 > +0.03 on 3 — the file's own character. Mean ΔE00 vs base 1.2 (vividFine) … 5.4 (tungstenGlow); mutedChrome chroma ×0.79.
+- **Tests:** `swift test` 78 tests: 77 + the stock-count test updated for the new set (re-run: pass).
+- **Unverified:** looks on device; the user's taste (first feedback round pending); grain resolution check and 10-bit banding not measured yet.
+- **Banding check added** (`testNoSteepStepsThatBand`: along grey and six hue lightness ramps, output may not change faster than 3× the input; declared clip ignored). It failed on vividFine: saturated reds jumped 5× just below white where the gamut fit pins R at the ceiling → vividFine highlightDesat 0.2 → 0.4; 6/6 look tests pass. Review set re-rendered with the fix.
+
+## 2026-11-10 — LUT library contract (manifest + route check), iceBlue removed, off-grid interpolation test
+- **Step 1, contract:** `Sources/RawCore/LookManifest.swift` — `LookManifest` (schema 1: input/output primaries, white, transfer, log curve / assumed curve, domain, referred; toneBaked, exposureAnchor, route, source author/url/version, licence id + redistribution, history, notes), `LookContract.check` (required fields, pure-Swift SHA-256 of the file bytes, cube parses, route resolution), `LookRoute` (`display(Display P3 | sRGB)`, `log(curve, primaries Rec.2020 | Rec.709)`; anything else rejected with the reason), release blockers kept separate from load problems (licence not on the allow-list MIT/CC0/BSD/Apache/own-work, redistribution not "permitted…", trademark word in the name, unknown source). `LookLibrary` loads every `*.manifest.json` of a folder (bundled `Looks/` or a user folder); only usable entries become stocks (`FilmStock.Source.library`, look colour space / log primaries from the route); `FilmStock.register` for run-time libraries. `Renderer.applyLook(colorSpace:)` (sRGB LUTs apply in sRGB); `resolveLookDeclared` checks a manifest next to a `--look` file, else records "no manifest, assumed Display P3". `LogLook.composite(primaries:)`. Recipe line per library look (author, version, licence, redistribution, sha, route). `raw-bench lutcheck [dir]`.
+- **Step 2, files:** `CinematicIceBlue.cube` was already gone from `Looks/`; its code removed (`BundledLook`, `iceBlue` stock; the set is 11 generated looks). The 6 files the user put in `Looks/` were checked: **all 6 rejected** — every manifest sha256 mismatches its file, and the routes do not fit (3 declare linear "sceneToDisplay" input, 2 declare log curves we cannot model — cineon, vision3_log — 1 declares "displayToDisplay"); release blockers: GPL-3.0 (PoLUT), CC-BY-SA-4.0 (Spektrafilm), trademark names. The cube data contradict several declarations (grey 0.5 → 0.5 for "linear input"). Details and provenance concerns: `.orchestration/looks/LUT_INTAKE_2026-11-10.md`. SHA values deliberately not edited.
+- **Step 3, interpolation:** `testOffGridInterpolationError` (4000 random points, CIEDE2000 vs `LookSpec.apply`). At 33³ the mean was fine (≤ 0.05) but p99.9 was 0.5–2.3 on 8 colour looks — the tail sits at saturated gamut corners (e.g. (0.9, 0.99, 0.07)); a soft gamut knee did not help and was reverted. Colour looks now ship at **65³** (`LookSpec.cubeSize`; CIColorCubeWithColorSpace accepts 33–128, checked on macOS): mean ≤ 0.015, p99 ≤ 0.33, max ≤ 2.27 (flashDigicam's declared clip). Bound set to mean < 0.1, p99 < 0.5, max < 2.5 — the research's p99.9 < 0.5 is NOT met by goldenDay, vividFine, cinemaNegative, flashDigicam (0.56–0.80, gamut corners only). 65³ exposed a 4× slope at vividFine's saturated red near white (banding test) → vividFine highlightDesat 0.4 → 0.6, red band 1.08 → 1.0.
+- **Tests:** new `testLookContractAcceptsDeclaredAndRejectsBad` (SHA-256 vectors, valid sRGB display entry, wrong sha / ACEScct / linear scene / cineon / mixed primaries rejected, log route resolves, GPL + trademark = release blockers only, bundled rejects never become stocks); iceBlue-based tests moved to temp-folder fixtures (log look via a registered library stock; recipe carries the manifest line). xcodeproj regenerated (LookManifest.swift, 12 resource files, iceBlue gone); iOS app build OK.
+- **Run:** `swift test` 80 tests: 79 + the stock-count test, which counted a stock another test registers at run time → now counts the built-in set (re-run: pass). `raw-bench bench originals`: Gates 1/2/2-core PASS on all 5.
+- **Unverified:** 65³ cost on device (generation per look, ≈ 4.4 MB per cached cube); the 6 files' real provenance.
+
+## 2026-11-10 — Film looks tuned for the feed ("enhance để stock đẹp hơn")
+- **What:** new values for all 11 looks in `FilmLooks2026` (per-look before → after and reasons:
+  `.orchestration/looks/LOOK_TUNE_2026-11-10.md`). Two look-function parameters added in `FilmLooks.swift` (defaults
+  keep the old output): `HueBand.lightness` (per-hue luminance, faded in by chroma so greys never move) and
+  `LookSpec.density` (subtractive dye density: saturated colours get deeper, not brighter — no neon reds). Summaries
+  rewritten, names unchanged, no trademarks. **User decision (2026-11-10): keep both parameters** in `LookSpec`;
+  `testDensityAndBandLightnessContract` locks them (defaults = old output, greys untouched, density darkens only saturated colour).
+  `testOffGridInterpolationError` now samples with a fixed-seed SplitMix64 (was `SystemRandomNumberGenerator`: the one
+  unreproducible failure came from a different random tail each run).
+- **Why:** at default intensity several looks were hard to tell from the base (ΔE00 vs base: vividFine 1.3,
+  cinemaNegative/mutedChrome 2.4); pastelCool skies went lavender; monoPunch skies barely darker. Direction from the
+  user's reference brief (2026-11-10), MoodRoll's tune brief fail list and the user's photography-film-lab skill
+  (all files read; per-look sources in the note). References = direction only, nothing copied.
+- **Evidence (raw-bench looks, 12 tuning files, 1200 px, mean before → after):** ΔE00 vs base vividFine 1.33 → 2.63,
+  goldenDay 3.21 → 5.17, everydayGreen 2.46 → 3.37, cinemaNegative 2.37 → 2.97, mutedChrome 2.39 → 3.00, softPortrait
+  3.04 → 3.70; clip % not raised on any look (tungstenGlow 2.29 → 0.86); black p1 within base + 0.03 everywhere
+  (pastelCool's toe pulled back after it reached +0.037); max skin hue shift on people ≤ 2.1° (tungstenGlow 6.2°,
+  declared). `swift test --filter "FilmLooksTests|Presets2026Tests|DevelopStagesTests"`: 20/20 pass (6 runs; one
+  earlier run reported 1 failure that did not reproduce — probably the random-sample interpolation test, unconfirmed).
+  ColorChecker skins sit at OKLCh h ≈ 41°, not 55° as the landmark comment said (fixed; mutedChrome's skin band uses 45°).
+- **Unverified:** device display; real skin variety (one dark-skinned portrait only); ±1 EV robustness; the user's
+  taste (feedback.json empty); mean linear luminance 5–6 % lower on goldenDay/vividFine/everydayGreen/mutedChrome/
+  cinemaNegative (contrast + density, intended) — may read heavy on dark scenes. Holdout files not rendered.
+
+## 2026-11-10 — Trend report → looks: goldenDay faded, vividFine "memory", 4 TRIAL looks (tests not fully run)
+- **What:** critique of the user's report "Film Look Trends 2026" + gallery + source check, mapped onto the 11 looks:
+  `.orchestration/looks/TREND_LOOK_PLAN_2026-11-10.md`. Changes in `FilmLooks.swift`: goldenDay warm FADED (black
+  0.025 → 0.038, contrast 1.06 → 0.96 around pivot 0.55, density 0.06 → 0.04, red band L −6 %, skin band ×0.72);
+  everydayGreen half-way faded (black 0.032, contrast 0.96 / pivot 0.55, density 0.03, vignette 0.12 → 0.08);
+  vividFine yellow-greens (−6°, ×1.05), 5650 K, grain 0.22. New `FilmLooks2026.trialLooks` / `trialStocks` /
+  `trialNames`: trialCoolFade, trialVividDay, trialWarmMoody, trialWarmFade. They are not in `names`/`stocks`/`FilmStock.all`
+  (the app does not list them). `Look.swift`: `FilmStock.named` falls back to `trialStocks` (one line), so raw-bench
+  and the review tool resolve them. Tests: every LUT check now also runs on the trials; new
+  `testTrialLooksResolvableButNotListed` and `testLooksDistinctFromNeighbours` (chart ΔE00 between looks; a trial ≥ 2).
+- **Why:** the report (and the source check, which weights flash lower and warm-faded / muted-chrome higher) argues for
+  faded rather than denser everyday warm looks, and names four directions the set lacked (cool faded 400, clean
+  vivid, warm pushed moody, expired fade).
+- **Evidence:** raw-bench looks, 12 tuning files at 1200 px: no clip added, black p1 ≤ base + 0.022, skin hue on
+  people ≤ 2.9°; goldenDay mean Y 0.276 (pre-tune 0.281); trial ΔE vs base 1.7–5.9 (table in the plan note).
+  `swift test --filter FilmLooksTests` 10/10 pass after the LUT edits.
+- **Unverified / not run:** at the user's instruction ("stop before the test step") the final
+  `swift test --filter "FilmLooksTests|Presets2026Tests|DevelopStagesTests"` was NOT run. The last edit (everydayGreen
+  vignette) is untested, and its re-render was not measured. Device, skin variety and user taste are also unverified.
+  Holdout files were not rendered.
+
+## 2026-11-10 — User decisions on the look set; roll-consistency benchmark; goldenDay highlights up
+- **User decisions:** no flash-portrait look; cinemaNegative moved to `FilmLooks2026.retiredLooks` (unlisted, kept,
+  still resolvable and tested); trials renamed trialVividDay → brightTravel, trialWarmFade → sunFade,
+  trialWarmMoody → warmEvening (trialCoolFade unchanged). Product rule: a look develops a whole roll (24/36 frames),
+  so its effect must be as uniform as possible across frames of different brightness; per-frame changes only from
+  context/objects.
+- **Benchmark:** `python3 -I tools/look-review/review.py roll [--against <looks.json>]` — per look over the tuning
+  files: dY mean/min/max/spread (% mean linear Y vs base), dY_slope (% per +0.1 base mean Y; < 0 = bright frames
+  darkened more), chroma-ratio spread, worst clip / black-p1 rise, ΔE vs base mean/spread; `--against` prints deltas.
+- **goldenDay (only look changed, `FilmLooks.swift`):** black 0.038 → 0.034, contrast 0.96 → 1.0, shoulder 0.87 → 0.88,
+  white 0.985 → 0.99, density 0.04 → 0.03, green band L −0.02 → 0, blue band L −0.03 → −0.02, highlight tint b
+  0.008 → 0.007, halation threshold 0.8 → 0.9, vignette 0.1 → 0.04. Why: shoulder/white alone moved dY_min only
+  −12.57 → −12.40; the darkening of bright frames came from the vignette (≈ −7 % on every frame), dye density + band
+  lightness on bright foliage/sky, and the toe lift brightening dark frames (the slope). Halation threshold 0.9 keeps
+  warm whites (R at the 0.99 cube ceiling) from being pushed over 0.98 once the vignette no longer dims them.
+- **Evidence (12 tuning files, 1200 px, `roll --against` the saved baseline):** dY_mean −5.79 → −1.45, dY_min −12.57 →
+  −6.72, dY_max +5.77 → +6.86, spread 18.34 → 13.58, slope −2.20 → −1.70, chroma_spread 1.026 → 0.985, clip_rise_max
+  0.000 → 0.000, p1_rise_max 0.007 → 0.005, ΔE vs base 5.30 → 4.82; skin hue on people −0.39/+1.58/−2.90° →
+  −0.34/+1.51/−2.64°. All other looks: every row bit-identical to the baseline (renamed trials compared by value).
+  `swift test --filter FilmLooksTests` 10/10 pass (distinct: goldenDay nearest warmEvening 3.41 → 3.17).
+  `raw-bench bench originals --full`: Gate 1 / Gate 2 auto / Gate 2 core PASS on all 5 originals (looks do not touch the gates).
+  Details: `.orchestration/looks/TREND_LOOK_PLAN_2026-11-10.md` §10.
+- **Unverified:** device display; holdout files not rendered; real skin variety; whether the lighter vignette reads
+  better on the feed (user review); everydayGreen has the same problem (dY_min −10.7, slope −2.36), not touched yet.
+  Other suites (Presets2026Tests, DevelopStagesTests) not run in this step.
+
+## 2026-11-10 — everydayGreen roll consistency (bright frames no longer darkened ~11 %)
+- **everydayGreen (only look changed, `FilmLooks.swift`):** black 0.032 → 0.03, contrast 0.96 → 1.0, shoulder 0.87 → 0.88,
+  white 0.98 → 0.99, highlightDesat 0.3 → 0.36, green band (140°) lightness −0.03 → −0.015, vignette 0.08 → 0.04.
+  Character kept (5650 K / tint −2, green shadow tint, cream highlight tint, emerald band, saturation 0.92, grain 0.45).
+  Why: same split as goldenDay (§10 of the plan note) — vignette ≈ −5.6 % on every frame, the 0.98 white ceiling on the
+  brightest frame, foliage lightness, and the toe brightening dark frames (slope). highlightDesat up holds chroma_spread
+  (the higher white raised chroma on HDR01).
+- **Evidence (12 tuning files, 1200 px, `roll --against` baseline-2):** dY_mean −3.90 → −1.13, dY_min −10.68 → −6.59,
+  dY_max +5.97 → +5.94, spread 16.65 → 12.54, slope −2.36 → −1.67, chroma_spread 0.287 → 0.280, clip_rise_max 0 → 0,
+  p1_rise_max 0.008 → 0.005, ΔE vs base 3.44 → 3.19; skin hue on people −0.53/+1.49/+0.06° → −0.41/+1.53/+0.21°. All 14 other looks:
+  Δ 0.000 in every column, every row bit-identical. `swift test --filter FilmLooksTests` 10/10 pass (distinct:
+  everydayGreen nearest softPortrait 2.56 → 2.69). `raw-bench bench originals --full`: Gate 1 / Gate 2 auto / Gate 2 core
+  PASS on all 5 originals (run on the highlightDesat 0.33 build; gates do not use looks). Details: `.orchestration/looks/TREND_LOOK_PLAN_2026-11-10.md` §11.
+- **Unverified:** device display; holdout files not rendered; real skin variety; whether the lighter vignette is missed
+  on the feed. Other suites (Presets2026Tests, DevelopStagesTests) not run in this step.
+
+## 2026-11-11 — sky hold: PORTRAIT160 / SOFT400 / softPortrait no longer wash bright skies
+- **Bench (`raw-bench looks`):** new per-render sky metrics `skyL`, `skyChroma`, `skySpread`. The mask is chosen on the
+  base render: top 40 % of the frame, OKLCh hue 190–290, L > 0.55, C > 0.02. New flag `--no-scene-intensity` sets
+  `lookIntensityOffset = 0`, so the context offset can be measured on its own. Why: the user reported that
+  PORTRAIT160/SOFT400 make the sky milky and suspected the landscape +0.05 intensity rule.
+- **Diagnosis (5 landscape tuning files, 800 px):**
+  - PORTRAIT160 vs base: sky L +0.024…+0.042, sky chroma −7…−18 %, gradient −5…−8 %.
+  - SOFT400: chroma −11…−25 %.
+  - softPortrait: chroma −33…−53 %.
+  - The +0.05 offset accounts for only −0.5…−2.3 % of the chroma loss: IMG_1901, where the rule does not fire, still
+    loses 14–16 %. The presets themselves cause the wash. +0.20 EV and the toe push the sky up, the warm white balance
+    greys the blue, and saturation < 1 plus the 0.99 gamut fit take the rest. The +0.05 rule is kept.
+- **Change:**
+  - `Preset26.skyWeight(c)`: smooth weight from the encoded input pixel. It needs b − r 0.03→0.12, b not more than 0.08
+    below g, and luma 0.25→0.45. Skin, foliage and greys get exactly 0.
+  - `PresetLookParams.skyHold` and `LookSpec.skyHold`, both 0 = off. On sky pixels: own white balance, and for presets
+    own exposure. Chroma is at least the input chroma (presets: capped ×1.3). 60 % of the input tone is mixed back.
+  - Set to 1 on PORTRAIT160, SOFT400 and softPortrait. Exposure stays at the spec's +0.20 EV.
+  - The deviation from the MoodRoll spec is listed in both presets' `openQuestions`.
+  - `PresetLookParams` decodes recipes without `skyHold` as 0 (custom `init(from:)`).
+- **Evidence (same 5 files, sky metric vs base, before → after):**
+  - PORTRAIT160: chroma −7…−18 % → −0.4…−3.7 %; sky L +0.024…+0.042 → +0.004…+0.018.
+  - SOFT400: chroma −11…−25 % → −0.1…−5.4 %; sky L +0.023…+0.039 → +0.004…+0.016.
+  - softPortrait: chroma −33…−53 % → −3…−15 %.
+  - Gradient within ±4 % of base, except P1073242 (snow): +10 %, a deeper sky, not a wash.
+  - Roll, 12 common tuning files, `roll --against` the previous looks.json: softPortrait dY_spread 25.10 → 24.87,
+    chroma_spread −0.041, dE_mean −0.42 (the look is weaker on sky frames), dE_spread +0.57. Every other listed look
+    moves by at most ~0.001 meanY / 0.07 ΔE; base moves by the same amount. The previous run was at a different
+    render size, so this is the noise floor.
+  - Tests: new `Presets2026Tests.testSkyHoldKeepsSkyAndLeavesSkinAlone` (sky chroma kept; skin, leaf and grey
+    bit-identical with and without the hold; old-recipe decode). `swift test --filter "FilmLooksTests|Presets2026Tests"`
+    16/16 pass.
+  - `raw-bench bench originals --full`: Gate 1, Gate 2 auto and Gate 2 core PASS on all 5 originals.
+- **Unverified:**
+  - Device display; holdout files.
+  - Blue-cast whites in shade now keep their blue under these looks, i.e. less warm than before.
+  - Teal or blue objects brighter than luma 0.45 (cars, clothes) are held like sky.
+  - Full `swift test` (DevelopStagesTests and others) not run in this step.
+  - The presets' roll numbers: `review.py render` renders only the listed looks, so the presets were checked only on
+    the 5 sky files.
+
+## 2026-11-11 — RR roll stocks: 21 stocks (RollioRoll) on top of the generated looks
+- **What:** new `Sources/RawCore/RollStocks.swift`. `RollStock` holds id slug, Vietnamese UI name, ISO (+T),
+  suggested tier, look, intensity, vibe and open questions. `RollStocks.all` holds the 21 stocks of
+  `docs/input/doi-ten-film-stock-RR-2026-11-11.md`.
+  - Each stock names one of the 11 colour looks (7 listed without flashDigicam, plus 4 trials). Grain comes from its
+    ISO; halation and vignette come from the look.
+  - Stocks resolve through `FilmStock.named(id)` but are not in `FilmStock.all`.
+  - The internal "inspired by" mapping lives only in `.orchestration/looks/RR_STOCKS_2026-11-11.md` (R6).
+  - `App/RawFilmDemo.xcodeproj` regenerated (new Swift file).
+- **Why:** user decision 2026-11-11. Ship all 21 RR names, drop flashDigicam from this set (not a film stock); the
+  set is the roll picker. MoodRoll is being renamed RollioRoll.
+- **Evidence:**
+  - `RollStocksTests`, 4 tests: naming R1/R2/R4/R6/R7/R10 (no maker words, id = slug of the name), colour look,
+    resolvable and valid settings, R5 roles, grain grows with ISO.
+  - `swift test --filter "RollStocksTests|Presets2026Tests|FilmLooksTests"` 20/20 pass.
+  - Smoke render of 6 RR stocks on IMG_1901 + mooncake (800 px) works. ΔE vs base: Vàng 200 5.6 / 3.9,
+    Chuẩn 400 1.2 / 0.9.
+- **Unverified:** roll bench of the 21 stocks; device; the brief's open points (price-list "*", R3a legal, tier conflict
+  of Chân Dung 400); Lá Phong 100 has no light leak and no look of its own; full `swift test` not run.
+
+## 2026-11-11 — RR stocks get their own character: 4 new trial looks, Chuẩn line cut to 400
+- **What:**
+  - New unlisted trial looks in `FilmLooks2026.trialLooks`:
+    - `mapleRed`: crimson reds, cyan-teal blues and shadows, low-medium contrast;
+    - `warmMuted`: amber-red soft warm, muted greens and skies;
+    - `naturalPortrait`: natural, slightly richer portrait 400;
+    - `cleanLab`: neutral lab scan with a soft toe and shoulder.
+  - RR stocks re-pointed:
+    - Ấm 200 → warmMuted 0.85;
+    - Lá Phong 100 → mapleRed 0.85;
+    - Nắng 100 → brightTravel 0.85;
+    - Chân Dung 400 → naturalPortrait 0.85;
+    - Đêm Mềm 800 → naturalPortrait 1.0;
+    - Chuẩn 400 → cleanLab 0.85.
+  - RR Chuẩn 160 and 800 removed (21 → 19 stocks).
+  - Tests:
+    - `RollStocksTests`: count 19; new `testSameISOStocksLookDifferent` (same-ISO stocks ≥ 2 chart ΔE00); print-only
+      before/after matrix.
+    - `FilmLooksTests`: the distinct test also prints each look's distance to base.
+- **Why:** user, 2026-11-11.
+  - Stocks that shared a look and differed only by intensity felt the same: Vàng/Ấm 200 chart ΔE 1.31, Vàng 200 /
+    Nắng 100 0.52, Rực Rỡ / Lá Phong 100 1.15, Da Mềm 160 / Chân Dung 400 0.56.
+  - The Chuẩn line was invisible (ΔE vs base ≈ 1.2), and its three ISOs were identical in colour: roll dY and chroma
+    were the same to 3 decimals.
+- **Evidence** (`.orchestration/looks/RR_LOOKS_2026-11-11.md`):
+  - Chart ΔE after: Vàng/Ấm 2.58, Vàng/Nắng 5.25, Rực Rỡ/Lá Phong 5.58, Da Mềm/Chân Dung 2.59.
+  - Every new look is ≥ 2.09 from every other look.
+  - Roll (18 tuning frames, `review.py roll --against`):
+    - Chân Dung 400 dY spread 20.7 → 8.4;
+    - Đêm Mềm 800 22.1 → 9.8;
+    - Ấm 200 8.8 → 7.1;
+    - Lá Phong 100 16.9 → 14.6.
+  - No clip rise above +0.025 %; black p1 rise ≤ 0.0074.
+  - Skin hue on the 7 person-mask files stays within ±6.4°.
+  - Holdout reported only (6 of 8 decode): all within the same bounds.
+  - `swift test --filter "FilmLooksTests|RollStocksTests|Presets2026Tests|DevelopStagesTests"`: 30/30 pass.
+- **Unverified:**
+  - Device; a real 36-frame roll; skin variety (4 real-people files).
+  - Nắng 100 on brightTravel is less warm than the brief says.
+  - The Chuẩn 160/800 cut needs the user's confirmation.
+  - The Lá Phong light leak is a spec only (in the note); a plugin is to be built by raw-core.
+  - Full `swift test` and CI were not run.
+
+## 2026-11-11 — bench: native-pixel sharpness metrics (edge overshoot, HF ratio, flat texture)
+- **What:**
+  - `SharpnessMetrics` / `SharpnessComparison` / `SharpnessSummary` in `ImageMetrics.swift` (pure Swift).
+  - `raw-bench bench … --native [--native-stock NAME|none]` and `compare … --native`: renders at scaleFactor 1, 1024² centre
+    crop + 4 quarter-point tiles, measures each variant on the same pixels as the appleDefault crop (new `Sources/RawBench/Native.swift`).
+  - Rows in `summary.md` / `summary.json` (`native`): appleDefault, explicit, auto, auto core, and warm400 with grain off ("before grain") and on.
+  - `docs/METRICS.md` section "Native-pixel sharpness" with definitions and the plan's pass criteria (reported, not a gate).
+  - `SharpnessMetricsTests` (4 tests, synthetic): unsharp-masked step overshoots, halved sharpening gives −30…−70 %, blur gives HF ratio < 0.6, noise std and waxy detector.
+- **Why:** the 1024 px long-edge metrics hide Apple's native-scale sharpening (SMARTPHONE_LOOK_PLAN §3).
+- **Evidence** (local `raw-bench bench originals --native`, 5 tuning files, release build; not committed):
+  - explicit and auto core = appleDefault on every file: overshoot change 0 %, HF ratio 1.00, flat ratio 1.00 (sanity holds).
+  - Apple's own overshoot at native size: 7.4 % (mug) … 30.9 % (HDR01 sailfish).
+  - warm400 before grain (current build, before the filmDevelop plugin): overshoot −4…−19 %, HF ratio 0.80–1.01, flat ratio 0.87–0.94.
+  - warm400 after grain: flat ratio 1.09–2.10, HF ratio 0.94–1.32; overshoot rises (grain counts as edge noise).
+  - Cost: ≈ 4 s per variant per file (5 crops); `--native` bench of 5 files ≈ 6 min total.
+  - `swift test --filter SharpnessMetricsTests`: 4/4 pass.
+- **Unverified:**
+  - No gate yet: thresholds are the plan's, not tuned.
+  - High-ISO and holdout files (CI only); overshoot after grain is inflated by the noise itself, read before-grain rows for sharpening.
+  - Mean over 5 crops hides per-crop spread; mean of per-crop ratios, not ratio of means.
+
+## 2026-11-11 — bench `--native-stock` resolves roll stocks; full suite green
+- **Fix:** `Sources/RawBench/Native.swift` now resolves the stock with `FilmStock.named`. Before, `FilmStock.all` was
+  used, so `--native-stock rr-…` silently added no rows.
+- **Evidence:** full `swift test` is 99 tests, 0 failures, on the combined build: filmDevelop plugin, native sharpness
+  metrics, RR looks and sky hold.
+- **Unverified:** CI (macos-15) and the holdout set.
+
+## 2026-11-11 — filmDevelop tuned on native crops
+- **What:**
+  - RollStock develop: 400–1599 sharp ×0.45 → ×0.50, ≥ 1600 ×0.35 → ×0.40, portrait ×0.45 → ×0.50.
+  - `FilmDevelop.faceSharpDelta` 0.10 → 0.05.
+  - ISO < 400 ×0.55 and vivid ×0.70 unchanged.
+  - docs/METRICS.md pass criteria revised: flat texture judged after grain (0.9–1.3×); overshoot target −20 % on
+    iPhone files.
+- **Why:** a scratch grid (sharpness × 1 / 0.55 / 0.40 / 0.25 / 0, with and without grain, 5 originals, native
+  1024² crops) shows:
+  - × 0.25 and below reads as mush on faces and checked fabric (IMG_1901 zoom);
+  - × 0.55 + grain looks most film-like;
+  - mooncake with the old portrait profile (≈ × 0.34 after the face delta) had an HF ratio of 0.57;
+  - flat texture before grain is 0.87–0.96 even at Apple's own sharpness once a look is applied, so the plan's
+    ≥ 0.9 before grain is unreachable.
+- **Evidence** (`raw-bench bench originals --full --native --native-stock …`; overshoot vs Apple / HF ratio / flat
+  ratio):
+
+  | Stock, grain | IMG_1901 | mooncake | mug | BVQX5524 | HDR01 (Pixel) |
+  |---|---|---|---|---|---|
+  | rr-da-mem-160, before grain | −39 % / 0.77 | −36 % / 0.62 | −24 % / 0.67 | −22 % / 0.74 | −11 % / 0.98 |
+  | rr-da-mem-160, after grain (flat) | 0.87 | 0.95 | 0.75 | 1.30 | 1.16 |
+  | rr-chuan-400, after grain (flat) | 1.05 | 1.19 | 0.94 | 1.80 | 1.44 |
+
+  - Gate 1 / Gate 2 auto / Gate 2 core PASS on all 5 originals.
+  - `swift test --filter "RollStocksTests|DevelopStagesTests|ColorAndMetricsTests|FilmFinisherTests"` 26/26 pass.
+- **Unverified:**
+  - Device; ISO ≥ 1600 (no local file); ProRAW.
+  - The ISO 400 grain (0.38) is too strong on BVQX / HDR01 for a "clean lab" stock: flat after grain 1.80 / 1.44,
+    and overshoot after grain is inflated by the grain. Grain amounts are not re-tuned yet.
+  - Full `swift test` was not re-run after this change.
+
+## 2026-11-11 — RR English names; first commit of the look / roll-stock work
+- **What:**
+  - `RollStock.nameEn` (column B of `.orchestration/looks/RR_NAMES_EN_2026-11-11.md`, the user's decision):
+    RR Golden 200, RR Vivid 100, RR Portrait 160/400/800, RR Tungsten 800T, RR Lab 400, …
+  - Tests check the shape "RR <1–2 words> <ISO>[T]", ASCII, unique names, and no maker words.
+- **Decisions (user, 2026-11-11):** keep RR Chuẩn 400 only; keep RR Nắng 100 on brightTravel (sunnier, by intent).
+  The look review on port 8777 can be skipped for now.
+- **Commit hygiene:** not committed:
+  - the 6 user LUTs in `Sources/RawCore/Looks/` (licence and trademark blockers); a README keeps the folder;
+  - the Instagram images in `docs/input/` and the two research HTML pages in `docs/research/` (third-party images);
+  - xcuserdata, `docs/outputs/`, `__pycache__`.
+- **Evidence:** `swift build -c release` and `swift build --build-tests` green; `swift test --filter RollStocksTests`
+  10/10 pass. The full suite was not re-run before this commit (user: commit when the build is green); CI runs it.
+- **Unverified:** legal check of the English names ("Portrait …" flagged).

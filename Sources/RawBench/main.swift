@@ -11,13 +11,18 @@ raw-bench — CIRAWFilter spike CLI
   raw-bench analyze <raw>...                      scene context (light stats, headroom, Vision) + auto decisions
   raw-bench render <raw> [--mode appleDefault|explicit|sceneLinear|auto] [--look NAME|path.cube]
                    [--intensity 0..1] [--format heic10|png16|jpeg] [--scale 0..1] [--out FILE]
-  raw-bench compare <raw> [--mode ...] [--look ...] [--long-edge N]   metrics + ΔE00 vs appleDefault
-  raw-bench bench <dir>... --out <dir> [--manifest corpus.json] [--long-edge N] [--full] [--crops]
+  raw-bench compare <raw> [--mode ...] [--look ...] [--long-edge N] [--native]   metrics + ΔE00 vs appleDefault; --native adds
+                   edge overshoot / HF ratio / flat texture on native-pixel crops (centre 1024² + 4 tiles)
+  raw-bench bench <dir>... --out <dir> [--manifest corpus.json] [--long-edge N] [--full] [--crops] [--native [--native-stock NAME|none]]
   raw-bench pairs <dir>... --out <dir> [--long-edge N]   device captures (<dir>/*/capture.dng + apple.heic): vs the camera HEIC
   raw-bench chart <raw> --corners x1,y1,x2,y2,x3,y3,x4,y4 [--model KEY] [--reference sheet.txt] [--calibration-out models.json] [--out chart.json]
                    ColorChecker Classic: corners = centres of dark skin (top-left), bluish green (top-right), black (bottom-right),
                    white (bottom-left), normalised 0..1 from the image's top-left. Fits the model's CCM, re-decodes to verify.
   raw-bench gate3 <chart.json> <chart.json>...    Gate 3: ΔE00 between models' corrected charts (pass: mean < 2)
+  raw-bench lutcheck [dir]                        check LUT manifests (default: bundled Looks/): route, sha256, fields, licence
+  raw-bench looks <raw|dir>... --out <dir> [--looks a,b] [--long-edge N] [--manifest corpus.json]   film-look set: base once, every look, metrics (look review tool)
+  raw-bench lut <in.cube|in.mrlut> --out <out.cube|out.mrlut>   convert LUTs (MoodRoll .mrlut packed format), print round-trip error
+  raw-bench storage <raw>... [--stock NAME] [--out <dir>]   base render stored as HEIC10/PNG16/TIFF16/EXR/JPEG: size and ΔE00 vs in-memory
   common options: --plugins none|highlightRecovery,cameraMatch,vignette   --calibration models.json
 
 Looks: \(BuiltInLook.allCases.map(\.rawValue).joined(separator: ", ")) or a .cube path.
@@ -121,6 +126,8 @@ struct FileResult: Codable {
     /// Scene-linear median log2 luminance (SceneContext.logP50): the input of the dark-scene rule, printed so its
     /// threshold can be set from tuning files only.
     var sceneMedianStops: Double? = nil
+    /// Native-resolution sharpness (bench --native).
+    var native: NativeResult? = nil
 }
 
 func gates(_ vs: [VariantResult]) -> Gates? {
@@ -150,7 +157,7 @@ func save(_ image: CIImage, recipe: DecodeRecipe, name: String, outDir: URL, for
     return data.count
 }
 
-func benchFile(_ url: URL, entry: CorpusEntry?, outDir: URL, longEdge: Int, full: Bool, crops: Bool) throws -> FileResult {
+func benchFile(_ url: URL, entry: CorpusEntry?, outDir: URL, longEdge: Int, full: Bool, crops: Bool, native: Bool = false, nativeStock: String? = "warm400") throws -> FileResult {
     let stem = url.deletingPathExtension().lastPathComponent
     let scale = try decoder.scaleFactor(url: url, longEdge: longEdge)
     let analysis = try dev.analyze(url: url)
@@ -242,9 +249,11 @@ func benchFile(_ url: URL, entry: CorpusEntry?, outDir: URL, longEdge: Int, full
             log(String(format: "  full-res %@ HEIC10: %.2fs, %.1f MB", v.name, Date().timeIntervalSince(t), Double(bytes) / 1e6))
         }
     }
+    var nativeResult: NativeResult?
+    if native { nativeResult = try nativeSharpness(url, variants: nativeVariants(stockName: nativeStock), analysis: analysis) }
     return FileResult(file: url.lastPathComponent, corpus: entry, camera: ref.recipe.camera, iso: ref.recipe.iso, analysisSize: [w, h],
                       reference: refMetrics, variants: results, gates: gates(results), error: nil,
-                      sceneMedianStops: analysis.context.logP50)
+                      sceneMedianStops: analysis.context.logP50, native: nativeResult)
 }
 
 func f2(_ v: Double?) -> String { v.map { String(format: "%.2f", $0) } ?? "–" }
@@ -256,7 +265,12 @@ func markdown(_ files: [FileResult]) -> String {
     md += "## Gates\n\n| id | file | category | split | camera | scene median (stops) | Gate 1 | Gate 2 (auto) | Gate 2 (core) | auto decisions |\n|---|---|---|---|---|---|---|---|---|---|\n"
     for f in files {
         let c = f.corpus
-        let g1 = f.gates.map { $0.gate1 ? "PASS" : "FAIL" } ?? (f.error == nil ? "–" : "ERROR")
+        // Gate 1 compares at different decoder versions when DecoderPolicy pins another version than Apple's default
+        // (kept on purpose, user 2026-11-09): say so, so a version difference is not read as lost decoder control.
+        let vRef = f.variants.first(where: { $0.name == "appleDefault" })?.recipe.decoderVersion
+        let vExp = f.variants.first(where: { $0.name == "explicit" })?.recipe.decoderVersion
+        let versionNote = (vRef != nil && vExp != nil && vRef != vExp) ? " (policy \(vExp!) ≠ Apple default \(vRef!))" : ""
+        let g1 = f.gates.map { ($0.gate1 ? "PASS" : "FAIL") + versionNote } ?? (f.error == nil ? "–" : "ERROR")
         let g2 = f.gates.map { $0.gate2 ? "PASS" : "FAIL: " + $0.gate2Reasons.joined(separator: "; ") } ?? (f.error ?? "–")
         let dec = f.variants.first(where: { $0.name == "auto" })?.recipe.decisions.joined(separator: "; ") ?? ""
         let g2c = f.gates.map { $0.gate2Core ? "PASS" : "FAIL: " + $0.gate2CoreReasons.joined(separator: "; ") } ?? "–"
@@ -279,6 +293,7 @@ func markdown(_ files: [FileResult]) -> String {
                          m.localContrast, f2(m.highlightRingMeanY) + " / " + f2(v.ringOnReferenceMask),
                          v.brightMeanY.map { String(format: "%.3f", $0) } ?? "–", v.brightLocalContrast.map { String(format: "%.3f", $0) } ?? "–", m.meanChroma, v.seconds)
         }
+        if let n = f.native { md += "\n" + nativeMarkdown(n) }
         let skin = f.variants.filter { $0.skinDeltaE != nil }
         if !skin.isEmpty {
             md += "\nlook change on people vs elsewhere (ΔE00 vs auto base, Vision person mask): "
@@ -374,7 +389,7 @@ func chartCommand(_ url: URL, corners: ColorChecker.Corners, model: String?, ref
         refLab = r
     }
     let scale = try decoder.scaleFactor(url: url, longEdge: 2048)
-    let version = DecoderPolicy.pick(supported: try decoder.inspect(url: url).supported)
+    let version = DecoderPolicy.pick(supported: try decoder.info(url: url).supported)
     func measure(_ ccm: [Float]?) throws -> [SIMD3<Double>] {
         var st = RenderSettings(mode: .sceneLinear, decoderVersion: version)
         st.ccm = ccm
@@ -485,6 +500,11 @@ func run() throws -> Int32 {
         let h = min(Int(ref.image.extent.integral.height), Int(cand.image.extent.integral.height))
         print(try ComparisonMetrics.compare(candidate: renderer.linearImage(cand.image, size: (w, h)), reference: renderer.linearImage(ref.image, size: (w, h))).prettyJSON())
         log("decisions: " + cand.recipe.decisions.joined(separator: "; "))
+        if a.flags.contains("native") {
+            let an = try dev.analyze(url: url)
+            let n = try nativeSharpness(url, variants: [v], analysis: an)
+            print(nativeMarkdown(n))
+        }
     case "bench":
         guard !rest.isEmpty, let out = a.options["out"] else { print(usage); return 2 }
         let outDir = URL(fileURLWithPath: out)
@@ -504,7 +524,8 @@ func run() throws -> Int32 {
         for url in urls {
             log("bench \(url.lastPathComponent)")
             let entry = manifest[url.lastPathComponent]
-            do { results.append(try benchFile(url, entry: entry, outDir: outDir, longEdge: longEdge, full: a.flags.contains("full"), crops: a.flags.contains("crops"))) } catch {
+            do { results.append(try benchFile(url, entry: entry, outDir: outDir, longEdge: longEdge, full: a.flags.contains("full"), crops: a.flags.contains("crops"),
+                                                 native: a.flags.contains("native"), nativeStock: a.options["native-stock"].map { $0 == "none" ? nil : $0 } ?? "warm400")) } catch {
                 log("  ERROR \(error)")
                 results.append(FileResult(file: url.lastPathComponent, corpus: entry, camera: nil, iso: nil, analysisSize: [0, 0],
                                           reference: nil, variants: [], gates: nil, error: "\(error)"))
@@ -521,6 +542,42 @@ func run() throws -> Int32 {
     case "gate3":
         guard rest.count >= 2 else { print(usage); return 2 }
         return try gate3Command(rest) ? 0 : 1
+    case "lutcheck":
+        // LUT library contract: every <name>.manifest.json in the folder (default: RawCore's bundled Looks/).
+        let lib = rest.first.map { LookLibrary(directory: URL(fileURLWithPath: $0)) } ?? LookLibrary.bundled
+        var bad = 0
+        for c in lib.checks {
+            let route = c.route.map { "\($0)" } ?? "—"
+            print("\(c.isUsable ? "OK  " : "FAIL") \(c.name)  route: \(route)")
+            for p in c.problems { print("       ✗ \(p)") }
+            for r in c.releaseBlockers { print("       ⚠︎ release: \(r)") }
+            if !c.isUsable { bad += 1 }
+        }
+        print("\(lib.checks.count) manifests, \(lib.entries.count) usable, \(bad) rejected")
+        return bad == 0 ? 0 : 1
+    case "looks":
+        guard !rest.isEmpty, let out = a.options["out"] else { print(usage); return 2 }
+        let run = try looksCommand(rest, out: out, looks: a.options["looks"].map { $0.split(separator: ",").map(String.init) },
+                                   longEdge: a.options["long-edge"].flatMap(Int.init) ?? 1600, manifest: a.options["manifest"],
+                                   sceneIntensity: !a.flags.contains("no-scene-intensity"))
+        log("wrote \(run.rows.count) renders to \(out)")
+    case "lut":
+        // Convert between .cube and .mrlut (MoodRoll's packed format) and report the round-trip error.
+        guard let src = rest.first, let dst = a.options["out"] else { print(usage); return 2 }
+        let lut = try CubeLUT.load(any: URL(fileURLWithPath: src))
+        let outURL = URL(fileURLWithPath: dst)
+        if outURL.pathExtension.lowercased() == LUTBinaryFormat.fileExtension {
+            try LUTBinaryFormat.encode(lut).write(to: outURL)
+        } else {
+            try lut.cubeText(comments: ["converted by raw-bench lut"]).write(to: outURL, atomically: true, encoding: .utf8)
+        }
+        let back = try CubeLUT.load(any: outURL)
+        let err = zip(lut.rgba, back.rgba).map { abs($0 - $1) }.max() ?? 0
+        let bytes = (try? FileManager.default.attributesOfItem(atPath: dst)[.size] as? Int) ?? 0
+        print(String(format: "%@ → %@: %d³, %d bytes, max round-trip error %.6f", src, dst, lut.size, bytes, err))
+    case "storage":
+        guard !rest.isEmpty else { print(usage); return 2 }
+        print(try storageCommand(rest, stockName: a.options["stock"] ?? "slide100", out: a.options["out"]))
     case "pairs":
         guard !rest.isEmpty, let out = a.options["out"] else { print(usage); return 2 }
         let outDir = URL(fileURLWithPath: out)

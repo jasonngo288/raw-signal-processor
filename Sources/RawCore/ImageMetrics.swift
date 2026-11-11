@@ -184,6 +184,190 @@ public struct ComparisonMetrics: Codable, Equatable, Sendable {
     }
 }
 
+/// Native-pixel sharpness metrics (docs/METRICS.md). Meant for full-resolution crops (scaleFactor 1): at a
+/// 1024 px long edge a 12 MP file is downscaled ~4x and the sharpening Apple applies at native scale disappears.
+/// Edge sites and the flat-area mask are taken from `reference` when given (the appleDefault crop), so the
+/// candidate is measured on exactly the same pixels.
+public struct SharpnessMetrics: Codable, Equatable, Sendable {
+    /// Median over the strongest edges of (peak - plateau) / step, in percent; profile +-6 px along the gradient normal on log2 Y.
+    /// Positive = halo / overshoot (sharpening); ~0 = soft edge. nil if the crop has no usable edge.
+    public var edgeOvershootPercent: Double?
+    public var edgeCount: Int
+    /// Variance of log2 Y in the DoG band sigma 0.7-2 px.
+    public var fineBandEnergy: Double
+    /// Variance of log2 Y in the DoG band sigma 2-6 px.
+    public var coarseBandEnergy: Double
+    /// fine / coarse band energy: scale-free detail measure. Compare to the reference with `SharpnessComparison.hfRatio`.
+    public var hfEnergy: Double { coarseBandEnergy > 0 ? fineBandEnergy / coarseBandEnergy : 0 }
+    /// Std-dev of the log2 Y high-pass (sigma 2 px) over flat pixels (low gradient, Y 0.02...0.9): the waxy detector.
+    /// nil if there are fewer than 1000 flat pixels.
+    public var flatTexture: Double?
+    public var flatPixelFraction: Double
+
+    static let edgeMargin = 8
+    static let profileRadius = 6
+
+    static func logLuma(_ image: LinearImage) -> [Float] {
+        image.displayLuminance().map { Float(log2(Double(max($0, 1e-4)))) }
+    }
+
+    struct EdgeSite { var x: Int; var y: Int; var nx: Float; var ny: Float }
+
+    /// Strongest 1 % of the gradient magnitude (log2 Y blurred sigma 1), thinned to local maxima along the normal.
+    static func edgeSites(_ logY: [Float], width: Int, height: Int) -> [EdgeSite] {
+        let m = edgeMargin
+        guard width > 2 * m + 2, height > 2 * m + 2 else { return [] }
+        let b = gaussianBlur(logY, width: width, height: height, sigma: 1)
+        var gx = [Float](repeating: 0, count: logY.count), gy = gx, mag = gx
+        for y in 1..<(height - 1) {
+            for x in 1..<(width - 1) {
+                let i = y * width + x
+                gx[i] = (b[i + 1] - b[i - 1]) / 2; gy[i] = (b[i + width] - b[i - width]) / 2
+                mag[i] = (gx[i] * gx[i] + gy[i] * gy[i]).squareRoot()
+            }
+        }
+        var inner: [Float] = []
+        inner.reserveCapacity((width - 2 * m) * (height - 2 * m))
+        for y in m..<(height - m) { for x in m..<(width - m) { inner.append(mag[y * width + x]) } }
+        inner.sort()
+        let thr = max(inner[min(inner.count - 1, Int(0.99 * Double(inner.count - 1)))], 0.05)
+        var sites: [EdgeSite] = []
+        for y in m..<(height - m) {
+            for x in m..<(width - m) {
+                let i = y * width + x
+                let g = mag[i]
+                guard g >= thr else { continue }
+                let nx = gx[i] / g, ny = gy[i] / g
+                let dx = Int((nx).rounded()), dy = Int((ny).rounded())
+                if g >= mag[(y + dy) * width + x + dx], g > mag[(y - dy) * width + x - dx] { sites.append(EdgeSite(x: x, y: y, nx: nx, ny: ny)) }
+            }
+        }
+        return sites
+    }
+
+    static func sample(_ p: [Float], width: Int, height: Int, x: Float, y: Float) -> Float {
+        let x0 = min(max(Int(x.rounded(.down)), 0), width - 2), y0 = min(max(Int(y.rounded(.down)), 0), height - 2)
+        let fx = x - Float(x0), fy = y - Float(y0)
+        let a = p[y0 * width + x0], b = p[y0 * width + x0 + 1], c = p[(y0 + 1) * width + x0], d = p[(y0 + 1) * width + x0 + 1]
+        return (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy
+    }
+
+    /// (peak - plateau) / step for one site; nil if the step is under 0.25 log2 (0.25 EV).
+    static func overshoot(_ logY: [Float], width: Int, height: Int, site: EdgeSite) -> Double? {
+        let r = profileRadius
+        var prof: [Float] = []   // t = -r...r along the normal (low side -> high side after the flip below)
+        for t in -r...r {
+            prof.append(sample(logY, width: width, height: height, x: Float(site.x) + Float(t) * site.nx, y: Float(site.y) + Float(t) * site.ny))
+        }
+        // The gradient points from dark to bright, so t > 0 is the bright side.
+        let hi = (prof[r + 4] + prof[r + 5] + prof[r + 6]) / 3, lo = (prof[0] + prof[1] + prof[2]) / 3
+        let step = hi - lo
+        guard step >= 0.25 else { return nil }
+        let peak = prof[r...].max() ?? hi, trough = prof[...r].min() ?? lo
+        let over = max(0, peak - hi), under = max(0, lo - trough)
+        return Double((over + under) / 2 / step)
+    }
+
+    static func flatMask(_ image: LinearImage, logY: [Float]) -> [Bool] {
+        let w = image.width, h = image.height
+        let b = gaussianBlur(logY, width: w, height: h, sigma: 2)
+        let y = image.displayLuminance()
+        var mask = [Bool](repeating: false, count: w * h)
+        guard w > 2, h > 2 else { return mask }
+        for yy in 1..<(h - 1) {
+            for xx in 1..<(w - 1) {
+                let i = yy * w + xx
+                let gx = (b[i + 1] - b[i - 1]) / 2, gy = (b[i + w] - b[i - w]) / 2
+                mask[i] = (gx * gx + gy * gy).squareRoot() < 0.02 && y[i] > 0.02 && y[i] < 0.9
+            }
+        }
+        return mask
+    }
+
+    /// Measures `image`; edge sites and the flat mask come from `reference` (same size) when given, else from `image`.
+    public static func measure(_ image: LinearImage, reference: LinearImage? = nil) -> SharpnessMetrics {
+        let w = image.width, h = image.height
+        let logY = logLuma(image)
+        let refLog = reference.map(logLuma) ?? logY
+        let refImage = reference ?? image
+
+        let sites = edgeSites(refLog, width: w, height: h)
+        let ov = sites.compactMap { overshoot(logY, width: w, height: h, site: $0) }.sorted()
+        let overshootPct = ov.isEmpty ? nil : ov[ov.count / 2] * 100
+
+        let g07 = gaussianBlur(logY, width: w, height: h, sigma: 0.7)
+        let g2 = gaussianBlur(logY, width: w, height: h, sigma: 2)
+        let g6 = gaussianBlur(logY, width: w, height: h, sigma: 6)
+        var fine = 0.0, coarse = 0.0
+        for i in 0..<logY.count {
+            let f = Double(g07[i] - g2[i]), c = Double(g2[i] - g6[i])
+            fine += f * f; coarse += c * c
+        }
+        let n = Double(logY.count)
+
+        let mask = flatMask(refImage, logY: refLog)
+        var s = 0.0, q = 0.0, cnt = 0
+        for i in 0..<logY.count where mask[i] {
+            let d = Double(logY[i] - g2[i]); s += d; q += d * d; cnt += 1
+        }
+        let flat: Double? = cnt >= 1000 ? sqrt(max(0, q / Double(cnt) - (s / Double(cnt)) * (s / Double(cnt)))) : nil
+        return SharpnessMetrics(edgeOvershootPercent: overshootPct, edgeCount: ov.count, fineBandEnergy: fine / n, coarseBandEnergy: coarse / n,
+                                flatTexture: flat, flatPixelFraction: Double(cnt) / n)
+    }
+}
+
+/// Candidate vs the appleDefault crop of the same file.
+public struct SharpnessComparison: Codable, Equatable, Sendable {
+    public var candidate: SharpnessMetrics
+    public var reference: SharpnessMetrics
+
+    public init(candidate: SharpnessMetrics, reference: SharpnessMetrics) { self.candidate = candidate; self.reference = reference }
+
+    public static func compare(candidate: LinearImage, reference: LinearImage) throws -> SharpnessComparison {
+        guard candidate.width == reference.width, candidate.height == reference.height else {
+            throw RawCoreError.sizeMismatch(candidate: (candidate.width, candidate.height), reference: (reference.width, reference.height))
+        }
+        return SharpnessComparison(candidate: .measure(candidate, reference: reference), reference: .measure(reference))
+    }
+
+    /// Candidate overshoot relative to the reference, in percent (-30 = 30 % less overshoot).
+    public var overshootChangePercent: Double? {
+        guard let c = candidate.edgeOvershootPercent, let r = reference.edgeOvershootPercent, r > 0 else { return nil }
+        return (c / r - 1) * 100
+    }
+    /// hfEnergy(candidate) / hfEnergy(reference). 1 = same detail; 0.6-0.85 = calmer; < 0.5 = mush.
+    public var hfRatio: Double? { reference.hfEnergy > 0 ? candidate.hfEnergy / reference.hfEnergy : nil }
+    /// flatTexture(candidate) / flatTexture(reference), both on the reference's flat pixels.
+    public var flatTextureRatio: Double? {
+        guard let c = candidate.flatTexture, let r = reference.flatTexture, r > 0 else { return nil }
+        return c / r
+    }
+}
+
+/// Mean of several crops' comparisons (centre + 4 tiles): one row per variant in summary.md / summary.json.
+public struct SharpnessSummary: Codable, Equatable, Sendable {
+    public var crops: Int
+    public var overshootPercent: Double?
+    public var referenceOvershootPercent: Double?
+    public var overshootChangePercent: Double?
+    public var hfEnergy: Double
+    public var hfRatio: Double?
+    public var flatTexture: Double?
+    public var flatTextureRatio: Double?
+
+    public init(_ cs: [SharpnessComparison]) {
+        func mean(_ v: [Double]) -> Double? { v.isEmpty ? nil : v.reduce(0, +) / Double(v.count) }
+        crops = cs.count
+        overshootPercent = mean(cs.compactMap(\.candidate.edgeOvershootPercent))
+        referenceOvershootPercent = mean(cs.compactMap(\.reference.edgeOvershootPercent))
+        overshootChangePercent = mean(cs.compactMap(\.overshootChangePercent))
+        hfEnergy = mean(cs.map(\.candidate.hfEnergy)) ?? 0
+        hfRatio = mean(cs.compactMap(\.hfRatio))
+        flatTexture = mean(cs.compactMap(\.candidate.flatTexture))
+        flatTextureRatio = mean(cs.compactMap(\.flatTextureRatio))
+    }
+}
+
 public enum RawCoreError: Error, CustomStringConvertible {
     case sizeMismatch(candidate: (Int, Int), reference: (Int, Int))
     case unsupportedRaw(String)

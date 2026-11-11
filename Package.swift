@@ -12,7 +12,7 @@ let package = Package(
     targets: [
         // Shared engine: pure-Swift colour math / metrics / settings, plus Core Image RAW decode
         // and Vision context analysis behind canImport guards.
-        .target(name: "RawCore"),
+        .target(name: "RawCore", resources: [.copy("Looks")]),   // bundled .cube looks (BundledLook)
         // iOS capture layer (AVFoundation Bayer RAW + HEIC from the same press). Compiles to metadata types only on macOS.
         .target(name: "CaptureKit"),
         // macOS CLI: render, compare against Apple's default decode, batch benchmark.

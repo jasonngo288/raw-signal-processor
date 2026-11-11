@@ -24,11 +24,19 @@ the host shell: UI, rolls, storage. **Priority: make the core pipeline solid her
   the press. Its result is stored next to the DNG, so develop never analyses again.
 - **Develop** (whole roll at the end) uses this repo's `Developer` with the stored analysis.
 - **Fallback:** a frame with no usable DNG goes through MoodRoll's current HEIC pipeline; the recipe says so.
+- **Film looks (decided 2026-11-09): RawCore's looks replace MoodRoll's film looks.** MoodRoll's LUT/stock code is not
+  final and is not ported; looks are designed, benched and shipped here (research: `.orchestration/looks/`).
 - What this asks of the core (not built yet): a stored analysis must be self-contained (person mask on disk,
   the HEIC's histograms for cameraMatch, decoder version and plugin set it was made with; re-analyse if they
   differ at develop time); per-stage timings in the recipe; analysis cost measured on device with the camera running.
-- **Open:** storage. A frame is DNG ≈ 10 MB (14 Pro Bayer) / 17 MB (15 Pro ProRAW) + HEIC ≈ 1.6 MB, kept until the
-  roll develops (36 Bayer frames ≈ 430 MB). Deleting the HEIC after analysis saves ≈ 13 % only; see WORK_LOG 2026-11-09.
+- **Storage (decided 2026-11-09): keep the DNG until the roll develops** (and the HEIC). Files in Application Support,
+  not Caches/tmp; roll folder `isExcludedFromBackup`; check free space for the whole roll before it starts
+  (≈ 12 MB per Bayer frame, 36 frames ≈ 430 MB). No Core Data blobs (saves nothing). The DNG is deleted after develop.
+  Why: Bayer DNG is already lossless-compressed; a stored HEIC10 base saves only ≈ 28 % and would rule out re-decoding
+  with a later CCM. ProRAW (−63 % with a stored base) stays open. Evidence: `.orchestration/storage/STORAGE_RESEARCH.md`.
+
+## Orchestration
+Agent roles and routing: `.orchestration/README.md` and `.claude/agents/` (adapted from MoodRoll). Topic notes go to `.orchestration/<topic>/`.
 
 ## Hard rules
 1. **Every render writes a `DecodeRecipe`** (decoder version, defaults, effective values, support flags, decisions, OS).
@@ -61,9 +69,13 @@ the host shell: UI, rolls, storage. **Priority: make the core pipeline solid her
 Sources/RawCore/   ColorMath, LinearImage, ImageMetrics, RenderSettings, Look, ContextAnalysis, ToneMatch, ColorChecker, Presets2026 (pure Swift)
                    Calibration (per-model CCM table, DecoderPolicy)
                    RawDecoder, Renderer, Developer (analyse → decode → plugins → look → skin protection → finish; Vision requests),
-                   FilmFinisher, Plugins (highlightRecovery, cameraMatch, vignette)
+                   FilmFinisher, Plugins (highlightRecovery, cameraMatch, vignette, logLook), LogLook (log curves, composite cube)
+                   Looks/ (declared LUT files: <name>.cube + <name>.manifest.json), LookManifest (LookContract checks route, sha256,
+                   licence; LookLibrary → stocks; only passing files load — `raw-bench lutcheck`)
+                   FilmLooks (2026 film-look set: `LookSpec` in OKLab → 33³ cube, `FilmLooks2026`), LUTBinaryFormat (.mrlut)
 Sources/CaptureKit AVFoundation Bayer RAW / ProRAW + HEIC capture (iOS; runs on device via App/)
-Sources/RawBench/  raw-bench CLI: info | render | compare | bench
+Sources/RawBench/  raw-bench CLI: info | render | compare | bench | pairs | chart | gate3 | storage | lut | lutcheck | looks
+tools/look-review/ review.py: render the look set with raw-bench, local review page, feedback.json (bench-out/, never committed)
 corpus/            corpus.json (public RAWs, fetched by CI, never committed) + README
 Tests/RawCoreTests unit tests (Sharma CIEDE2000, metrics, LUT, settings, decisions) + decoder tests on originals/
 docs/              ROADMAP.md, PLANNING.md, METRICS.md, PRESETS_2026.md; <timestamp>/ device captures

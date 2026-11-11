@@ -26,11 +26,27 @@ public struct PresetLookParams: Codable, Equatable, Sendable {
     public var shadows: Float
     public var highlights: Float
     public var curve: PresetCurve
+    /// Sky hold (0 = off, 1 = full): on bright blue pixels of the input (encoded b − r ≳ 0.03, luma ≳ 0.45) the
+    /// exposure lift and the saturation cut are taken back, so a bright-airy preset does not wash the sky to milk.
+    /// Not in the MoodRoll spec (added 2026-11-11 after the sky bench); listed in the preset's `openQuestions`.
+    public var skyHold: Float
 
     public init(exposureEV: Float, temperatureK: Float, tint: Float, saturation: Float = 1, vibrance: Float = 0,
-                shadows: Float = 0, highlights: Float = 0, curve: PresetCurve) {
+                shadows: Float = 0, highlights: Float = 0, curve: PresetCurve, skyHold: Float = 0) {
         self.exposureEV = exposureEV; self.temperatureK = temperatureK; self.tint = tint; self.saturation = saturation
         self.vibrance = vibrance; self.shadows = shadows; self.highlights = highlights; self.curve = curve
+        self.skyHold = skyHold
+    }
+
+    enum CodingKeys: String, CodingKey { case exposureEV, temperatureK, tint, saturation, vibrance, shadows, highlights, curve, skyHold }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(exposureEV: try c.decode(Float.self, forKey: .exposureEV), temperatureK: try c.decode(Float.self, forKey: .temperatureK),
+                  tint: try c.decode(Float.self, forKey: .tint), saturation: try c.decode(Float.self, forKey: .saturation),
+                  vibrance: try c.decode(Float.self, forKey: .vibrance), shadows: try c.decode(Float.self, forKey: .shadows),
+                  highlights: try c.decode(Float.self, forKey: .highlights), curve: try c.decode(PresetCurve.self, forKey: .curve),
+                  skyHold: try c.decodeIfPresent(Float.self, forKey: .skyHold) ?? 0)   // older recipes have no skyHold
     }
 
     public static let referenceTemperatureK: Float = 5500
@@ -124,10 +140,22 @@ public struct Preset26: Equatable, Sendable {
         return g / (g * lumaLinear).sum()
     }
 
+    /// How much an encoded-P3 input pixel looks like sky (0…1): bright and blue (b above r, not far below g, so cyan
+    /// skies count and foliage / skin do not). Smooth in every channel, so a cube built from it stays smooth.
+    static func skyWeight(_ c: SIMD3<Float>) -> Float {
+        func smooth(_ a: Float, _ b: Float, _ x: Float) -> Float { let t = min(max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t) }
+        return smooth(0.03, 0.12, c.z - c.x) * smooth(-0.08, 0, c.z - c.y) * smooth(0.25, 0.45, (c * lumaEncoded).sum())
+    }
+
     static func apply(_ c: SIMD3<Float>, _ p: PresetLookParams, gains: SIMD3<Float>) -> SIMD3<Float> {
         let w = lumaEncoded
-        // 1. White balance + exposure in linear light.
-        let lin = SIMD3(decode(c.x), decode(c.y), decode(c.z)) * gains
+        // 0. Sky weight from the input pixel.
+        let sky = p.skyHold <= 0 ? 0 : min(p.skyHold, 1) * skyWeight(c)
+        // 1. White balance + exposure in linear light (the sky keeps its own exposure and white balance: a warm
+        //    balance would turn it grey).
+        let wbExp = gains / pow(2, p.exposureEV)
+        let skyGains = (wbExp + (SIMD3<Float>(repeating: 1) - wbExp) * sky) * exp2(p.exposureEV * (1 - sky))
+        let lin = SIMD3(decode(c.x), decode(c.y), decode(c.z)) * skyGains
         var e = SIMD3(encode(max(lin.x, 0)), encode(max(lin.y, 0)), encode(max(lin.z, 0)))
         // 2. Tone on luma (hue-stable, same scheme as BuiltInLook.film): shadows/highlights, S-curve, soft shoulder, toe.
         let y = max((e * w).sum(), 0)
@@ -160,7 +188,12 @@ public struct Preset26: Equatable, Sendable {
         let yo = (e * w).sum()
         let mx = e.max(), mn = e.min()
         let currentSat = mx > 1e-4 ? (mx - mn) / mx : 0
-        let s = p.saturation * (1 + p.vibrance * (1 - min(currentSat, 1)))
+        let s0 = p.saturation * (1 + p.vibrance * (1 - min(currentSat, 1)))
+        // The sky keeps at least its input chroma (toe, shoulder and saturation would each take some away).
+        let chromaIn = c - SIMD3(repeating: (c * w).sum())
+        let cIn = (chromaIn * chromaIn).sum().squareRoot(), cNow = ((e - SIMD3(repeating: yo)) * (e - SIMD3(repeating: yo))).sum().squareRoot()
+        let skyS = cNow > 1e-4 ? min(max(cIn / cNow, s0), 1.3) : s0
+        let s = s0 + (skyS - s0) * sky
         var chroma = (e - SIMD3(repeating: yo)) * s
         // Ceiling 0.99, not 1: a warm white balance would otherwise push R of pure white to a hard clip.
         let ceiling: Float = 0.99
@@ -171,7 +204,9 @@ public struct Preset26: Equatable, Sendable {
             if c < 0, yo + c < 0 { t = min(t, -yo / c) }
         }
         chroma *= max(t, 0)
-        return SIMD3(repeating: yo) + chroma
+        let out = SIMD3(repeating: yo) + chroma
+        // 5. The sky also keeps most of its own tone: toe, soft contrast and shoulder flatten its gradient (milky sky).
+        return out + (c - out) * (0.6 * sky)
     }
 
     // MARK: the seven presets (brief order: P0, P1, P2)
@@ -187,17 +222,18 @@ public struct Preset26: Equatable, Sendable {
         Preset26(name: "PRESET_26_PORTRAIT160", specId: "portra-160", tier: .pro, priority: "P1", group: .film,
                  vibe: "pale, bright, light & airy; whites stay clean",
                  params: PresetLookParams(exposureEV: 0.20, temperatureK: 5700, tint: 2, saturation: 0.95, shadows: 0.30,
-                                          curve: PresetCurve(toe: 0.045, contrast: 0.94, shadowRGB: SIMD3(0.008, 0, -0.008))),
+                                          curve: PresetCurve(toe: 0.045, contrast: 0.94, shadowRGB: SIMD3(0.008, 0, -0.008)), skyHold: 1),
                  finish: FilmFinish(grainAmount: 0.25, grainSize: 0.07),
-                 intensity: 0.6, skinProtect: false, curveLocked: false, openQuestions: []),
+                 intensity: 0.6, skinProtect: false, curveLocked: false, openQuestions: ["skyHold 1 is not in the spec (added 2026-11-11: +0.20 EV, warm WB, toe and saturation < 1 washed bright skies, chroma -7…-25 %); exposure kept at the spec value"]),
         Preset26(name: "PRESET_26_SOFT400", specId: "fuji-400h", tier: .pro, priority: "P1", group: .film,
                  vibe: "pastel, bright pink skin, muted greens",
                  params: PresetLookParams(exposureEV: 0.20, temperatureK: 5800, tint: -2, saturation: 0.90, shadows: 0.30,
                                           curve: PresetCurve(toe: 0.03, contrast: 0.95, shadowRGB: SIMD3(0.005, -0.004, 0.002),
-                                                             midRGB: SIMD3(0.004, -0.003, 0.001))),
+                                                             midRGB: SIMD3(0.004, -0.003, 0.001)), skyHold: 1),
                  finish: FilmFinish(grainAmount: 0.30, grainSize: 0.07),
                  intensity: 0.6, skinProtect: false, curveLocked: false,
-                 openQuestions: ["spec display name \"Fuji Soft 400\" contains a trademark (checklist forbids it); app name used here: PRESET_26_SOFT400"]),
+                 openQuestions: ["spec display name \"Fuji Soft 400\" contains a trademark (checklist forbids it); app name used here: PRESET_26_SOFT400",
+                                 "skyHold 1 is not in the spec (added 2026-11-11: +0.20 EV, warm WB, toe and saturation < 1 washed bright skies, chroma -7…-25 %); exposure kept at the spec value"]),
         Preset26(name: "PRESET_26_CHROME64", specId: "kodachrome-64", tier: .pro, priority: "P1", group: .film,
                  vibe: "deep reds, rich yellows, deep blacks, high contrast",
                  params: PresetLookParams(exposureEV: 0.0, temperatureK: 5500, tint: 2, saturation: 1.15, vibrance: 0.35,

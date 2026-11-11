@@ -19,20 +19,31 @@ public final class Renderer: @unchecked Sendable {
     }
 
     /// Apply a look LUT (display-referred, encoded Display P3 domain) at the given intensity.
-    public func applyLook(_ lut: CubeLUT, to image: CIImage, intensity: Float) throws -> CIImage {
+    public static let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
+
+    public func applyLook(_ lut: CubeLUT, to image: CIImage, intensity: Float, colorSpace: LookColorSpace = .displayP3) throws -> CIImage {
         guard intensity > 0 else { return image }
         let data = lut.rgba.withUnsafeBufferPointer { Data(buffer: $0) }
         guard let cube = CIFilter(name: "CIColorCubeWithColorSpace", parameters: [
             kCIInputImageKey: image.clampedToExtent(),
             "inputCubeDimension": lut.size,
             "inputCubeData": data,
-            "inputColorSpace": Renderer.displayP3,
+            "inputColorSpace": colorSpace == .sRGB ? Renderer.sRGB : Renderer.displayP3,
         ])?.outputImage?.cropped(to: image.extent) else { throw RawCoreError.renderFailed("CIColorCubeWithColorSpace failed") }
         guard intensity < 1 else { return cube }
         guard let mixed = CIFilter(name: "CIDissolveTransition", parameters: [
             kCIInputImageKey: image, kCIInputTargetImageKey: cube, kCIInputTimeKey: intensity,
         ])?.outputImage else { throw RawCoreError.renderFailed("CIDissolveTransition failed") }
         return mixed.cropped(to: image.extent)
+    }
+
+    /// `amount` of the way from `base` to `target` (CIDissolveTransition); 0 = base, 1 = target.
+    public func dissolve(from base: CIImage, to target: CIImage, amount: Float) -> CIImage {
+        if amount >= 1 { return target.cropped(to: base.extent) }
+        if amount <= 0 { return base }
+        return (CIFilter(name: "CIDissolveTransition", parameters: [
+            kCIInputImageKey: base, kCIInputTargetImageKey: target, kCIInputTimeKey: amount,
+        ])?.outputImage ?? target).cropped(to: base.extent)
     }
 
     /// Map an EDR image whose highlights reach `sourceHeadroom` (× SDR white) into SDR, keeping mid-tones.
@@ -155,10 +166,30 @@ public final class Renderer: @unchecked Sendable {
         return total > 0 ? v.map { $0 / total } : nil
     }
 
-    public func resolveLook(_ name: String?) throws -> CubeLUT? {
+    public func resolveLook(_ name: String?) throws -> CubeLUT? { try resolveLookDeclared(name)?.lut }
+
+    /// A built-in look or a LUT file. A file with `<stem>.manifest.json` next to it is checked by `LookContract`
+    /// (problems throw; a log route must be used as a library stock, not as a plain look); without one it is
+    /// assumed display-referred Display P3 and the note says so.
+    public func resolveLookDeclared(_ name: String?) throws -> (lut: CubeLUT, space: LookColorSpace, note: String?)? {
         guard let name, !name.isEmpty else { return nil }
-        if let builtIn = BuiltInLook(rawValue: name) { return builtIn.lut() }
-        return try CubeLUT.load(URL(fileURLWithPath: name))
+        if let builtIn = BuiltInLook(rawValue: name) { return (builtIn.lut(), .displayP3, nil) }
+        let url = URL(fileURLWithPath: name)
+        let manifestURL = url.deletingPathExtension().appendingPathExtension("manifest.json")
+        let stem = url.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "_33x33_spectral", with: "")
+        let alt = url.deletingLastPathComponent().appendingPathComponent(stem + ".manifest.json")
+        for m in [manifestURL, alt] where FileManager.default.fileExists(atPath: m.path) {
+            let manifest = try JSONDecoder().decode(LookManifest.self, from: Data(contentsOf: m))
+            let (check, lut) = LookContract.check(manifest, manifestFile: m.lastPathComponent, cubeData: try? Data(contentsOf: url))
+            guard let lut, let route = check.route else {
+                throw RawCoreError.invalidLUT("\(url.lastPathComponent) fails its manifest: " + check.problems.joined(separator: "; "))
+            }
+            guard case .display(let space) = route else {
+                throw RawCoreError.invalidLUT("\(url.lastPathComponent) is a log (scene-referred) LUT: register it as a library stock so logLook applies it")
+            }
+            return (lut, space, "look \(manifest.name) (\(manifest.license.id), sha \(manifest.sha256.prefix(12))…, route display \(space.rawValue))")
+        }
+        return (try CubeLUT.load(any: url), .displayP3, "look \(url.lastPathComponent): no manifest, assumed display-referred Display P3")
     }
 
     public enum Format: String, CaseIterable, Sendable { case heic10, png16, jpeg }

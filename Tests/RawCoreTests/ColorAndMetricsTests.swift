@@ -106,6 +106,22 @@ final class LookAndSettingsTests: XCTestCase {
         XCTAssertEqual(v.x, 0.25, accuracy: 1e-6); XCTAssertEqual(v.y, 0.5, accuracy: 1e-6); XCTAssertEqual(v.z, 0.75, accuracy: 1e-6)
     }
 
+    /// DOMAIN is the input range: outputs are never rescaled (regression: they were divided by the domain).
+    func testCubeDomainIsInputRange() throws {
+        func cube(_ header: String, _ f: (Int, Int, Int) -> String) -> String {
+            var t = "LUT_3D_SIZE 2\n" + header
+            for b in 0..<2 { for g in 0..<2 { for r in 0..<2 { t += f(r, g, b) + "\n" } } }
+            return t
+        }
+        // Constant output 0.3 over domain 0.5…1: every input gives 0.3 (was (0.3 − 0.5)/0.5 = −0.4).
+        let flat = try CubeLUT.parse(cube("DOMAIN_MIN 0.5 0.5 0.5\nDOMAIN_MAX 1 1 1\n") { _, _, _ in "0.3 0.3 0.3" })
+        XCTAssertEqual(flat.apply(SIMD3(0.2, 0.7, 1)), SIMD3(repeating: 0.3))
+        // output = 0.4·input + 0.1 over domain 0…2 (nodes 0.1 and 0.9): input 0.5 → 0.3 (was 0.25).
+        let off = try CubeLUT.parse(cube("DOMAIN_MAX 2 2 2\n") { r, g, b in "\(Double(r) * 0.8 + 0.1) \(Double(g) * 0.8 + 0.1) \(Double(b) * 0.8 + 0.1)" })
+        XCTAssertEqual(off.apply(SIMD3(repeating: 0.5)).x, 0.3, accuracy: 1e-5)
+        XCTAssertThrowsError(try CubeLUT.parse(cube("DOMAIN_MIN 1 1 1\nDOMAIN_MAX 1 1 1\n") { _, _, _ in "0 0 0" }))
+    }
+
     func testCubeRejectsBadInput() {
         XCTAssertThrowsError(try CubeLUT.parse("LUT_3D_SIZE 2\n0 0 0\n"))
         XCTAssertThrowsError(try CubeLUT.parse("0 0 0\n"))
@@ -236,7 +252,7 @@ final class LookAndSettingsTests: XCTestCase {
         XCTAssertEqual(dec.settings.luminanceNoiseReductionAmount, 1)
         XCTAssertEqual(dec.settings.colorNoiseReductionAmount, 1)
         XCTAssertEqual(dec.settings.sharpnessAmount, 0)
-        XCTAssertEqual(dec.settings.detailAmount, 0)
+        XCTAssertNil(dec.settings.detailAmount, "detail default 0: the face rule lowers sharpness instead (above)")
         XCTAssertEqual(dec.settings.lensCorrection, true)
         XCTAssertEqual(dec.settings.skinProtection, DecisionEngine.Threshold.skinProtection)
         XCTAssertEqual(dec.reasons.count, 9, "7 decode rules + 2 look-intensity reasons (ISO 3200, people)")
@@ -351,5 +367,73 @@ final class LookAndSettingsTests: XCTestCase {
         XCTAssertGreaterThan(c.deltaE00Mean, 1)
         XCTAssertEqual(c.deltaE00MeanUnclipped, 0, accuracy: 1e-9)
         XCTAssertEqual(c.referenceUnclippedFraction, 0.5, accuracy: 1e-9)
+    }
+}
+
+final class SharpnessMetricsTests: XCTestCase {
+    private func gray(_ y: [Float], _ w: Int, _ h: Int) -> LinearImage {
+        var p = [Float](repeating: 0, count: w * h * 3)
+        for i in 0..<(w * h) { p[i * 3] = y[i]; p[i * 3 + 1] = y[i]; p[i * 3 + 2] = y[i] }
+        return LinearImage(width: w, height: h, pixels: p)
+    }
+    /// Deterministic roughly-Gaussian noise (sum of 4 uniforms), unit variance.
+    private func noise(_ n: Int, seed: UInt32 = 7) -> [Float] {
+        var s = seed
+        func u() -> Float { s = s &* 1664525 &+ 1013904223; return Float(s >> 8) / Float(1 << 24) - 0.5 }
+        return (0..<n).map { _ in (u() + u() + u() + u()) * 1.7320508 }
+    }
+    private func step(_ w: Int, _ h: Int, sigma: Double = 1) -> [Float] {
+        let s = (0..<(w * h)).map { Float($0 % w < w / 2 ? 0.15 : 0.6) }
+        return gaussianBlur(s, width: w, height: h, sigma: sigma)
+    }
+
+    func testSharpenedStepShowsOvershoot() {
+        let w = 128, h = 128
+        let soft = step(w, h)
+        let blur2 = gaussianBlur(soft, width: w, height: h, sigma: 2)
+        let sharp = zip(soft, blur2).map { $0 + 1.0 * ($0 - $1) }   // unsharp mask
+        let a = SharpnessMetrics.measure(gray(soft, w, h)), b = SharpnessMetrics.measure(gray(sharp, w, h), reference: gray(soft, w, h))
+        XCTAssertGreaterThan(a.edgeCount, 50)
+        XCTAssertLessThan(a.edgeOvershootPercent ?? 100, 3, "a plain blurred step has no overshoot")
+        XCTAssertGreaterThan(b.edgeOvershootPercent ?? 0, 10, "an unsharp-masked step must overshoot")
+    }
+
+    func testOvershootDropsWhenSharpeningIsReduced() throws {
+        let w = 128, h = 128
+        let soft = step(w, h), blur2 = gaussianBlur(soft, width: w, height: h, sigma: 2)
+        let strong = gray(zip(soft, blur2).map { $0 + 1.0 * ($0 - $1) }, w, h)
+        let mild = gray(zip(soft, blur2).map { $0 + 0.5 * ($0 - $1) }, w, h)
+        let c = try SharpnessComparison.compare(candidate: mild, reference: strong)
+        let change = try XCTUnwrap(c.overshootChangePercent)
+        XCTAssertLessThan(change, -30)
+        XCTAssertGreaterThan(change, -70)
+    }
+
+    func testBlurredImageHasLowerHFRatio() throws {
+        let w = 128, h = 128
+        let n = noise(w * h)
+        let base = gray(zip(gaussianBlur(n, width: w, height: h, sigma: 3), n).map { 0.3 + 0.05 * $0 + 0.04 * $1 }, w, h)
+        let blurred = gray(gaussianBlur(base.displayLuminance(), width: w, height: h, sigma: 1.2), w, h)
+        let c = try SharpnessComparison.compare(candidate: blurred, reference: base)
+        XCTAssertLessThan(try XCTUnwrap(c.hfRatio), 0.6)
+        let same = try SharpnessComparison.compare(candidate: base, reference: base)
+        XCTAssertEqual(try XCTUnwrap(same.hfRatio), 1, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(same.overshootChangePercent ?? 0), 0, accuracy: 1e-9)
+    }
+
+    func testFlatTextureMeasuresNoiseAndScales() throws {
+        let w = 128, h = 128
+        let n = noise(w * h)
+        let a = gray(n.map { 0.3 * (1 + 0.02 * $0) }, w, h)
+        let b = gray(n.map { 0.3 * (1 + 0.04 * $0) }, w, h)
+        let ma = SharpnessMetrics.measure(a)
+        // log2(1 + 0.02 n) ~ 0.02 n / ln 2 = 0.0289 n; the sigma-2 high-pass keeps ~0.99 of white noise.
+        XCTAssertEqual(try XCTUnwrap(ma.flatTexture), 0.0289, accuracy: 0.004)
+        XCTAssertGreaterThan(ma.flatPixelFraction, 0.9)
+        let c = try SharpnessComparison.compare(candidate: b, reference: a)
+        XCTAssertEqual(try XCTUnwrap(c.flatTextureRatio), 2, accuracy: 0.15)
+        // Waxy: smoothing the noise drops the ratio well below 0.9.
+        let waxy = gray(gaussianBlur(a.displayLuminance(), width: w, height: h, sigma: 1.5), w, h)
+        XCTAssertLessThan(try XCTUnwrap(SharpnessComparison.compare(candidate: waxy, reference: a).flatTextureRatio), 0.5)
     }
 }

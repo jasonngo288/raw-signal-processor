@@ -18,6 +18,9 @@ public protocol DevelopPlugin: Sendable {
     func afterDecode(_ image: CIImage, settings: RenderSettings, ctx: PluginRenderContext) throws -> (CIImage, [String])
     /// After look + skin protection + grain/halation.
     func afterFinish(_ image: CIImage, settings: RenderSettings, finish: FilmFinish?, ctx: PluginRenderContext) throws -> (CIImage, [String])
+    /// Look stage for a stock whose LUT is not made for the display base (`FilmStock.lookInput`). Return the looked
+    /// image (full strength) to take over the look, or nil to leave it to the core.
+    func look(stock: FilmStock, settings: RenderSettings, ctx: PluginRenderContext) throws -> (CIImage, [String])?
 }
 
 public extension DevelopPlugin {
@@ -27,12 +30,17 @@ public extension DevelopPlugin {
     }
     func afterDecode(_ image: CIImage, settings: RenderSettings, ctx: PluginRenderContext) throws -> (CIImage, [String]) { (image, []) }
     func afterFinish(_ image: CIImage, settings: RenderSettings, finish: FilmFinish?, ctx: PluginRenderContext) throws -> (CIImage, [String]) { (image, []) }
+    func look(stock: FilmStock, settings: RenderSettings, ctx: PluginRenderContext) throws -> (CIImage, [String])? { nil }
 }
 
 public struct PluginRenderContext {
     public let renderer: Renderer
     /// Decodes the same file with the same settings but without anything a plugin added (no EDR, no tone map).
     public let decodeBase: () throws -> CIImage
+    /// The scene analysis of this render (auto only).
+    public var scene: SceneContext? = nil
+    /// Decodes the same file scene-linear (Apple's tone removed) with this render's colour, white balance and exposure.
+    public var decodeSceneLinear: (() throws -> CIImage)? = nil
 }
 
 public struct PluginRegistry: Sendable {
@@ -45,8 +53,8 @@ public struct PluginRegistry: Sendable {
     }
 
     /// Everything shipped so far, all enabled by default.
-    public static let standard = PluginRegistry(available: [HighlightRecoveryPlugin(), CameraMatchPlugin(), VignettePlugin()],
-                                                defaultEnabled: ["highlightRecovery", "cameraMatch", "vignette"])
+    public static let standard = PluginRegistry(available: [HighlightRecoveryPlugin(), CameraMatchPlugin(), VignettePlugin(), LogLookPlugin(), FilmDevelopPlugin()],
+                                                defaultEnabled: ["highlightRecovery", "cameraMatch", "vignette", "logLook", "filmDevelop"])
     /// Roadmap core only.
     public static let none = PluginRegistry(available: [], defaultEnabled: [])
 
@@ -111,28 +119,38 @@ public struct CameraMatchPlugin: DevelopPlugin {
     public let summary = "match exposure + tones to the camera HEIC from the same press (ToneMatch)"
     public init() {}
 
-    /// Display-encoded luminance histogram of the reference at ~512 px (same measure as SceneContext.lumaHistogram).
-    static func referenceHistogram(_ path: String, renderer: Renderer, bins: Int) -> [Double]? {
+    /// Bins of the tone-curve histogram (afterDecode).
+    public static let fineBins = 256
+    /// Long edge both sides of every comparison are measured at: the analysis' Apple render, our developed image and
+    /// the camera HEIC (was 512 px, 2026-11-09: one size everywhere, and the analysis reuses the Vision render).
+    public static let histogramLongEdge: CGFloat = 1024
+
+    /// Display-encoded luminance histogram of the reference at `histogramLongEdge` (same measure as SceneContext.lumaHistogram).
+    public static func referenceHistogram(_ path: String, renderer: Renderer, bins: Int) -> [Double]? {
         guard let img = CIImage(contentsOf: URL(fileURLWithPath: path), options: [.applyOrientationProperty: true]) else { return nil }
         return renderer.lumaHistogram(small(img), bins: bins)
     }
 
-    public static func small(_ img: CIImage, longEdge: CGFloat = 512) -> CIImage {
+    public static func small(_ img: CIImage, longEdge: CGFloat = histogramLongEdge) -> CIImage {
         let e = img.extent
         let s = min(1, longEdge / max(e.width, e.height))
         return img.transformed(by: CGAffineTransform(translationX: -e.minX, y: -e.minY)).transformed(by: CGAffineTransform(scaleX: s, y: s))
     }
 
     public func decide(context: SceneContext, defaults: DecodeParameters, settings: inout RenderSettings) -> [String] {
-        guard let ref = settings.cameraReference else { return [] }
-        guard let ours = context.lumaHistogram, let theirs = Self.referenceHistogram(ref, renderer: Renderer(), bins: ours.count) else {
-            return ["camera reference \((ref as NSString).lastPathComponent) unreadable or no histogram: skipped"]
+        // The reference: histograms stored by the analysis (HEIC may be gone), else the HEIC file itself.
+        let stored = context.cameraReferenceHistogram.flatMap { $0.count == context.lumaHistogram?.count ? $0 : nil }
+        guard stored != nil || settings.cameraReference != nil else { return [] }
+        guard let ours = context.lumaHistogram,
+              let theirs = stored ?? settings.cameraReference.flatMap({ Self.referenceHistogram($0, renderer: Renderer(), bins: ours.count) }) else {
+            return ["camera reference \(settings.cameraReference.map { ($0 as NSString).lastPathComponent } ?? "") unreadable or no histogram: skipped"]
         }
+        let source = (stored != nil ? "stored analysis" : "HEIC file") + String(format: ", %.0f px", Self.histogramLongEdge)
         let off = ToneMatch.exposureOffsetEV(candidate: ours, reference: theirs)
-        guard abs(off) >= 0.05 else { return [String(format: "camera HEIC mid-tones within %.2f EV: no exposure change", off)] }
+        guard abs(off) >= 0.05 else { return [String(format: "camera HEIC (%@) mid-tones within %.2f EV: no exposure change", source, off)] }
         let before = settings.exposure ?? 0
         settings.exposure = before + Float(off)
-        var why = [String(format: "camera HEIC mid-tones %+.2f EV vs Apple's default render -> exposure %.2f -> %.2f (bounded -1...+0.5)", off, before, before + Float(off))]
+        var why = [String(format: "camera HEIC (%@) mid-tones %+.2f EV vs Apple's default render -> exposure %.2f -> %.2f (bounded -1...+0.5)", source, off, before, before + Float(off))]
         // Shadows: Apple's shadow boost (0.9 on ProRAW) keeps deep shadows ~1.5 stops above the camera HEIC after the
         // exposure match, more than the curve can take back (its gain is bounded). Lower the boost in the decode, by
         // how far our shadows sit above the HEIC's (WORK_LOG 2026-11-09). Only lowers, never raises.
@@ -153,9 +171,10 @@ public struct CameraMatchPlugin: DevelopPlugin {
     }
 
     public func afterDecode(_ image: CIImage, settings st: RenderSettings, ctx: PluginRenderContext) throws -> (CIImage, [String]) {
-        guard let ref = st.cameraReference else { return (image, []) }
-        let bins = 256
-        guard let theirs = Self.referenceHistogram(ref, renderer: ctx.renderer, bins: bins),
+        let stored = ctx.scene?.cameraReferenceHistogramFine
+        guard stored != nil || st.cameraReference != nil else { return (image, []) }
+        let bins = Self.fineBins
+        guard let theirs = stored ?? st.cameraReference.flatMap({ Self.referenceHistogram($0, renderer: ctx.renderer, bins: bins) }),
               let ours = ctx.renderer.lumaHistogram(Self.small(image), bins: bins) else {
             return (image, ["camera reference unreadable: tone curve skipped"])
         }
@@ -169,6 +188,21 @@ public struct CameraMatchPlugin: DevelopPlugin {
     }
 }
 
+/// Extra: a soft film base. Reads `settings.stock` -> `FilmStock.develop` and scales Apple's per-file sharpness (and luma NR cap,
+/// highlight clarity, ProRAW detail) so a stock's look sits on a base without the phone's crunchy sharpening.
+/// Registered after highlightRecovery so it can scale that plugin's clarity. No stock or no `develop` = no-op.
+public struct FilmDevelopPlugin: DevelopPlugin {
+    public let id = "filmDevelop"
+    public let summary = "film-stock decode profile: softer sharpening, bounded luma NR, less highlight clarity (stock.develop)"
+    public init() {}
+
+    public func decide(context: SceneContext, defaults: DecodeParameters, settings: inout RenderSettings) -> [String] {
+        guard let name = settings.stock, let stock = FilmStock.named(name), let dev = stock.develop else { return [] }
+        let why = dev.apply(context: context, defaults: defaults, settings: &settings)
+        return why.isEmpty ? [] : why
+    }
+}
+
 /// Extra: vignette. Reads `FilmFinish.vignette` (stocks carry a value); unplugged = no vignette at all.
 public struct VignettePlugin: DevelopPlugin {
     public let id = "vignette"
@@ -178,6 +212,42 @@ public struct VignettePlugin: DevelopPlugin {
     public func afterFinish(_ image: CIImage, settings: RenderSettings, finish: FilmFinish?, ctx: PluginRenderContext) throws -> (CIImage, [String]) {
         guard let v = finish?.vignette, v > 0 else { return (image, []) }
         return (FilmFinisher.vignette(image, v), [String(format: "vignette %.2f", v)])
+    }
+}
+/// Extra: looks authored for log footage (`FilmStock.lookInput = .log`). Decodes the file scene-linear (Apple's tone
+/// removed), scales by 1/`LogLook.headroom`, and applies one composite cube: Rec.2020 → log curve → the user's LUT →
+/// Rec.709 output as Display P3. Unplugged, the core applies such a LUT to the display base and says so in the recipe.
+public struct LogLookPlugin: DevelopPlugin {
+    public let id = "logLook"
+    public let summary = "apply LOG .cube looks on a scene-linear, log-encoded decode instead of the display base"
+    public init() {}
+
+    final class Cache: @unchecked Sendable {
+        static let shared = Cache()
+        private let lock = NSLock()
+        private var items: [String: CubeLUT] = [:]
+        func get(_ k: String, _ make: () -> CubeLUT) -> CubeLUT {
+            lock.lock(); defer { lock.unlock() }
+            if let c = items[k] { return c }
+            let c = make(); items[k] = c; return c
+        }
+    }
+
+    public func look(stock: FilmStock, settings: RenderSettings, ctx: PluginRenderContext) throws -> (CIImage, [String])? {
+        guard case .log(let curve) = stock.lookInput else { return nil }
+        guard let decodeSceneLinear = ctx.decodeSceneLinear else {
+            return nil   // no scene-linear decode available (core render without a file): the core handles it
+        }
+        let lut = stock.lut()
+        let cube = Cache.shared.get("\(stock.name)|\(curve.rawValue)|\(stock.logPrimaries.rawValue)") { LogLook.composite(lut, curve: curve, primaries: stock.logPrimaries) }
+        let k = CGFloat(1 / LogLook.headroom)
+        let scaled = try decodeSceneLinear().applyingFilter("CIColorMatrix", parameters: [
+            "inputRVector": CIVector(x: k, y: 0, z: 0, w: 0), "inputGVector": CIVector(x: 0, y: k, z: 0, w: 0),
+            "inputBVector": CIVector(x: 0, y: 0, z: k, w: 0), "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+        ])
+        let out = try ctx.renderer.applyLook(cube, to: scaled, intensity: 1)
+        return (out, [String(format: "%@: LUT made for log input → scene-linear decode, %@, %@, LUT (%d³ composite, headroom %.0f×)",
+                             stock.name, stock.logPrimaries.rawValue, curve.rawValue, cube.size, LogLook.headroom)])
     }
 }
 #endif

@@ -4,3 +4,5 @@ bench-out/
 *.xcodeproj/xcuserdata/
 .DS_Store
 corpus-cache/
+__pycache__/
+docs/outputs/

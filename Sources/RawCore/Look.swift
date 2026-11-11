@@ -38,7 +38,9 @@ public struct CubeLUT: Equatable, Sendable {
         return try! CubeLUT(size: size, rgba: data, title: title)
     }
 
-    /// Parse an Adobe/Resolve .cube file (3D only; DOMAIN_MIN/MAX supported by normalisation).
+    /// Parse an Adobe/Resolve .cube file (3D only). DOMAIN_MIN/MAX is the INPUT range the lattice spans (output
+    /// values are stored as written); a non-default domain is resampled onto the 0…1 input range CIColorCube uses,
+    /// inputs outside the domain clamp to its edge.
     public static func parse(_ text: String) throws -> CubeLUT {
         var size = 0
         var title: String?
@@ -65,12 +67,15 @@ public struct CubeLUT: Equatable, Sendable {
                 guard parts.count == 3, let a = Float(parts[0]), let b = Float(parts[1]), let c = Float(parts[2]) else {
                     throw RawCoreError.invalidLUT("unexpected line: \(line)")
                 }
-                let v = (SIMD3(a, b, c) - dmin) / (dmax - dmin)
-                values.append(contentsOf: [v.x, v.y, v.z, 1])
+                values.append(contentsOf: [a, b, c, 1])
             }
         }
         guard size > 0 else { throw RawCoreError.invalidLUT("missing LUT_3D_SIZE") }
-        return try CubeLUT(size: size, rgba: values, title: title)
+        guard all(dmax .> dmin) else { throw RawCoreError.invalidLUT("DOMAIN_MAX must be above DOMAIN_MIN") }
+        let raw = try CubeLUT(size: size, rgba: values, title: title)
+        if dmin == SIMD3(0, 0, 0), dmax == SIMD3(1, 1, 1) { return raw }
+        // Lattice node i of the file sits at input dmin + i/(n−1)·(dmax − dmin): find each 0…1 input's place in it.
+        return CubeLUT.generate(size: size, title: title) { c in raw.apply((c - dmin) / (dmax - dmin)) }
     }
 
     public static func load(_ url: URL) throws -> CubeLUT {
@@ -214,12 +219,101 @@ public struct FilmFinish: Codable, Equatable, Sendable {
     }
 }
 
+/// How a stock wants the RAW decoded (plugin `filmDevelop`, docs/ROADMAP.md EXTRAS; plan
+/// `.orchestration/smartphone-look/SMARTPHONE_LOOK_PLAN_2026-11-11.md`): a soft film base instead of the phone's
+/// crunchy one. All values are multipliers on / limits around Apple's per-file defaults; tone (contrast, boost,
+/// boostShadow) is never touched, looks own the curve. `FilmStock.develop == nil` = no change.
+public struct FilmDevelop: Codable, Equatable, Sendable {
+    /// Short id recorded in the recipe and in `Developer.Base` ("iso<400", "iso400+portrait").
+    public var profile: String
+    /// Sharpness = Apple's default × this (never raised).
+    public var sharpScale: Float
+    /// Absolute floor of the scaled sharpness (a very low default is not scaled below it).
+    public var sharpFloor: Float = 0.30
+    /// Extra sharpness taken off when a face >= `DecisionEngine.Threshold.faceArea` is in frame.
+    public var faceSharpDelta: Float = 0.05
+    /// Multiplier on `highlightClarity` when highlightRecovery set one.
+    public var clarityScale: Float = 0.4
+    /// Luma NR may rise at most this far above Apple's default (nil = leave DecisionEngine's choice).
+    public var lumaNRMaxDelta: Float? = nil
+    /// ProRAW only (file whose default local tone map > 0): multiplier on the local tone map. nil = unchanged (trial off).
+    public var ltmScale: Float? = nil
+    /// ProRAW only (default detail > this): detail is lowered to this.
+    public var proRAWDetail: Float = 0.2
+
+    public init(profile: String, sharpScale: Float, sharpFloor: Float = 0.30, faceSharpDelta: Float = 0.05,
+                clarityScale: Float = 0.4, lumaNRMaxDelta: Float? = nil, ltmScale: Float? = nil, proRAWDetail: Float = 0.2) {
+        self.profile = profile; self.sharpScale = sharpScale; self.sharpFloor = sharpFloor; self.faceSharpDelta = faceSharpDelta
+        self.clarityScale = clarityScale; self.lumaNRMaxDelta = lumaNRMaxDelta; self.ltmScale = ltmScale; self.proRAWDetail = proRAWDetail
+    }
+
+    /// Scale Apple's per-file defaults inside `settings` (already holding DecisionEngine's choices). Bounded: values only go
+    /// down (luma NR is capped, never raised). Returns one reason per change; empty = nothing changed.
+    public func apply(context c: SceneContext, defaults d: DecodeParameters, settings st: inout RenderSettings) -> [String] {
+        var why: [String] = []
+        let tag = "develop \(profile)"
+        // Sharpness: scaled default, floor, extra for faces.
+        let curSharp = st.sharpnessAmount ?? d.sharpnessAmount
+        var target = max(d.sharpnessAmount * sharpScale, min(sharpFloor, d.sharpnessAmount))
+        var faceNote = ""
+        if (c.largestFaceArea ?? 0) >= DecisionEngine.Threshold.faceArea, faceSharpDelta > 0 {
+            target = max(0, target - faceSharpDelta)
+            faceNote = String(format: ", face %.1f%% of frame -%.2f", (c.largestFaceArea ?? 0) * 100, faceSharpDelta)
+        }
+        if target < curSharp - 0.001 {
+            st.sharpnessAmount = target
+            why.append(String(format: "%@: sharpness %.2f -> %.2f (Apple default %.2f x %.2f, floor %.2f%@)", tag, curSharp, target, d.sharpnessAmount, sharpScale, sharpFloor, faceNote))
+        }
+        // Luma NR cap.
+        if let cap = lumaNRMaxDelta {
+            let cur = st.luminanceNRAmountOrDefault(d)
+            let limit = min(1, d.luminanceNoiseReductionAmount + cap)
+            if cur > limit + 0.001 {
+                st.luminanceNoiseReductionAmount = limit
+                why.append(String(format: "%@: luminanceNR %.2f -> %.2f (at most %+.2f over Apple's %.2f; grain covers the rest, colour NR kept)", tag, cur, limit, cap, d.luminanceNoiseReductionAmount))
+            }
+        }
+        // Highlight clarity from highlightRecovery.
+        if let cl = st.highlightClarity, cl > 0, clarityScale < 1 {
+            let v = cl * clarityScale
+            st.highlightClarity = v
+            why.append(String(format: "%@: highlight clarity %.2f -> %.2f (x%.2f, a film base has no HDR clarity)", tag, cl, v, clarityScale))
+        }
+        // ProRAW: Apple's detail 0.5 and optionally its local tone map.
+        let proRAW = d.localToneMapAmount > 0
+        if proRAW {
+            let curDetail = st.detailAmount ?? d.detailAmount
+            if curDetail > proRAWDetail + 0.001 {
+                st.detailAmount = proRAWDetail
+                why.append(String(format: "%@: ProRAW detail %.2f -> %.2f", tag, curDetail, proRAWDetail))
+            }
+            if let k = ltmScale {
+                let cur = st.localToneMapAmount ?? d.localToneMapAmount
+                let v = cur * k
+                if abs(v - cur) > 0.001 {
+                    st.localToneMapAmount = v
+                    why.append(String(format: "%@: ProRAW local tone map %.2f -> %.2f", tag, cur, v))
+                }
+            }
+        }
+        return why
+    }
+}
+
+extension RenderSettings {
+    fileprivate func luminanceNRAmountOrDefault(_ d: DecodeParameters) -> Float { luminanceNoiseReductionAmount ?? d.luminanceNoiseReductionAmount }
+}
+
 /// A complete film stock = look LUT + finishing. Names are the app's own (no real film brand names).
 public struct FilmStock: Equatable, Sendable {
     public enum Source: Equatable, Sendable {
         case builtIn(BuiltInLook)
         /// Parametric preset (Presets2026.swift).
         case preset(PresetLookParams)
+        /// A declared LUT file (`<name>.manifest.json` + `.cube`, checked by `LookContract`; see `LookLibrary`).
+        case library(String)
+        /// A generated look of the 2026 set (FilmLooks.swift).
+        case spec(LookSpec)
     }
     public var name: String
     public var source: Source
@@ -231,6 +325,14 @@ public struct FilmStock: Equatable, Sendable {
     public var allowsSkinProtection: Bool = true
     /// Preset asks for skin protection on people ("skinProtect: true" in the 2026 spec): at least this strength.
     public var minSkinProtection: Float? = nil
+    /// What the look LUT expects as input. `.log` looks are applied by the `logLook` plugin on a scene-linear decode.
+    public var lookInput: LookInput = .display
+    /// Encoded colour space of a display-referred LUT (CIColorCubeWithColorSpace encodes into it).
+    public var lookColorSpace: LookColorSpace = .displayP3
+    /// Input primaries of a log LUT.
+    public var logPrimaries: LogLookPrimaries = .rec2020
+    /// How the RAW is decoded for this stock (plugin `filmDevelop`). nil = no change to Apple's decode.
+    public var develop: FilmDevelop? = nil
 
     public init(name: String, source: Source, lookIntensity: Float, finish: FilmFinish, summary: String,
                 allowsSkinProtection: Bool = true, minSkinProtection: Float? = nil) {
@@ -248,6 +350,8 @@ public struct FilmStock: Equatable, Sendable {
         switch source {
         case .builtIn(let l): return l.lut(size: size)
         case .preset: return Preset26.named(name)?.lut(size: size) ?? .identity(size: size)
+        case .library(let n): return FilmStock.libraryLUT(n) ?? .identity(size: size)
+        case .spec(let spec): return LookSpecCache.shared.lut(name, spec, size: max(size, spec.cubeSize))
         }
     }
 
@@ -267,8 +371,62 @@ public struct FilmStock: Equatable, Sendable {
                   summary: "tungsten-balanced night stock, big grain, strong halation on lamps"),
     ]
 
-    /// Classic stocks + the 2026 drop (PRESET_26_*).
-    public static let all: [FilmStock] = classic + Preset26.all.map(\.stock)
+    /// Declared LUT files shipped in `Sources/RawCore/Looks` that pass `LookContract` (unusable ones are listed by
+    /// `LookLibrary.bundled.checks` and `raw-bench lutcheck`, never loaded).
+    public static var bundled: [FilmStock] { LookLibrary.bundled.stocks }
 
-    public static func named(_ n: String) -> FilmStock? { all.first { $0.name == n } }
+    private static let registryLock = NSLock()
+    nonisolated(unsafe) private static var registered: [(FilmStock, LookLibrary?)] = []
+
+    /// Adds stocks at run time (a user's checked LUT library, tests). A name already known is replaced.
+    public static func register(_ stocks: [FilmStock], library: LookLibrary? = nil) {
+        registryLock.lock(); defer { registryLock.unlock() }
+        registered.removeAll { r in stocks.contains { $0.name == r.0.name } }
+        registered += stocks.map { ($0, library) }
+    }
+
+    static func libraryLUT(_ n: String) -> CubeLUT? {
+        registryLock.lock()
+        let lib = registered.first { $0.0.name == n }?.1
+        registryLock.unlock()
+        return (lib ?? LookLibrary.bundled).lut(named: n)
+    }
+
+    /// Manifest of a library look (for the recipe).
+    public static func manifest(_ n: String) -> LookManifest? {
+        registryLock.lock()
+        let lib = registered.first { $0.0.name == n }?.1
+        registryLock.unlock()
+        return (lib ?? LookLibrary.bundled).manifest(named: n)
+    }
+
+    static let builtIn: [FilmStock] = classic + Preset26.all.map(\.stock) + FilmLooks2026.stocks
+
+    /// Classic stocks + the 2026 drop (PRESET_26_*) + the 2026 film-look set + checked library looks + registered ones.
+    public static var all: [FilmStock] {
+        registryLock.lock(); let r = registered.map(\.0); registryLock.unlock()
+        let lib = bundled
+        return builtIn + lib.filter { l in !r.contains { $0.name == l.name } } + r
+    }
+
+    /// Trial looks (`FilmLooks2026.trialStocks`) resolve by name for review renders but are not in `all` (not listed).
+    /// Roll stocks (`RollStocks`, `rr-…` ids) resolve the same way.
+    public static func named(_ n: String) -> FilmStock? {
+        all.first { $0.name == n } ?? (FilmLooks2026.trialStocks + FilmLooks2026.retiredStocks + RollStocks.stocks).first { $0.name == n }
+    }
+}
+
+/// Generated looks are built once per (name, size): a 33³ OKLab look costs a few ms to generate.
+final class LookSpecCache: @unchecked Sendable {
+    static let shared = LookSpecCache()
+    private let lock = NSLock()
+    private var items: [String: CubeLUT] = [:]
+    func lut(_ name: String, _ spec: LookSpec, size: Int) -> CubeLUT {
+        lock.lock(); defer { lock.unlock() }
+        let key = "\(name)|\(size)"
+        if let l = items[key] { return l }
+        let l = spec.lut(size: size, title: name)
+        items[key] = l
+        return l
+    }
 }

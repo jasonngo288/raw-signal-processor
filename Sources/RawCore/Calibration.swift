@@ -63,6 +63,8 @@ public struct CalibrationTable: Codable, Equatable, Sendable {
 /// version of a fixed preference list that the file supports. Change the list only on purpose (WORK_LOG + bench).
 public enum DecoderPolicy {
     /// Newest first. RAW 9 (WWDC26) is NOT in the list yet: add it only after a bench run on that OS.
+    /// A newer generic `.dng` decoder is preferred over an older camera-specific one (e.g. iPhone SE: `8.dng` over
+    /// Apple's default `7`); kept on purpose (user, 2026-11-09), so Gate 1 on such files compares two versions.
     public static let preferred = ["8", "8.dng", "7", "7.dng", "6", "6.dng"]
 
     public static func pick(supported: [String]) -> String? { preferred.first { supported.contains($0) } }
