@@ -882,3 +882,15 @@ Defaults differ per model (sharpness, contrast, NR, shadowBias) → must be stor
   - New `DevelopStagesTests.testLightLeakRunsBeforeGrain` passes: the "[lightLeak] screen…" decision comes before
     "film finish" in the recipe, and lightLeak is listed in `recipe.plugins`.
 - **Unverified:** visual check of a leak frame at native size; device.
+
+## 2026-11-11 — xcodeproj regenerated from a clean-checkout file set; merge to main
+- **What:** `App/RawFilmDemo.xcodeproj` regenerated with the 6 local (uncommitted) user LUTs moved aside. Before, the
+  project referenced their `.cube` / `.manifest.json` files, which a clean checkout or CI does not have: missing
+  resources and a stale-project diff. It now lists only `Looks/README.md`.
+- **Evidence:** `swift build -c release` and `swift build --build-tests` green;
+  `xcodebuild build -project RawFilmDemo.xcodeproj -scheme RawFilmDemo -destination 'generic/platform=iOS'
+  CODE_SIGNING_ALLOWED=NO` green.
+- **Not run:** full `swift test` was stopped at the user's request ("stop test; test build"). AGENTS rule 4 wants CI
+  green before merge, and CI has not run on this branch (not pushed).
+- **Note:** regenerating the project while the local LUTs are in `Looks/` puts them back in. Move them aside first,
+  or keep them outside `Sources/`.

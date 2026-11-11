@@ -8,27 +8,19 @@
 
 /* Begin PBXBuildFile section */
 		01CE70278FE0383B8A64B540 /* LogLook.swift in Sources */ = {isa = PBXBuildFile; fileRef = E66900A823BAE6D7454F8C63 /* LogLook.swift */; };
-		244BA685C52123609106EC93 /* spectral_gold_200.manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = 456E3A8AEB954A1D8E8EF026 /* spectral_gold_200.manifest.json */; };
 		25F82EE03B64B49D259DDD2E /* ColorMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 413EA6473A1476FB86D562C5 /* ColorMath.swift */; };
 		28EC09A8B7A0710A77FE7F1E /* RollStocks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B1587A486053CA8A22D60E1 /* RollStocks.swift */; };
-		3055DE4EA8E217AF4DA4C032 /* spectral_gold_200_33x33_spectral.cube in Resources */ = {isa = PBXBuildFile; fileRef = 6A8D2F56DCAD673D66EBCE2C /* spectral_gold_200_33x33_spectral.cube */; };
 		317CBFF39A0022F28BFC8892 /* Renderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05F2D975851B757B4BC6EE6E /* Renderer.swift */; };
-		32086D0FCC7C54AAF7D69467 /* spektra_vision3_500t.manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = 38D41EE233179486F71712DE /* spektra_vision3_500t.manifest.json */; };
 		34555159314B5556FA3EB6B9 /* ToneMatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A6124EF90824DD6CAF22606 /* ToneMatch.swift */; };
-		35AF5E8C0E34B6B79BB490C2 /* spektra_vision3_500t_33x33_spectral.cube in Resources */ = {isa = PBXBuildFile; fileRef = B7D06879E0A3DF7B4C2F73A2 /* spektra_vision3_500t_33x33_spectral.cube */; };
 		3A6CDCBD614859F79E764500 /* FilmLooks.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF5625118DCDEA13BB4BE46C /* FilmLooks.swift */; };
 		4559F3AC457D564E7C267464 /* RawCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 1FE946699F10CFB2DB53F39F /* RawCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		481D26A08F470F3ACC097811 /* ImageMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B9FCCF144502B6CE31EEE65 /* ImageMetrics.swift */; };
-		5EB51910004784B522649A3D /* polut_vision3_250d.manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = 97CAD72D1A7A01F772D99E5A /* polut_vision3_250d.manifest.json */; };
 		6AE109991A1AC267DFE42A79 /* Look.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20D982FA8DFEE3CDDDB8A6C /* Look.swift */; };
-		750998E19E957F64812BF645 /* spectral_trix_400_33x33_spectral.cube in Resources */ = {isa = PBXBuildFile; fileRef = 958337D71E66401A3B18392B /* spectral_trix_400_33x33_spectral.cube */; };
 		7DE4A9ECF172149648CDA57E /* RenderSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 836F5F5A5A29E762D3633A6E /* RenderSettings.swift */; };
 		7DEB3063E3EE5960A2513E44 /* Presets2026.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E665446EEFCA624C9EB7D82 /* Presets2026.swift */; };
 		80DAF44AED1677A89420E66D /* CaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E76F9A995FEE177791EC26C3 /* CaptureService.swift */; };
 		875C60419A94846F4106D7D2 /* ContextAnalysis.swift in Sources */ = {isa = PBXBuildFile; fileRef = 532A340E102CD794F657DD29 /* ContextAnalysis.swift */; };
 		95955DAA3B35454516EE186A /* ColorChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8204A61DE5C29AAF96573C8B /* ColorChecker.swift */; };
-		9A75D75AA8006A8CF8EC99C8 /* polut_vision3_250d_33x33_spectral.cube in Resources */ = {isa = PBXBuildFile; fileRef = A829ED06A7E28687DE0A4687 /* polut_vision3_250d_33x33_spectral.cube */; };
-		9F66C91EBF8B3B33B1C5A3BF /* spectral_trix_400.manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = 26AEB529CB175F3D7BAAB7B3 /* spectral_trix_400.manifest.json */; };
 		A58EA31DCA3CEC8968D6C11F /* LUTBinaryFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7181652596619CAED237507C /* LUTBinaryFormat.swift */; };
 		AE219C93C9B487EB62457EB2 /* Developer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CB4D2FFC28E45F108A39B3B /* Developer.swift */; };
 		AEE6CCCECFCC9970E538528E /* Calibration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55DDCA8137C9D24EBA3BC89E /* Calibration.swift */; };
@@ -37,14 +29,11 @@
 		CE485D536DF659B2F8843B67 /* CaptureKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 87AB576835F738501C46ABEF /* CaptureKit.framework */; };
 		CF7140CC73C299BC294CD7A5 /* CaptureKit.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 87AB576835F738501C46ABEF /* CaptureKit.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		D65C00398EF07EBF38DBCD29 /* RawCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FE946699F10CFB2DB53F39F /* RawCore.framework */; };
-		E4B42E078BD19117848D0B60 /* rawtherapee_velvia_50_33x33_spectral.cube in Resources */ = {isa = PBXBuildFile; fileRef = 057BF9560E5CCCE6BF3952A3 /* rawtherapee_velvia_50_33x33_spectral.cube */; };
 		E91216BE2B48238B46815F83 /* RawDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B469E3A41A484B6791CEF286 /* RawDecoder.swift */; };
-		EF1C66D080A92A67A4E43E86 /* spektra_portra_400_33x33_spectral.cube in Resources */ = {isa = PBXBuildFile; fileRef = 8642A6FADCCBFC5BC1789E34 /* spektra_portra_400_33x33_spectral.cube */; };
 		EF9183DB2B3DF3526837F434 /* Plugins.swift in Sources */ = {isa = PBXBuildFile; fileRef = 199798B49C3F9C744946C8C0 /* Plugins.swift */; };
 		F40984D818182383ECA1A969 /* FilmFinisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25E0ACA87DE487320CF89405 /* FilmFinisher.swift */; };
 		F6B3AFADC091DA6AF4F4FC5B /* LinearImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 861CEAF1B9609C09FFA6106E /* LinearImage.swift */; };
-		FA08C720DCF6EBCB93BBC085 /* spektra_portra_400.manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = 25EDB7AFA5B51C33E80EBB88 /* spektra_portra_400.manifest.json */; };
-		FEC481BAB0771130F5B82500 /* rawtherapee_velvia_50.manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = BA383358868312E76BFE3515 /* rawtherapee_velvia_50.manifest.json */; };
+		F6EFD48530298C41661C382A /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = A154608732559B51F34A4A81 /* README.md */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -80,41 +69,30 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		057BF9560E5CCCE6BF3952A3 /* rawtherapee_velvia_50_33x33_spectral.cube */ = {isa = PBXFileReference; path = rawtherapee_velvia_50_33x33_spectral.cube; sourceTree = "<group>"; };
 		05F2D975851B757B4BC6EE6E /* Renderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Renderer.swift; sourceTree = "<group>"; };
 		199798B49C3F9C744946C8C0 /* Plugins.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Plugins.swift; sourceTree = "<group>"; };
 		1FE946699F10CFB2DB53F39F /* RawCore.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = RawCore.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		25E0ACA87DE487320CF89405 /* FilmFinisher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmFinisher.swift; sourceTree = "<group>"; };
-		25EDB7AFA5B51C33E80EBB88 /* spektra_portra_400.manifest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = spektra_portra_400.manifest.json; sourceTree = "<group>"; };
-		26AEB529CB175F3D7BAAB7B3 /* spectral_trix_400.manifest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = spectral_trix_400.manifest.json; sourceTree = "<group>"; };
 		2F3640B1EB1F14C45053141B /* RawFilmDemo.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RawFilmDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		2F88DBAB73DC8127A5049F38 /* LookManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LookManifest.swift; sourceTree = "<group>"; };
-		38D41EE233179486F71712DE /* spektra_vision3_500t.manifest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = spektra_vision3_500t.manifest.json; sourceTree = "<group>"; };
 		3AD9DD3EA982536591C39E44 /* RawFilmDemoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RawFilmDemoApp.swift; sourceTree = "<group>"; };
 		413EA6473A1476FB86D562C5 /* ColorMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorMath.swift; sourceTree = "<group>"; };
-		456E3A8AEB954A1D8E8EF026 /* spectral_gold_200.manifest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = spectral_gold_200.manifest.json; sourceTree = "<group>"; };
 		4A6124EF90824DD6CAF22606 /* ToneMatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToneMatch.swift; sourceTree = "<group>"; };
 		4CB4D2FFC28E45F108A39B3B /* Developer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Developer.swift; sourceTree = "<group>"; };
 		532A340E102CD794F657DD29 /* ContextAnalysis.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextAnalysis.swift; sourceTree = "<group>"; };
 		55DDCA8137C9D24EBA3BC89E /* Calibration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Calibration.swift; sourceTree = "<group>"; };
 		5B1587A486053CA8A22D60E1 /* RollStocks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RollStocks.swift; sourceTree = "<group>"; };
-		6A8D2F56DCAD673D66EBCE2C /* spectral_gold_200_33x33_spectral.cube */ = {isa = PBXFileReference; path = spectral_gold_200_33x33_spectral.cube; sourceTree = "<group>"; };
 		6E665446EEFCA624C9EB7D82 /* Presets2026.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Presets2026.swift; sourceTree = "<group>"; };
 		7181652596619CAED237507C /* LUTBinaryFormat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LUTBinaryFormat.swift; sourceTree = "<group>"; };
 		7B9FCCF144502B6CE31EEE65 /* ImageMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageMetrics.swift; sourceTree = "<group>"; };
 		8204A61DE5C29AAF96573C8B /* ColorChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorChecker.swift; sourceTree = "<group>"; };
 		836F5F5A5A29E762D3633A6E /* RenderSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenderSettings.swift; sourceTree = "<group>"; };
 		861CEAF1B9609C09FFA6106E /* LinearImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinearImage.swift; sourceTree = "<group>"; };
-		8642A6FADCCBFC5BC1789E34 /* spektra_portra_400_33x33_spectral.cube */ = {isa = PBXFileReference; path = spektra_portra_400_33x33_spectral.cube; sourceTree = "<group>"; };
 		87AB576835F738501C46ABEF /* CaptureKit.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = CaptureKit.framework; sourceTree = BUILT_PRODUCTS_DIR; };
-		958337D71E66401A3B18392B /* spectral_trix_400_33x33_spectral.cube */ = {isa = PBXFileReference; path = spectral_trix_400_33x33_spectral.cube; sourceTree = "<group>"; };
 		974CEF52E20F75DE7E945970 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
-		97CAD72D1A7A01F772D99E5A /* polut_vision3_250d.manifest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = polut_vision3_250d.manifest.json; sourceTree = "<group>"; };
+		A154608732559B51F34A4A81 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		A20D982FA8DFEE3CDDDB8A6C /* Look.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Look.swift; sourceTree = "<group>"; };
-		A829ED06A7E28687DE0A4687 /* polut_vision3_250d_33x33_spectral.cube */ = {isa = PBXFileReference; path = polut_vision3_250d_33x33_spectral.cube; sourceTree = "<group>"; };
 		B469E3A41A484B6791CEF286 /* RawDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RawDecoder.swift; sourceTree = "<group>"; };
-		B7D06879E0A3DF7B4C2F73A2 /* spektra_vision3_500t_33x33_spectral.cube */ = {isa = PBXFileReference; path = spektra_vision3_500t_33x33_spectral.cube; sourceTree = "<group>"; };
-		BA383358868312E76BFE3515 /* rawtherapee_velvia_50.manifest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = rawtherapee_velvia_50.manifest.json; sourceTree = "<group>"; };
 		E66900A823BAE6D7454F8C63 /* LogLook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogLook.swift; sourceTree = "<group>"; };
 		E76F9A995FEE177791EC26C3 /* CaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureService.swift; sourceTree = "<group>"; };
 		EF5625118DCDEA13BB4BE46C /* FilmLooks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmLooks.swift; sourceTree = "<group>"; };
@@ -155,18 +133,7 @@
 		DC4D34090B18996B6628A118 /* Looks */ = {
 			isa = PBXGroup;
 			children = (
-				A829ED06A7E28687DE0A4687 /* polut_vision3_250d_33x33_spectral.cube */,
-				97CAD72D1A7A01F772D99E5A /* polut_vision3_250d.manifest.json */,
-				057BF9560E5CCCE6BF3952A3 /* rawtherapee_velvia_50_33x33_spectral.cube */,
-				BA383358868312E76BFE3515 /* rawtherapee_velvia_50.manifest.json */,
-				6A8D2F56DCAD673D66EBCE2C /* spectral_gold_200_33x33_spectral.cube */,
-				456E3A8AEB954A1D8E8EF026 /* spectral_gold_200.manifest.json */,
-				958337D71E66401A3B18392B /* spectral_trix_400_33x33_spectral.cube */,
-				26AEB529CB175F3D7BAAB7B3 /* spectral_trix_400.manifest.json */,
-				8642A6FADCCBFC5BC1789E34 /* spektra_portra_400_33x33_spectral.cube */,
-				25EDB7AFA5B51C33E80EBB88 /* spektra_portra_400.manifest.json */,
-				B7D06879E0A3DF7B4C2F73A2 /* spektra_vision3_500t_33x33_spectral.cube */,
-				38D41EE233179486F71712DE /* spektra_vision3_500t.manifest.json */,
+				A154608732559B51F34A4A81 /* README.md */,
 			);
 			path = Looks;
 			sourceTree = "<group>";
@@ -324,18 +291,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				5EB51910004784B522649A3D /* polut_vision3_250d.manifest.json in Resources */,
-				9A75D75AA8006A8CF8EC99C8 /* polut_vision3_250d_33x33_spectral.cube in Resources */,
-				FEC481BAB0771130F5B82500 /* rawtherapee_velvia_50.manifest.json in Resources */,
-				E4B42E078BD19117848D0B60 /* rawtherapee_velvia_50_33x33_spectral.cube in Resources */,
-				244BA685C52123609106EC93 /* spectral_gold_200.manifest.json in Resources */,
-				3055DE4EA8E217AF4DA4C032 /* spectral_gold_200_33x33_spectral.cube in Resources */,
-				9F66C91EBF8B3B33B1C5A3BF /* spectral_trix_400.manifest.json in Resources */,
-				750998E19E957F64812BF645 /* spectral_trix_400_33x33_spectral.cube in Resources */,
-				FA08C720DCF6EBCB93BBC085 /* spektra_portra_400.manifest.json in Resources */,
-				EF1C66D080A92A67A4E43E86 /* spektra_portra_400_33x33_spectral.cube in Resources */,
-				32086D0FCC7C54AAF7D69467 /* spektra_vision3_500t.manifest.json in Resources */,
-				35AF5E8C0E34B6B79BB490C2 /* spektra_vision3_500t_33x33_spectral.cube in Resources */,
+				F6EFD48530298C41661C382A /* README.md in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
