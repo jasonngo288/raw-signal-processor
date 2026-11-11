@@ -9,7 +9,8 @@ import Foundation
 ///   stage 1, `developBase`: DecisionEngine (bounded, logged) → plugins.decide
 ///            → CIRAWFilter (pinned decoder, explicit parameters, per-model CCM + exposure in linearSpaceFilter)
 ///            → plugins.afterDecode                                   = the base render (no look)
-///   stage 2, `finish`: look → skin protection (Vision mask, CIBlendWithMask) → grain / halation → plugins.afterFinish
+///   stage 2, `finish`: look → skin protection (Vision mask, CIBlendWithMask) → plugins.beforeGrain (light leak)
+///            → grain / halation → plugins.afterFinish
 ///   → export (HEIC 10-bit P3 with recipe embedded).
 ///
 /// `develop` = `finish(developBase(...))`. A base can be finished again with another stock (`Base.settings.stock`)
@@ -422,14 +423,21 @@ public final class Developer: @unchecked Sendable {
             }
         }
         let finish = st.finish ?? stock?.finish
+        var finishCtx = base.pluginContext
+        finishCtx.personMask = base.personMask   // lightLeak holds the leak back on people (spec: x personFactor)
+        // Exposure-stage plugins (light leak) before grain / halation, so the grain sits on top as on film.
+        for p in base.active {
+            let (img, why) = try p.beforeGrain(image, settings: st, finish: finish, ctx: finishCtx)
+            image = img
+            if !why.isEmpty { ran.insert(p.id) }
+            out.recipe.decisions += why.map { "[\(p.id)] " + $0 }
+        }
         if let finish, finish.grainAmount > 0 || finish.halationAmount > 0 {
             image = FilmFinisher.apply(image, finish)
             out.recipe.decisions.append(String(format: "film finish%@: grain %.2f @ %.3f%% short edge (seed %u), halation %.2f (Y>%.2f, r %.2f%%)",
                                                stock.map { " (\($0.name))" } ?? "", finish.grainAmount, finish.grainSize, finish.grainSeed,
                                                finish.halationAmount, finish.halationThreshold, finish.halationRadius))
         }
-        var finishCtx = base.pluginContext
-        finishCtx.personMask = base.personMask   // lightLeak holds the leak back on people (spec: x personFactor)
         for p in base.active {
             let (img, why) = try p.afterFinish(image, settings: st, finish: finish, ctx: finishCtx)
             image = img

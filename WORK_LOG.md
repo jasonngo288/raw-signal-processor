@@ -866,3 +866,19 @@ Defaults differ per model (sharpness, contrast, NR, shadowBias) → must be stor
     Not changed yet.
   - The finisher's grain fades too little toward white (sparkle on near-white walls at 400 / 800, grain agent).
   - The bench sky metric counts stage lights and blue rock as sky (sky-mask agent).
+
+## 2026-11-11 — light leak drawn before grain
+- **What:**
+  - New plugin stage `DevelopPlugin.beforeGrain` (default no-op). It runs in `Developer.finish` after the look and
+    skin protection, before grain / halation.
+  - `LightLeakPlugin` moved from `afterFinish` to `beforeGrain`; the person mask is passed as before.
+  - Vignette and the other afterFinish plugins are unchanged.
+- **Why:** user decision ("Đổi thứ tự"). A leak is light on the emulsion, so on film the grain of the developed
+  image covers it. Applied after grain, the leak's smooth glow sat over the grain, which reads as digital.
+- **Evidence:**
+  - Release build green.
+  - `swift test --filter "LightLeakTests|DevelopStagesTests|FilmFinisherTests"` 30/30 pass, run before the new test
+    was added.
+  - New `DevelopStagesTests.testLightLeakRunsBeforeGrain` passes: the "[lightLeak] screen…" decision comes before
+    "film finish" in the recipe, and lightLeak is listed in `recipe.plugins`.
+- **Unverified:** visual check of a leak frame at native size; device.

@@ -347,5 +347,20 @@ final class DevelopStagesTests: XCTestCase {
             XCTAssertLessThan(dist(held.apply(skin), plain.apply(skin)), 0.004, "\(s.name): hold leaves skin alone")
         }
     }
+
+    /// A light leak is exposure on the emulsion: it is drawn before grain, so the grain sits on top (user, 2026-11-11).
+    func testLightLeakRunsBeforeGrain() throws {
+        let url = try original()
+        let dev = Developer()
+        let scale = try dev.decoder.scaleFactor(url: url, longEdge: 256)
+        var st = RenderSettings(mode: .explicit)
+        st.stock = "rr-la-phong-100"; st.rollID = "order-test"; st.rollFrameIndex = 1; st.rollFrameCount = 36
+        let out = try dev.develop(url: url, settings: st, auto: false, scaleFactor: scale)
+        let d = out.recipe.decisions
+        let leak = try XCTUnwrap(d.firstIndex { $0.hasPrefix("[lightLeak]") && $0.contains("screen in linear light") }, "frame 1 always leaks")
+        let grain = try XCTUnwrap(d.firstIndex { $0.hasPrefix("film finish") })
+        XCTAssertLessThan(leak, grain, "leak before grain")
+        XCTAssertTrue(out.recipe.plugins.contains("lightLeak"))
+    }
 }
 #endif

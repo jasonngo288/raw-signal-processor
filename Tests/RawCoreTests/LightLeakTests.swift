@@ -136,19 +136,19 @@ final class LightLeakTests: XCTestCase {
         let ctx = PluginRenderContext(renderer: renderer, decodeBase: { self.flat(8, 8, 0.1) })
         let img = flat(300, 200, 0.05)
         // No roll position: nothing drawn, and it says so.
-        var (out, why) = try plugin.afterFinish(img, settings: st, finish: finish, ctx: ctx)
+        var (out, why) = try plugin.beforeGrain(img, settings: st, finish: finish, ctx: ctx)
         XCTAssertTrue(why.first?.contains("not set") ?? false)
         XCTAssertEqual(try renderer.linearImage(out).pixels, try renderer.linearImage(img).pixels)
         // Frame 1 of 36: leak, logged, deterministic.
         st.rollID = "r1"; st.rollFrameIndex = 1; st.rollFrameCount = 36
-        let a = try plugin.afterFinish(img, settings: st, finish: finish, ctx: ctx)
-        let b = try plugin.afterFinish(img, settings: st, finish: finish, ctx: ctx)
+        let a = try plugin.beforeGrain(img, settings: st, finish: finish, ctx: ctx)
+        let b = try plugin.beforeGrain(img, settings: st, finish: finish, ctx: ctx)
         XCTAssertTrue(a.1.joined().contains("seed") && a.1.joined().contains("edge") && a.1.joined().contains("strength") && a.1.joined().contains("hue"))
         let pa = try renderer.linearImage(a.0).pixels
         XCTAssertEqual(pa, try renderer.linearImage(b.0).pixels, "same roll + frame, same leak")
         XCTAssertNotEqual(pa, try renderer.linearImage(img).pixels)
         // No FilmFinish.lightLeak: no-op, no reasons.
-        (out, why) = try plugin.afterFinish(img, settings: st, finish: FilmFinish(), ctx: ctx)
+        (out, why) = try plugin.beforeGrain(img, settings: st, finish: FilmFinish(), ctx: ctx)
         XCTAssertTrue(why.isEmpty)
         // Removable: not in the list = not active.
         st.plugins = []

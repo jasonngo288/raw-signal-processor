@@ -16,6 +16,9 @@ public protocol DevelopPlugin: Sendable {
     func decide(context: SceneContext, defaults: DecodeParameters, settings: inout RenderSettings) -> [String]
     /// After CIRAWFilter decode, before the look. `ctx` can decode the plain SDR base on demand.
     func afterDecode(_ image: CIImage, settings: RenderSettings, ctx: PluginRenderContext) throws -> (CIImage, [String])
+    /// After look + skin protection, before grain/halation: effects that happen at exposure on film (a light leak
+    /// fogs the emulsion, so grain must sit on top of it).
+    func beforeGrain(_ image: CIImage, settings: RenderSettings, finish: FilmFinish?, ctx: PluginRenderContext) throws -> (CIImage, [String])
     /// After look + skin protection + grain/halation.
     func afterFinish(_ image: CIImage, settings: RenderSettings, finish: FilmFinish?, ctx: PluginRenderContext) throws -> (CIImage, [String])
     /// Look stage for a stock whose LUT is not made for the display base (`FilmStock.lookInput`). Return the looked
@@ -29,6 +32,7 @@ public extension DevelopPlugin {
         decide(context: context, settings: &settings)
     }
     func afterDecode(_ image: CIImage, settings: RenderSettings, ctx: PluginRenderContext) throws -> (CIImage, [String]) { (image, []) }
+    func beforeGrain(_ image: CIImage, settings: RenderSettings, finish: FilmFinish?, ctx: PluginRenderContext) throws -> (CIImage, [String]) { (image, []) }
     func afterFinish(_ image: CIImage, settings: RenderSettings, finish: FilmFinish?, ctx: PluginRenderContext) throws -> (CIImage, [String]) { (image, []) }
     func look(stock: FilmStock, settings: RenderSettings, ctx: PluginRenderContext) throws -> (CIImage, [String])? { nil }
 }
@@ -221,10 +225,11 @@ public struct FilmDevelopPlugin: DevelopPlugin {
 /// Runs after grain/halation (the afterFinish hook): the leak is not grained. Unplugged = no leak at all.
 public struct LightLeakPlugin: DevelopPlugin {
     public let id = "lightLeak"
-    public let summary = "light leak from the stock's finish, drawn per roll frame (seeded, deterministic)"
+    public let summary = "light leak from the stock's finish, drawn per roll frame (seeded, deterministic), before grain"
     public init() {}
 
-    public func afterFinish(_ image: CIImage, settings: RenderSettings, finish: FilmFinish?, ctx: PluginRenderContext) throws -> (CIImage, [String]) {
+    /// Runs before grain / halation: a leak is light on the emulsion, so the grain of the developed film covers it.
+    public func beforeGrain(_ image: CIImage, settings: RenderSettings, finish: FilmFinish?, ctx: PluginRenderContext) throws -> (CIImage, [String]) {
         guard let spec = finish?.lightLeak else { return (image, []) }
         guard let frame = settings.rollFrameIndex, let count = settings.rollFrameCount else {
             return (image, ["no leak: the frame's place in the roll is not set (rollFrameIndex / rollFrameCount)"])
