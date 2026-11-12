@@ -194,28 +194,12 @@ public final class Renderer: @unchecked Sendable {
 
     public func resolveLook(_ name: String?) throws -> CubeLUT? { try resolveLookDeclared(name)?.lut }
 
-    /// A built-in look or a LUT file. A file with `<stem>.manifest.json` next to it is checked by `LookContract`
-    /// (problems throw; a log route must be used as a library stock, not as a plain look); without one it is
-    /// assumed display-referred Display P3 and the note says so.
+    /// A built-in look or a LUT file. A file is loaded as a display-referred Display P3 look and the note says so.
     public func resolveLookDeclared(_ name: String?) throws -> (lut: CubeLUT, space: LookColorSpace, note: String?)? {
         guard let name, !name.isEmpty else { return nil }
         if let builtIn = BuiltInLook(rawValue: name) { return (builtIn.lut(), .displayP3, nil) }
         let url = URL(fileURLWithPath: name)
-        let manifestURL = url.deletingPathExtension().appendingPathExtension("manifest.json")
-        let stem = url.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "_33x33_spectral", with: "")
-        let alt = url.deletingLastPathComponent().appendingPathComponent(stem + ".manifest.json")
-        for m in [manifestURL, alt] where FileManager.default.fileExists(atPath: m.path) {
-            let manifest = try JSONDecoder().decode(LookManifest.self, from: Data(contentsOf: m))
-            let (check, lut) = LookContract.check(manifest, manifestFile: m.lastPathComponent, cubeData: try? Data(contentsOf: url))
-            guard let lut, let route = check.route else {
-                throw RawCoreError.invalidLUT("\(url.lastPathComponent) fails its manifest: " + check.problems.joined(separator: "; "))
-            }
-            guard case .display(let space) = route else {
-                throw RawCoreError.invalidLUT("\(url.lastPathComponent) is a log (scene-referred) LUT: register it as a library stock so logLook applies it")
-            }
-            return (lut, space, "look \(manifest.name) (\(manifest.license.id), sha \(manifest.sha256.prefix(12))…, route display \(space.rawValue))")
-        }
-        return (try CubeLUT.load(any: url), .displayP3, "look \(url.lastPathComponent): no manifest, assumed display-referred Display P3")
+        return (try CubeLUT.load(any: url), .displayP3, "look \(url.lastPathComponent): assumed display-referred Display P3")
     }
 
     public enum Format: String, CaseIterable, Sendable { case heic10, png16, jpeg }

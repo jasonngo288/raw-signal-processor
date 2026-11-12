@@ -259,7 +259,7 @@ public final class Developer: @unchecked Sendable {
                 let before = st
                 let why = p.decide(context: a.context, defaults: a.defaults, settings: &st)
                 if st != before { ran.insert(p.id) }
-                if p.id == "filmDevelop", let n = st.stock, let prof = FilmStock.named(n)?.develop?.profile { developedFor = "\(n): \(prof)" }
+                if p.id == "filmDevelop", let n = st.stock, let prof = try st.resolvedStock()?.develop?.profile { developedFor = "\(n): \(prof)" }
                 reasons += why.map { "[\(p.id)] " + $0 }
             }
             if !reused { reasons.append(String(format: "analysis %.2fs", a.seconds)) }
@@ -346,10 +346,13 @@ public final class Developer: @unchecked Sendable {
         out.recipe.settings = st
         var ran = base.ran
         var image = base.image
-        let stock = st.stock.flatMap(FilmStock.named)
+        let stock = try st.resolvedStock()
         let beforeLook = image
+        if let args = st.lookArguments, let look = st.stock {
+            out.recipe.decisions.append("look=\(look) args=\(args.compactJSON())")
+        }
         if base.active.contains(where: { $0.id == "filmDevelop" }) {
-            let now = st.stock.flatMap(FilmStock.named).flatMap { s in s.develop.map { "\(s.name): \($0.profile)" } }
+            let now = stock.flatMap { s in s.develop.map { "\(st.stock ?? s.name): \($0.profile)" } }
             if now != base.developedFor {
                 out.recipe.decisions.append("[filmDevelop] base developed for \(base.developedFor ?? "no develop profile"), finished as \(now ?? "no develop profile") (decode is not redone)")
             }
@@ -395,9 +398,6 @@ public final class Developer: @unchecked Sendable {
                 } else {
                     image = try renderer.applyLook(lut, to: image, intensity: strength, colorSpace: stock.lookColorSpace)
                 }
-            }
-            if case .library(let n) = stock.source, let m = FilmStock.manifest(n) {
-                out.recipe.decisions.append("look \(n): \(m.source.author) \(m.source.version), \(m.license.id) (redistribution: \(m.license.redistributionInApp)), sha \(m.sha256.prefix(12))…, route \(m.route)")
             }
             appliedLUT = lut
         }

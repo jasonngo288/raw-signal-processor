@@ -23,7 +23,8 @@ final class Presets2026Tests: XCTestCase {
         XCTAssertNil(FilmStock.named("PRESET_26_CHROME64")?.minSkinProtection)
         XCTAssertEqual(Preset26.named("PRESET_26_CPM35")?.finish.vignette, 0.25)
         XCTAssertEqual(Preset26.named("PRESET_26_CPM35")!.finish.grainSize, 0.084, accuracy: 1e-6)
-        XCTAssertEqual(FilmStock.classic.count + 7 + FilmLooks2026.stocks.count, FilmStock.builtIn.count)   // `all` also holds run-time registered stocks (tests register some)
+        XCTAssertEqual(FilmStock.classic.count + 7 + FilmLooks2026.stocks.count, FilmStock.builtIn.count)
+        XCTAssertEqual(FilmStock.all.count, FilmStock.builtIn.count, "no run-time registry (T2: library removed)")
     }
 
     func testWhiteBalanceDirection() {

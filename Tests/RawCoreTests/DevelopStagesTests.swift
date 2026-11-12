@@ -152,57 +152,6 @@ final class DevelopStagesTests: XCTestCase {
         XCTAssertFalse(same.recipe.decisions.contains { $0.contains("base developed for") })
     }
 
-    /// Writes a .cube + manifest pair into a temp folder (the contract's own fixture, sha computed from the bytes).
-    func libraryFixture(name: String = "testLook", route: String = "display", input: (String, String, String?) = ("srgb", "srgb", nil),
-                        output: (String, String) = ("srgb", "srgb"), license: String = "MIT", sha: String? = nil,
-                        lut: CubeLUT = BuiltInLook.warmNegative.lut()) throws -> URL {
-        let dir = try tempDir()
-        let cube = Data(lut.cubeText().utf8)
-        try cube.write(to: dir.appendingPathComponent("\(name).cube"))
-        let logCurve = input.2.map { "\"logCurve\": \"\($0)\"," } ?? ""
-        let json = """
-        {"schema": 1, "name": "\(name)", "file": "\(name).cube", "sha256": "\(sha ?? SHA256.hex(cube))",
-         "input": {"primaries": "\(input.0)", "white": "D65", "transfer": "\(input.1)", \(logCurve) "domain": [0, 1]},
-         "output": {"primaries": "\(output.0)", "white": "D65", "transfer": "\(output.1)", "referred": "display"},
-         "toneBaked": true, "exposureAnchor": "unknown", "route": "\(route)",
-         "source": {"author": "test", "url": "https://example.invalid", "version": "1"},
-         "license": {"id": "\(license)", "redistributionInApp": "permitted"},
-         "history": [{"date": "2026-11-10", "change": "fixture"}]}
-        """
-        try Data(json.utf8).write(to: dir.appendingPathComponent("\(name).manifest.json"))
-        return dir
-    }
-
-    /// LUT library contract: a declared file loads on its route; wrong sha, empty fields, unsupported routes are
-    /// rejected with the reason; licence and trademark problems block a release but not loading.
-    func testLookContractAcceptsDeclaredAndRejectsBad() throws {
-        XCTAssertEqual(SHA256.hex(Data("abc".utf8)), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
-        XCTAssertEqual(SHA256.hex(Data()), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
-
-        let ok = LookLibrary(directory: try libraryFixture())
-        XCTAssertEqual(ok.entries.count, 1, "\(ok.checks)")
-        XCTAssertEqual(ok.entries.first?.route, .display(.sRGB))
-        XCTAssertEqual(ok.stocks.first?.lookColorSpace, .sRGB)
-        XCTAssertTrue(ok.checks[0].releaseBlockers.isEmpty, "\(ok.checks[0].releaseBlockers)")
-
-        func problems(_ dir: URL) -> [String] { LookLibrary(directory: dir).checks.first?.problems ?? ["no check"] }
-        XCTAssertTrue(problems(try libraryFixture(sha: String(repeating: "0", count: 64))).contains { $0.hasPrefix("sha256 mismatch") })
-        XCTAssertTrue(problems(try libraryFixture(route: "creative", input: ("ap1", "acescct", nil), output: ("ap1", "acescct"))).contains { $0.contains("not supported") })
-        XCTAssertTrue(problems(try libraryFixture(route: "sceneToDisplay", input: ("srgb", "linear", nil))).contains { $0.contains("log-encoded input only") })
-        XCTAssertTrue(problems(try libraryFixture(route: "sceneToDisplay", input: ("rec709", "log", "cineon"))).contains { $0.contains("cineon") })
-        XCTAssertTrue(problems(try libraryFixture(input: ("displayP3", "srgb", nil))).contains { $0.contains("same supported primaries") })
-        XCTAssertEqual(LookLibrary(directory: try libraryFixture(route: "sceneToDisplay", input: ("rec2020", "log", "appleLog"))).entries.first?.route,
-                       .log(.appleLog, primaries: .rec2020))
-
-        let gpl = LookLibrary(directory: try libraryFixture(name: "portra_test", license: "GPL-3.0"))
-        XCTAssertEqual(gpl.entries.count, 1, "licence/trademark do not block loading")
-        XCTAssertTrue(gpl.checks[0].releaseBlockers.contains { $0.contains("GPL-3.0") })
-        XCTAssertTrue(gpl.checks[0].releaseBlockers.contains { $0.contains("portra") })
-
-        // Bundled Looks/: only files that pass become stocks; the rest are reported, never loaded.
-        for c in LookLibrary.bundled.checks where !c.isUsable { XCTAssertFalse(FilmStock.bundled.contains { $0.name == c.name }, c.name) }
-    }
-
     /// Log curves put mid grey where their specs do; the composite cube is monotone on grey.
     func testLogCurvesAndComposite() throws {
         XCTAssertEqual(LogCurve.appleLog.encode(0.18), 0.488, accuracy: 0.005)
@@ -220,27 +169,28 @@ final class DevelopStagesTests: XCTestCase {
         }
     }
 
-    /// A LOG stock goes through the logLook plugin; unplugged, the core applies it to the display base and says so.
-    func testLogLookPluginAndFallback() throws {
+    /// A LOG stock (built in code, `lookInput = .log`) goes through the logLook plugin on a scene-linear decode; a display
+    /// stock never does; without a scene-linear decode the plugin leaves it to the core.
+    func testLogLookPluginOnAnInCodeLogStock() throws {
         let url = try original()
         let dev = Developer()
         let scale = try dev.decoder.scaleFactor(url: url, longEdge: 256)
-        let an = try dev.analyze(url: url)
-        let lib = LookLibrary(directory: try libraryFixture(name: "testLogLook", route: "sceneToDisplay", input: ("rec2020", "log", "appleLog")))
-        FilmStock.register(lib.stocks, library: lib)
-        var st = RenderSettings.explicit; st.stock = "testLogLook"
-        let withPlugin = try dev.develop(url: url, settings: st, auto: true, scaleFactor: scale, analysis: an)
-        XCTAssertTrue(withPlugin.recipe.plugins.contains("logLook"))
-        XCTAssertTrue(withPlugin.recipe.decisions.contains { $0.hasPrefix("[logLook] testLogLook") }, "\(withPlugin.recipe.decisions)")
-        XCTAssertTrue(withPlugin.recipe.decisions.contains { $0.hasPrefix("look testLogLook:") && $0.contains("sha") }, "recipe records the manifest")
-        var off = st; off.plugins = ["highlightRecovery", "cameraMatch", "vignette"]
-        let fallback = try dev.develop(url: url, settings: off, auto: true, scaleFactor: scale, analysis: an)
-        XCTAssertFalse(fallback.recipe.plugins.contains("logLook"))
-        XCTAssertTrue(fallback.recipe.decisions.contains { $0.contains("no plugin applied it") })
-        XCTAssertGreaterThan(try maxDiff(withPlugin.image, fallback.image, dev.renderer), 0.02)
-        var classic = RenderSettings.explicit; classic.stock = "warm400"
-        let warm = try dev.develop(url: url, settings: classic, auto: true, scaleFactor: scale, analysis: an)
-        XCTAssertFalse(warm.recipe.plugins.contains("logLook"), "display looks never go through logLook")
+        var stock = FilmStock(name: "testLogLook", look: .warmNegative, lookIntensity: 1, finish: FilmFinish(), summary: "log test")
+        stock.lookInput = .log(.appleLog); stock.logPrimaries = .rec2020
+        let base = try dev.decoder.decode(url: url, settings: .explicit, scaleFactor: scale).image
+        let linear = RenderSettings(mode: .sceneLinear)
+        let ctx = PluginRenderContext(renderer: dev.renderer, decodeBase: { base }, decodeSceneLinear: {
+            try dev.decoder.decode(url: url, settings: linear, scaleFactor: scale).image
+        })
+        let plugin = LogLookPlugin()
+        let (looked, why) = try XCTUnwrap(try plugin.look(stock: stock, settings: .explicit, ctx: ctx))
+        XCTAssertTrue(why.contains { $0.hasPrefix("testLogLook: LUT made for log input") }, "\(why)")
+        let display = try dev.renderer.applyLook(stock.lut(), to: base, intensity: 1)
+        XCTAssertGreaterThan(try maxDiff(looked, display, dev.renderer), 0.02, "log route differs from the LUT on the display base")
+        var classic = stock; classic.lookInput = .display
+        XCTAssertNil(try plugin.look(stock: classic, settings: .explicit, ctx: ctx), "display looks never go through logLook")
+        let noLinear = PluginRenderContext(renderer: dev.renderer, decodeBase: { base })
+        XCTAssertNil(try plugin.look(stock: stock, settings: .explicit, ctx: noLinear), "no scene-linear decode: left to the core")
     }
 
     /// MoodRoll's .mrlut format round-trips within half precision; .cube text round-trips exactly to 6 decimals.

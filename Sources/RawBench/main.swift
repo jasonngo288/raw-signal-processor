@@ -19,7 +19,6 @@ raw-bench — CIRAWFilter spike CLI
                    ColorChecker Classic: corners = centres of dark skin (top-left), bluish green (top-right), black (bottom-right),
                    white (bottom-left), normalised 0..1 from the image's top-left. Fits the model's CCM, re-decodes to verify.
   raw-bench gate3 <chart.json> <chart.json>...    Gate 3: ΔE00 between models' corrected charts (pass: mean < 2)
-  raw-bench lutcheck [dir]                        check LUT manifests (default: bundled Looks/): route, sha256, fields, licence
   raw-bench looks <raw|dir>... --out <dir> [--looks a,b] [--long-edge N] [--manifest corpus.json]   film-look set: base once, every look, metrics (look review tool)
   raw-bench lut <in.cube|in.mrlut> --out <out.cube|out.mrlut>   convert LUTs (MoodRoll .mrlut packed format), print round-trip error
   raw-bench storage <raw>... [--stock NAME] [--out <dir>]   base render stored as HEIC10/PNG16/TIFF16/EXR/JPEG: size and ΔE00 vs in-memory
@@ -547,19 +546,6 @@ func run() throws -> Int32 {
     case "gate3":
         guard rest.count >= 2 else { print(usage); return 2 }
         return try gate3Command(rest) ? 0 : 1
-    case "lutcheck":
-        // LUT library contract: every <name>.manifest.json in the folder (default: RawCore's bundled Looks/).
-        let lib = rest.first.map { LookLibrary(directory: URL(fileURLWithPath: $0)) } ?? LookLibrary.bundled
-        var bad = 0
-        for c in lib.checks {
-            let route = c.route.map { "\($0)" } ?? "—"
-            print("\(c.isUsable ? "OK  " : "FAIL") \(c.name)  route: \(route)")
-            for p in c.problems { print("       ✗ \(p)") }
-            for r in c.releaseBlockers { print("       ⚠︎ release: \(r)") }
-            if !c.isUsable { bad += 1 }
-        }
-        print("\(lib.checks.count) manifests, \(lib.entries.count) usable, \(bad) rejected")
-        return bad == 0 ? 0 : 1
     case "looks":
         guard !rest.isEmpty, let out = a.options["out"] else { print(usage); return 2 }
         let run = try looksCommand(rest, out: out, looks: a.options["looks"].map { $0.split(separator: ",").map(String.init) },

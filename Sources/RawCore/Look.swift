@@ -314,14 +314,24 @@ extension RenderSettings {
     fileprivate func luminanceNRAmountOrDefault(_ d: DecodeParameters) -> Float { luminanceNoiseReductionAmount ?? d.luminanceNoiseReductionAmount }
 }
 
+/// Colour space a display-referred LUT was authored in (CIColorCubeWithColorSpace encodes the image into it).
+public enum LookColorSpace: String, Codable, Equatable, Sendable {
+    case displayP3
+    case sRGB
+}
+
+/// Primaries of a log LUT's input (the composite converts the scene-linear Display P3 decode into them).
+public enum LogLookPrimaries: String, Codable, Equatable, Sendable {
+    case rec2020
+    case rec709
+}
+
 /// A complete film stock = look LUT + finishing. Names are the app's own (no real film brand names).
 public struct FilmStock: Equatable, Sendable {
     public enum Source: Equatable, Sendable {
         case builtIn(BuiltInLook)
         /// Parametric preset (Presets2026.swift).
         case preset(PresetLookParams)
-        /// A declared LUT file (`<name>.manifest.json` + `.cube`, checked by `LookContract`; see `LookLibrary`).
-        case library(String)
         /// A generated look of the 2026 set (FilmLooks.swift).
         case spec(LookSpec)
     }
@@ -360,7 +370,6 @@ public struct FilmStock: Equatable, Sendable {
         switch source {
         case .builtIn(let l): return l.lut(size: size)
         case .preset: return Preset26.named(name)?.lut(size: size) ?? .identity(size: size)
-        case .library(let n): return FilmStock.libraryLUT(n) ?? .identity(size: size)
         case .spec(let spec): return LookSpecCache.shared.lut(name, spec, size: max(size, spec.cubeSize))
         }
     }
@@ -381,48 +390,17 @@ public struct FilmStock: Equatable, Sendable {
                   summary: "tungsten-balanced night stock, big grain, strong halation on lamps"),
     ]
 
-    /// Declared LUT files shipped in `Sources/RawCore/Looks` that pass `LookContract` (unusable ones are listed by
-    /// `LookLibrary.bundled.checks` and `raw-bench lutcheck`, never loaded).
-    public static var bundled: [FilmStock] { LookLibrary.bundled.stocks }
-
-    private static let registryLock = NSLock()
-    nonisolated(unsafe) private static var registered: [(FilmStock, LookLibrary?)] = []
-
-    /// Adds stocks at run time (a user's checked LUT library, tests). A name already known is replaced.
-    public static func register(_ stocks: [FilmStock], library: LookLibrary? = nil) {
-        registryLock.lock(); defer { registryLock.unlock() }
-        registered.removeAll { r in stocks.contains { $0.name == r.0.name } }
-        registered += stocks.map { ($0, library) }
-    }
-
-    static func libraryLUT(_ n: String) -> CubeLUT? {
-        registryLock.lock()
-        let lib = registered.first { $0.0.name == n }?.1
-        registryLock.unlock()
-        return (lib ?? LookLibrary.bundled).lut(named: n)
-    }
-
-    /// Manifest of a library look (for the recipe).
-    public static func manifest(_ n: String) -> LookManifest? {
-        registryLock.lock()
-        let lib = registered.first { $0.0.name == n }?.1
-        registryLock.unlock()
-        return (lib ?? LookLibrary.bundled).manifest(named: n)
-    }
-
     static let builtIn: [FilmStock] = classic + Preset26.all.map(\.stock) + FilmLooks2026.stocks
 
-    /// Classic stocks + the 2026 drop (PRESET_26_*) + the 2026 film-look set + checked library looks + registered ones.
-    public static var all: [FilmStock] {
-        registryLock.lock(); let r = registered.map(\.0); registryLock.unlock()
-        let lib = bundled
-        return builtIn + lib.filter { l in !r.contains { $0.name == l.name } } + r
-    }
+    /// Classic stocks + the 2026 drop (PRESET_26_*) + the 2026 film-look set (listed looks only).
+    public static var all: [FilmStock] { builtIn }
 
-    /// Trial looks (`FilmLooks2026.trialStocks`) resolve by name for review renders but are not in `all` (not listed).
-    /// Roll stocks (`RollStocks`, `rr-…` ids) resolve the same way.
+    /// Trial and retired looks (`FilmLooks2026.trialStocks`, `retiredStocks`) resolve by name for review renders but are
+    /// not in `all` (not listed). Roll stocks (`RollStocks`, `rr-…` ids) resolve by id. A look + `LookArguments` resolves
+    /// through `RenderSettings.resolvedStock()` / `FilmStock.resolve(look:arguments:)`, not here.
     public static func named(_ n: String) -> FilmStock? {
-        all.first { $0.name == n } ?? (FilmLooks2026.trialStocks + FilmLooks2026.retiredStocks + RollStocks.stocks).first { $0.name == n }
+        all.first { $0.name == n } ?? (FilmLooks2026.trialStocks + FilmLooks2026.retiredStocks).first { $0.name == n }
+            ?? RollStocks.named(n)?.stock
     }
 }
 

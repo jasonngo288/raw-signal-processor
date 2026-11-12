@@ -149,7 +149,10 @@ final class RollStocksTests: XCTestCase {
         XCTAssertLessThan(RollStocks.named("rr-chuan-400")!.stock.finish.grainAmount,
                           RollStocks.named("rr-chan-dung-400")!.stock.finish.grainAmount)
         // The multiplier stays a gentle character offset (amount only, within 0.7...1.0).
-        for s in RollStocks.all { XCTAssert((0.7...1.0).contains(RollStock.grainScale(look: s.look)), s.id) }
+        for s in RollStocks.all {
+            guard case .iso(let scale)? = s.arguments.grain else { XCTFail("\(s.id): grain must be the ISO form"); continue }
+            XCTAssert((0.7...1.0).contains(scale), s.id)
+        }
     }
 
     // MARK: filmDevelop (pure rule)

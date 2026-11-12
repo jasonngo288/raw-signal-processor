@@ -54,8 +54,12 @@ public struct RenderSettings: Codable, Equatable, Sendable {
     public var look: String?
     /// 0...1 blend of the look over the base render.
     public var lookIntensity: Float
-    /// Film stock (`FilmStock.all`): sets look, intensity and finish unless `look` / `finish` are given explicitly.
+    /// Film stock (`FilmStock.named`: a listed stock, a roll stock id, or with `lookArguments` a supported look id): sets
+    /// look, intensity and finish unless `look` / `finish` are given explicitly. Resolve it with `resolvedStock()`.
     public var stock: String?
+    /// Layer-1 arguments merged onto the look named in `stock` (`FilmStock.resolve(look:arguments:)`). Needs `stock` to be
+    /// a `SupportedLooks` id; cannot be combined with `finish` (the arguments set the finish).
+    public var lookArguments: LookArguments?
     /// Explicit finishing (grain, halation, vignette); overrides the stock's finish.
     public var finish: FilmFinish?
     /// 0...1: how much of the look is held back on people (Vision person mask). nil/0 = off.
@@ -97,9 +101,7 @@ public struct RenderSettings: Codable, Equatable, Sendable {
     public func validate() throws {
         if let ccm, ccm.count != 9 { throw RawCoreError.invalidSettings("ccm must have 9 values, got \(ccm.count)") }
         if let h = toneMapSourceHeadroom, !(1...64).contains(h) { throw RawCoreError.invalidSettings("toneMapSourceHeadroom must be in 1...64") }
-        if let n = stock, FilmStock.named(n) == nil {
-            throw RawCoreError.invalidSettings("unknown stock \(n); known: \(FilmStock.all.map(\.name).joined(separator: ", "))")
-        }
+        _ = try resolvedStock()
         try finish?.validate()
         if let p = skinProtection, !(0...1).contains(p) { throw RawCoreError.invalidSettings("skinProtection must be in 0...1") }
         if let e = linearExposureEV, !(-4...4).contains(e) { throw RawCoreError.invalidSettings("linearExposureEV must be in -4...4") }
@@ -114,6 +116,25 @@ public struct RenderSettings: Codable, Equatable, Sendable {
         if mode == .appleDefault && hasOverrides {
             throw RawCoreError.invalidSettings("appleDefault mode must not carry parameter overrides; use explicit")
         }
+    }
+
+    /// The stock this render uses: `stock` + `lookArguments` merged (`FilmStock.resolve`), else `FilmStock.named(stock)`.
+    /// nil = no stock. Every reader of the stock goes through here, so a look + arguments and the same roll stock id give
+    /// the same `FilmStock`. Throws `invalidSettings`: unknown stock, arguments without a stock, arguments with an
+    /// explicit `finish`, or arguments RSP cannot merge.
+    public func resolvedStock() throws -> FilmStock? {
+        guard let n = stock else {
+            if lookArguments != nil { throw RawCoreError.invalidSettings("lookArguments need stock = <supported look id>") }
+            return nil
+        }
+        if let args = lookArguments {
+            if finish != nil { throw RawCoreError.invalidSettings("lookArguments and finish cannot be combined: the arguments set the finish") }
+            return try FilmStock.resolve(look: n, arguments: args)
+        }
+        guard let s = FilmStock.named(n) else {
+            throw RawCoreError.invalidSettings("unknown stock \(n); known: \(FilmStock.all.map(\.name).joined(separator: ", "))")
+        }
+        return s
     }
 
     /// True if any decode parameter is overridden.

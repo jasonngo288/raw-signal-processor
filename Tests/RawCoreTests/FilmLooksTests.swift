@@ -7,7 +7,7 @@ final class FilmLooksTests: XCTestCase {
     let trademarks = ["kodak", "kodachrome", "portra", "ektar", "ektacolor", "fuji", "fujifilm", "superia", "velvia", "provia",
                       "ilford", "polaroid", "cinestill", "chrome64", "trix", "agfa", "vsco", "dazz"]
 
-    /// The 10 listed looks, the trial candidates and the retired looks: every LUT check below runs on all of them.
+    /// The 18 listed looks, the trial candidates (none since T2) and the retired looks: every LUT check below runs on all of them.
     var allLooks: [(name: String, summary: String, spec: LookSpec, intensity: Float, finish: FilmFinish, minSkin: Float?)] {
         FilmLooks2026.looks + FilmLooks2026.trialLooks + FilmLooks2026.retiredLooks
     }
@@ -17,7 +17,7 @@ final class FilmLooksTests: XCTestCase {
     }
 
     func testGeneratedLooksGenericNames() throws {
-        XCTAssertEqual(FilmLooks2026.names.count, 10)   // cinemaNegative left the launch set (unlisted) 2026-11-10
+        XCTAssertEqual(FilmLooks2026.names.count, 18)   // 10 + the 8 trial looks promoted by T2 (2026-11-12); cinemaNegative retired 2026-11-10
         for n in FilmLooks2026.names { XCTAssertNotNil(FilmStock.named(n), n) }
         for l in allLooks {
             let words = (l.name + " " + l.summary).lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
@@ -153,26 +153,30 @@ final class FilmLooksTests: XCTestCase {
         XCTAssertEqual(base.apply(red, gains: gains), LookSpec().apply(red, gains: gains))
     }
 
-    /// Unlisted looks (trial candidates; retired cinemaNegative, 2026-11-10): resolvable by name for review renders, never listed (not in `names`,
-    /// `stocks` or `FilmStock.all`), no name shared with the shipped set.
-    func testTrialLooksResolvableButNotListed() {
-        XCTAssertFalse(FilmLooks2026.trialNames.isEmpty)
+    /// T2 D3 (2026-11-12): the 8 former trial looks are listed now (in `names`, `stocks`, `FilmStock.all` and
+    /// `SupportedLooks`) with unchanged names; the trial set is empty. The retired cinemaNegative still resolves by name
+    /// but is never listed or supported.
+    func testPromotedLooksAreListedAndRetiredIsNot() {
+        let promoted = ["trialCoolFade", "brightTravel", "warmEvening", "sunFade", "mapleRed", "warmMuted", "naturalPortrait", "cleanLab"]
+        XCTAssertTrue(FilmLooks2026.trialNames.isEmpty)
         let listed = Set(FilmStock.all.map(\.name))
-        for n in FilmLooks2026.trialNames {
+        for n in promoted {
             XCTAssertNotNil(FilmStock.named(n), n)
-            XCTAssertFalse(FilmLooks2026.names.contains(n), n)
-            XCTAssertFalse(listed.contains(n), "\(n) must not be listed in FilmStock.all")
+            XCTAssertTrue(FilmLooks2026.names.contains(n), n)
+            XCTAssertTrue(listed.contains(n), "\(n) must be listed in FilmStock.all")
+            XCTAssertNotNil(SupportedLooks.named(n), n)
         }
-        XCTAssertEqual(Set(FilmLooks2026.trialNames).count, FilmLooks2026.trialNames.count)
+        XCTAssertEqual(Set(FilmLooks2026.names).count, FilmLooks2026.names.count)
         for l in FilmLooks2026.retiredLooks {
             XCTAssertNotNil(FilmStock.named(l.name), l.name)
             XCTAssertFalse(listed.contains(l.name), "\(l.name) is retired: must not be listed")
+            XCTAssertNil(SupportedLooks.named(l.name), "\(l.name) is retired: not supported")
         }
     }
 
     /// Distinctness on the LUTs: mean CIEDE2000 between two looks over the 24 ColorChecker patches and 9 greys, at
-    /// the shipped intensity. Prints every look's nearest neighbour; a trial must sit ≥ 2 from every look (else it
-    /// duplicates one and should not be proposed).
+    /// the shipped intensity. Prints every look's nearest neighbour; a trial (none since T2) must sit ≥ 2 from every look
+    /// (else it duplicates one and should not be proposed).
     func testLooksDistinctFromNeighbours() {
         let patches: [SIMD3<Float>] = ColorChecker.referenceLabD50.map { lab in
             let l = ColorChecker.referenceLinearP3(lab)

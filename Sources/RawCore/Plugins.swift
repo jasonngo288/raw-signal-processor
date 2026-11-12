@@ -193,7 +193,8 @@ public struct CameraMatchPlugin: DevelopPlugin {
         // otherwise be imported into the film stock (plan §5). Exposure match (decide) is not touched.
         var curve = c
         var stockNote = ""
-        if let name = st.stock, let stock = FilmStock.named(name), let fd = stock.develop {
+        if let stock = try st.resolvedStock(), let fd = stock.develop {
+            let name = st.stock ?? stock.name
             curve = ToneMatch.blended(c, strength: Double(fd.cameraMatchCurveStrength))
             stockNote = String(format: "; stock %@ (%@): curve blended toward identity at %.2f (max shift %.3f -> %.3f), exposure match unchanged",
                                name, fd.profile, fd.cameraMatchCurveStrength, dev, ToneMatch.deviation(curve))
@@ -213,7 +214,8 @@ public struct FilmDevelopPlugin: DevelopPlugin {
     public init() {}
 
     public func decide(context: SceneContext, defaults: DecodeParameters, settings: inout RenderSettings) -> [String] {
-        guard let name = settings.stock, let stock = FilmStock.named(name), let dev = stock.develop else { return [] }
+        // A stock that does not resolve is not skipped silently: `RenderSettings.validate()` throws it at decode.
+        guard let stock = try? settings.resolvedStock(), let dev = stock.develop else { return [] }
         let why = dev.apply(context: context, defaults: defaults, settings: &settings)
         return why.isEmpty ? [] : why
     }

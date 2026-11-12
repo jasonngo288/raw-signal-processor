@@ -179,7 +179,8 @@ public enum OKLab {
     }
 }
 
-/// The 2026 set: 10 listed generated looks (declared LUT files come through `LookLibrary`).
+/// The 2026 set: 18 listed generated looks (the 10 of 2026-11-10 + the 8 promoted trial looks, T2 2026-11-12). Every
+/// look is generated in code; there is no bundled LUT library.
 public enum FilmLooks2026 {
     // OKLCh hue landmarks (degrees): red ≈ 25, skin ≈ 40–60 (ColorChecker skins ≈ 41), orange ≈ 55, yellow ≈ 100, green ≈ 140, cyan ≈ 200, blue ≈ 260.
     static func spec(_ f: (inout LookSpec) -> Void) -> LookSpec { var s = LookSpec(); f(&s); return s }
@@ -246,32 +247,7 @@ public enum FilmLooks2026 {
              $0.shadowTint = SIMD2(-0.006, -0.002)
              $0.bands = [.init(140, width: 40, chroma: 1.1), .init(255, width: 40, shift: -6, chroma: 1.1)] },
          0.9, FilmFinish(grainAmount: 0.3, grainSize: 0.05, vignette: 0.3), nil),
-    ]
-
-    public static var names: [String] { looks.map(\.name) }
-
-    public static let stocks: [FilmStock] = looks.map(stock)
-
-    /// Looks the user took out of the launch set; kept in the library (resolvable by name, never listed).
-    /// cinemaNegative (2026-11-10): too close to mutedChrome; night teal is tungstenGlow's job.
-    public static let retiredLooks: [(name: String, summary: String, spec: LookSpec, intensity: Float, finish: FilmFinish, minSkin: Float?)] = [
-        ("cinemaNegative", "cinema negative: firm contrast, deep crimson, amber yellows, dense desaturated greens, teal-leaning skies, skin held back",
-         spec { $0.temperatureK = 5450; $0.black = 0.012; $0.contrast = 1.12; $0.shoulder = 0.84; $0.white = 0.98; $0.saturation = 0.9
-             $0.highlightDesat = 0.35; $0.density = 0.1
-             $0.shadowTint = SIMD2(-0.004, -0.004); $0.highlightTint = SIMD2(0.002, 0.005); $0.neutralDrift = 0.03
-             $0.bands = [.init(25, width: 30, shift: -4, chroma: 1.1, lightness: -0.05), .init(55, width: 25, chroma: 1.05),
-                         .init(100, width: 35, shift: -8, chroma: 0.8), .init(140, width: 45, shift: 6, chroma: 0.8, lightness: -0.05),
-                         .init(240, width: 45, shift: -10, chroma: 0.9)] },   // colour separation by hue, not a global orange-teal split
-         0.85, FilmFinish(grainAmount: 0.2, grainSize: 0.055, vignette: 0.08), 0.5),
-    ]
-
-    public static let retiredStocks: [FilmStock] = retiredLooks.map(stock)
-
-    /// UNLISTED looks: they resolve through `FilmStock.named` (raw-bench looks, review tool) but are NOT in `names`,
-    /// `stocks` or `FilmStock.all`, so the app does not list them. Candidates from the 2026 trend report
-    /// (`.orchestration/looks/TREND_LOOK_PLAN_2026-11-10.md`; names chosen by the user 2026-11-10: brightTravel, sunFade,
-    /// warmEvening; trialCoolFade waits for evidence). Promote one by moving it into `looks`.
-    public static let trialLooks: [(name: String, summary: String, spec: LookSpec, intensity: Float, finish: FilmFinish, minSkin: Float?)] = [
+        // Promoted from the trial set (T2 D3, user 2026-11-12): names and values unchanged.
         ("trialCoolFade", "cool faded 400: grey lifted blacks, low contrast, cool green-cyan shadows, muted colour, magenta-leaning reds, medium grain",
          spec { $0.temperatureK = 5250; $0.tint = -2; $0.black = 0.042; $0.contrast = 0.9; $0.pivot = 0.45; $0.shoulder = 0.84; $0.white = 0.965
              $0.saturation = 0.8; $0.highlightDesat = 0.3; $0.shadowDesat = 0.1; $0.density = 0.03
@@ -335,6 +311,32 @@ public enum FilmLooks2026 {
          0.85, FilmFinish(grainAmount: 0.22, grainSize: 0.055, vignette: 0.03), nil),
     ]
 
+    public static var names: [String] { looks.map(\.name) }
+
+    public static let stocks: [FilmStock] = looks.map(stock)
+
+    /// Looks the user took out of the launch set; kept in the library (resolvable by name, never listed).
+    /// cinemaNegative (2026-11-10): too close to mutedChrome; night teal is tungstenGlow's job.
+    public static let retiredLooks: [(name: String, summary: String, spec: LookSpec, intensity: Float, finish: FilmFinish, minSkin: Float?)] = [
+        ("cinemaNegative", "cinema negative: firm contrast, deep crimson, amber yellows, dense desaturated greens, teal-leaning skies, skin held back",
+         spec { $0.temperatureK = 5450; $0.black = 0.012; $0.contrast = 1.12; $0.shoulder = 0.84; $0.white = 0.98; $0.saturation = 0.9
+             $0.highlightDesat = 0.35; $0.density = 0.1
+             $0.shadowTint = SIMD2(-0.004, -0.004); $0.highlightTint = SIMD2(0.002, 0.005); $0.neutralDrift = 0.03
+             $0.bands = [.init(25, width: 30, shift: -4, chroma: 1.1, lightness: -0.05), .init(55, width: 25, chroma: 1.05),
+                         .init(100, width: 35, shift: -8, chroma: 0.8), .init(140, width: 45, shift: 6, chroma: 0.8, lightness: -0.05),
+                         .init(240, width: 45, shift: -10, chroma: 0.9)] },   // colour separation by hue, not a global orange-teal split
+         0.85, FilmFinish(grainAmount: 0.2, grainSize: 0.055, vignette: 0.08), 0.5),
+    ]
+
+    public static let retiredStocks: [FilmStock] = retiredLooks.map(stock)
+
+    /// UNLISTED looks: they resolve through `FilmStock.named` (raw-bench looks, review tool) but are NOT in `names`,
+    /// `stocks`, `FilmStock.all` or `SupportedLooks`, so the app does not list them. Empty since T2 (2026-11-12): the 8
+    /// trial looks (trialCoolFade, brightTravel, warmEvening, sunFade, mapleRed, warmMuted, naturalPortrait, cleanLab)
+    /// were promoted into `looks`, names and values unchanged. A new candidate goes here; promote it by moving it.
+    public static let trialLooks: [(name: String, summary: String, spec: LookSpec, intensity: Float, finish: FilmFinish, minSkin: Float?)] = [
+    ]
+
     public static var trialNames: [String] { trialLooks.map(\.name) }
 
     public static let trialStocks: [FilmStock] = trialLooks.map(stock)
@@ -343,6 +345,39 @@ public enum FilmLooks2026 {
         FilmStock(name: l.name, source: .spec(l.spec), lookIntensity: l.intensity, finish: l.finish, summary: l.summary,
                   allowsSkinProtection: l.spec.monoWeights == nil, minSkinProtection: l.minSkin)
     }
+}
+
+// MARK: published look list (T2 D4)
+
+/// Engine identity the host app checks its stock catalog against (`minEngine` <= `engineVersion`).
+public enum RawCore {
+    public static let engineVersion = "0.2.0"
+}
+
+/// A look a host app may name in a stock (`RenderSettings.stock` + `lookArguments`), with its defaults.
+public struct SupportedLook: Equatable, Sendable {
+    public var id: String
+    public var summary: String
+    public var isMonochrome: Bool
+    public var defaultIntensity: Float
+    public var defaultFinish: FilmFinish
+    public var allowsSkinProtection: Bool
+
+    public init(id: String, summary: String, isMonochrome: Bool, defaultIntensity: Float, defaultFinish: FilmFinish,
+                allowsSkinProtection: Bool) {
+        self.id = id; self.summary = summary; self.isMonochrome = isMonochrome; self.defaultIntensity = defaultIntensity
+        self.defaultFinish = defaultFinish; self.allowsSkinProtection = allowsSkinProtection
+    }
+}
+
+/// The listed generated looks (`FilmLooks2026.looks`): trial and retired looks are not supported.
+public enum SupportedLooks {
+    public static let all: [SupportedLook] = zip(FilmLooks2026.looks, FilmLooks2026.stocks).map { l, s in
+        SupportedLook(id: s.name, summary: s.summary, isMonochrome: l.spec.monoWeights != nil, defaultIntensity: s.lookIntensity,
+                      defaultFinish: s.finish, allowsSkinProtection: s.allowsSkinProtection)
+    }
+
+    public static func named(_ id: String) -> SupportedLook? { all.first { $0.id == id } }
 }
 
 // MARK: sky hold gated by the sky mask (plugin `skyMask`, Developer.finish)
