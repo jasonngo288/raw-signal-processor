@@ -197,7 +197,10 @@ final class FilmLooksTests: XCTestCase {
             let others = outs.enumerated().filter { $0.offset != i }.map { ($0.element.0, dist(a.1, $0.element.1)) }.sorted { $0.1 < $1.1 }
             print(String(format: "[distinct] %@ nearest %@ %.2f, then %@ %.2f; vs base %.2f", a.0, others[0].0, others[0].1, others[1].0, others[1].1,
                          dist(a.1, patches.map(lab))))
-            if FilmLooks2026.trialNames.contains(a.0) { XCTAssertGreaterThanOrEqual(others[0].1, 2, "\(a.0) too close to \(others[0].0)") }
+            // Trial candidates and the v2 looks of RSP 0.3.0 (tech-lead R2) must sit >= 2 from every other look.
+            if FilmLooks2026.trialNames.contains(a.0) || ["goldenDay2", "coolFade2", "softPortrait2"].contains(a.0) {
+                XCTAssertGreaterThanOrEqual(others[0].1, 2, "\(a.0) too close to \(others[0].0)")
+            }
         }
     }
 }

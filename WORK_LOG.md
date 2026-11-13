@@ -52,6 +52,11 @@ Contract: MoodRoll `.orchestration/film-lab/RSP_030_SIGNOFF.md` (C1-C11, §5 tes
 - **(h) `RawCore.engineVersion` "0.3.0"** (`testSupportedLooksAndEngineVersion`). Not tagged, not pushed: tag and push wait
   for the C10 renders (film-lab), the tech-lead diff review and the User's OK. Not verified: device (C11), the C10 acceptance
   renders, CI (macos-15).
+- **(i) Breeze retune + R2** (User, 2026-11-13; film-lab C10 §4): `coolFade2` shadowDesat 0 -> 0.1 (the lab prototype
+  inherited it from trialCoolFade), contrast 1.0 -> 1.06, shadowTint (-0.014, -0.008) -> (-0.017, -0.008); nothing else.
+  `looks-v2-0.3.0.json`: only the coolFade2 LUT and Breeze pixel hash change; Marigold, Blush and the 18-look guard are
+  unchanged. `testLooksDistinctFromNeighbours` now asserts nearest >= 2.0 for the 3 v2 looks (tech-lead R2); shadowDesat
+  alone gave 1.97, so it needed the retune.
 
 ## 2026-11-11 — RR roll-stock grain re-tuned for the filmDevelop decode
 - **What** (`RollStocks.swift`, grain only; note `.orchestration/looks/RR_GRAIN_2026-11-11.md`):

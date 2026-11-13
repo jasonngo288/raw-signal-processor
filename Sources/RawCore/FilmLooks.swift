@@ -335,9 +335,9 @@ public enum FilmLooks2026 {
                          .init(245, width: 40, shift: -10, chroma: 1.15)] },
          0.85, FilmFinish(grainAmount: 0.4, grainSize: 0.07, halationAmount: 0.1, halationThreshold: 0.9, halationRadius: 0.4, vignette: 0.04), nil),
         ("coolFade2", "cool green-teal faded 400: matte lifted blacks, even contrast, teal shadows, muted greens, held skies, medium grain",
-         spec { $0.temperatureK = 5300; $0.tint = -3; $0.black = 0.04; $0.contrast = 1.0; $0.pivot = 0.5; $0.shoulder = 0.84; $0.white = 0.96
-             $0.saturation = 0.9; $0.highlightDesat = 0.3; $0.density = 0.04; $0.skyHold = 0.8
-             $0.shadowTint = SIMD2(-0.014, -0.008); $0.highlightTint = SIMD2(0.0, 0.004); $0.vibrance = 0; $0.neutralDrift = 0.025
+         spec { $0.temperatureK = 5300; $0.tint = -3; $0.black = 0.04; $0.contrast = 1.06; $0.pivot = 0.5; $0.shoulder = 0.84; $0.white = 0.96
+             $0.saturation = 0.9; $0.highlightDesat = 0.3; $0.shadowDesat = 0.1; $0.density = 0.04; $0.skyHold = 0.8   // Breeze retune (C10 §4, User 2026-11-13): shadowDesat 0.1, contrast 1.06, shadow tint -0.017
+             $0.shadowTint = SIMD2(-0.017, -0.008); $0.highlightTint = SIMD2(0.0, 0.004); $0.vibrance = 0; $0.neutralDrift = 0.025
              $0.bands = [.init(25, width: 30, shift: -4, chroma: 0.95), .init(42, width: 28, shift: 1, chroma: 1.4, lightness: 0.02),
                          .init(100, width: 35, shift: 4, chroma: 0.75), .init(140, width: 45, shift: 10, chroma: 0.85, lightness: -0.02),
                          .init(205, width: 30, shift: 0, chroma: 1.1), .init(245, width: 40, shift: -22, chroma: 1.15, lightness: -0.02)] },
