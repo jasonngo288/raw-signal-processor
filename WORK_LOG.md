@@ -39,6 +39,9 @@ Contract: MoodRoll `.orchestration/film-lab/RSP_030_SIGNOFF.md` (C1-C11, §5 tes
   Note for the tech-lead: because f is normalised to f(1) = 1, the gain below the knee is G / raw(1), not G: x2.05 instead
   of x2 at D 1.0, x1.50 instead of x1.37 for a +0.45 bias alone. The prototype measured with this curve, so it is kept.
   Unverified: device output (C11), highlightRecovery stacking (C10), the S1-S4 acceptance renders (film-lab, C10).
+- **(f) `LookArguments.Grain.isoV2(scale:)`** (JSON `{"isoV2":{"scale":1}}`) and `RollStock.grainV2(iso:)`, the L12 tiers
+  <130 0.22/0.065, <180 0.26/0.075, <300 0.33/0.090, <600 0.46/0.120, >=600 0.62/0.150 (by box ISO; 800T uses the 800 tier).
+  Same checks as `.iso` (needs iso, scale 0...2). The old `.iso` table is unchanged. `GrainV2Tests` 4/4.
 
 ## 2026-11-11 — RR roll-stock grain re-tuned for the filmDevelop decode
 - **What** (`RollStocks.swift`, grain only; note `.orchestration/looks/RR_GRAIN_2026-11-11.md`):

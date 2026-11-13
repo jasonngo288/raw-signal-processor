@@ -54,6 +54,18 @@ public struct RollStock: Equatable, Sendable {
         }
     }
 
+    /// Grain table v2 (RSP 0.3.0, MoodRoll LINEUP_V2 L12 tiers): coarser and stronger than `grain(iso:tungsten:)`, which
+    /// stays unchanged for the 0.1.0 baseline. By box ISO only; a tungsten stock uses the tier of its ISO (800T = 800).
+    public static func grainV2(iso: Int) -> (amount: Float, size: Float) {
+        switch iso {
+        case ..<130: return (0.22, 0.065)
+        case ..<180: return (0.26, 0.075)
+        case ..<300: return (0.33, 0.090)
+        case ..<600: return (0.46, 0.120)
+        default:     return (0.62, 0.150)
+        }
+    }
+
     /// Layer-1 arguments on top of `look` (T2 D2): intensity, ISO, grain, decode character, light leak. `stock` is
     /// `FilmStock.resolve(look:arguments:)`, the same merge an app catalog entry goes through.
     public var arguments: LookArguments = LookArguments()
@@ -150,10 +162,12 @@ extension FilmLooks2026 {
 /// JSON shape (synthesised Codable): `{"intensity":0.85,"iso":400,"grain":{"iso":{"scale":0.8}},"develop":"auto"}`.
 public struct LookArguments: Codable, Equatable, Sendable {
     /// Film grain. `.iso` takes amount and size from `RollStock.grain(iso:tungsten:)` (needs `iso`) and multiplies the
-    /// amount by `scale`; `.explicit` sets both.
+    /// amount by `scale`; `.isoV2` (RSP 0.3.0, JSON `{"isoV2":{"scale":1}}`) does the same from `RollStock.grainV2(iso:)`;
+    /// `.explicit` sets both.
     public enum Grain: Codable, Equatable, Sendable {
         case iso(scale: Float)
         case explicit(amount: Float, size: Float)
+        case isoV2(scale: Float)
     }
     /// Halation replacing the look's (`FilmFinish` units).
     public struct Halation: Codable, Equatable, Sendable {
@@ -227,6 +241,11 @@ extension FilmStock {
             finish.grainAmount = g.amount * scale; finish.grainSize = g.size
         case .explicit(let amount, let size)?:
             finish.grainAmount = amount; finish.grainSize = size
+        case .isoV2(let scale)?:
+            guard let iso = a.iso else { throw bad("grain .isoV2 needs iso") }
+            guard LookArguments.grainScaleRange.contains(scale) else { throw bad("grain scale must be in 0...2") }
+            let g = RollStock.grainV2(iso: iso)
+            finish.grainAmount = g.amount * scale; finish.grainSize = g.size
         }
         if let h = a.halation {
             finish.halationAmount = h.amount; finish.halationThreshold = h.threshold; finish.halationRadius = h.radius
