@@ -22,6 +22,12 @@ Contract: MoodRoll `.orchestration/film-lab/RSP_030_SIGNOFF.md` (C1-C11, §5 tes
   0 `lut`, 0 `pixels` (same macOS 15.2 24C101 arm64 and USER_mooncake.dng as the file, so pixels were compared). Then
   `RSP_WRITE_BASELINE=1` into `Fixtures/rollstocks-0.3.0-baseline.json` (`engine` "0.3.0"): all 19 `lut` and `pixels`
   equal to 0.1.0, and each `fields` line differs only in its `source=` part. The 0.1.0 file is deleted.
+- **(c) C5 `LookSpec.vibrance` / `vibranceSkin`** (default 0 / 0.5): chroma x (1 + v (1 - min(C/0.25, 1))^2), skin hues
+  (OKLCh 52 +- 22 deg) at `vibranceSkin` of the gain (raised cosine). Placed as the film-lab prototype diff does (C5): after the
+  hue bands' hue shift, on the input chroma, before band chroma scale, band lightness, density and tonal saturation (the
+  prototype's §2/§5.B text, "before the hue bands", is wrong; the skin numbers were measured with this placement).
+  v = 0 skips the branch. `VibranceTests` B(1)-(5): v 0 identical LUT for every look whatever vibranceSkin is, grey drift
+  unchanged, low chroma gains more than high, hue <= 0.5 deg up to v 0.5, in gamut and monotone greys; guard still green.
 
 ## 2026-11-11 — RR roll-stock grain re-tuned for the filmDevelop decode
 - **What** (`RollStocks.swift`, grain only; note `.orchestration/looks/RR_GRAIN_2026-11-11.md`):

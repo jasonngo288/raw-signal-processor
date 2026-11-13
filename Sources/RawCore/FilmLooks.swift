@@ -54,6 +54,13 @@ public struct LookSpec: Equatable, Sendable {
     /// FilmLooksTests.testOffGridInterpolationError), 33³ is plenty for mono.
     public var cubeSize: Int { monoWeights == nil ? 65 : 33 }
     public var skinTolerance: Float = 8      // max skin hue shift (degrees) before skin protection
+    /// Vibrance (RSP 0.3.0; 0 = off, the branch is skipped, so the LUT is bit-identical): chroma × (1 + vibrance ·
+    /// (1 − min(C / 0.25, 1))²), so low-chroma colours gain more than saturated ones. Placement (sign-off C5, as the
+    /// prototype measured it): after the hue bands' hue shift, on the input chroma, before the band chroma scale, band
+    /// lightness, density and tonal saturation. Skin hues (OKLCh 52 ± 22°) get `vibranceSkin` of the gain at the centre,
+    /// with a raised-cosine edge.
+    public var vibrance: Float = 0
+    public var vibranceSkin: Float = 0.5
 
     public init() {}
 
@@ -111,6 +118,12 @@ public struct LookSpec: Equatable, Sendable {
             light *= 1 + b.lightness * w
         }
         h += shift
+        if vibrance != 0 {
+            let w = pow(1 - min(ch / 0.25, 1), 2)
+            var hd = abs(h - 52).truncatingRemainder(dividingBy: 360); if hd > 180 { hd = 360 - hd }
+            let sk = hd < 22 ? 1 - (1 - vibranceSkin) * 0.5 * (1 + cos(.pi * hd / 22)) : 1
+            ch *= 1 + vibrance * w * sk
+        }
         let chromaWeight = min(ch / 0.05, 1)
         lab.x *= (1 + (light - 1) * chromaWeight) * (1 - density * min(ch / 0.2, 1))
         let tonal = saturation * (1 - highlightDesat * L * L * L) * (1 - shadowDesat * (1 - L) * (1 - L))
