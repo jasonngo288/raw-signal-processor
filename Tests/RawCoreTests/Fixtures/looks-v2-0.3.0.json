@@ -1,0 +1,39 @@
+{
+  "engine" : "0.3.0",
+  "environment" : "Version 15.2 (Build 24C101) arm64",
+  "fixture" : "USER_mooncake.dng",
+  "looks" : [
+    {
+      "look" : "goldenDay2",
+      "lut" : "65:63b60148be018294"
+    },
+    {
+      "look" : "coolFade2",
+      "lut" : "65:e1dfd28b5f09e442"
+    },
+    {
+      "look" : "softPortrait2",
+      "lut" : "65:8befcba5124d5344"
+    }
+  ],
+  "stocks" : [
+    {
+      "arguments" : "{\"develop\":\"auto\",\"grain\":{\"explicit\":{\"amount\":0.32,\"size\":0.085}},\"halation\":{\"amount\":0.3,\"radius\":1,\"threshold\":0.75},\"intensity\":0.9,\"iso\":200,\"stockId\":\"rr-vang-200\",\"vignette\":0.14}",
+      "look" : "goldenDay2",
+      "name" : "Marigold",
+      "pixels" : "f2164f7719afb2e8"
+    },
+    {
+      "arguments" : "{\"develop\":\"auto\",\"grain\":{\"explicit\":{\"amount\":0.44,\"size\":0.115}},\"halation\":{\"amount\":0.12,\"radius\":0.8,\"threshold\":0.82},\"intensity\":1,\"iso\":400,\"stockId\":\"rr-gio-400\",\"vignette\":0.12}",
+      "look" : "coolFade2",
+      "name" : "Breeze",
+      "pixels" : "8b9ef98b164b5e66"
+    },
+    {
+      "arguments" : "{\"develop\":\"portrait\",\"grain\":{\"explicit\":{\"amount\":0.26,\"size\":0.075}},\"halation\":{\"amount\":0.1,\"radius\":0.9,\"threshold\":0.8},\"intensity\":1,\"iso\":160,\"stockId\":\"rr-da-mem-160\",\"vignette\":0.1}",
+      "look" : "softPortrait2",
+      "name" : "Blush",
+      "pixels" : "ebd6899fe428055b"
+    }
+  ]
+}

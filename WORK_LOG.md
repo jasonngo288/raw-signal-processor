@@ -42,6 +42,13 @@ Contract: MoodRoll `.orchestration/film-lab/RSP_030_SIGNOFF.md` (C1-C11, §5 tes
 - **(f) `LookArguments.Grain.isoV2(scale:)`** (JSON `{"isoV2":{"scale":1}}`) and `RollStock.grainV2(iso:)`, the L12 tiers
   <130 0.22/0.065, <180 0.26/0.075, <300 0.33/0.090, <600 0.46/0.120, >=600 0.62/0.150 (by box ISO; 800T uses the 800 tier).
   Same checks as `.iso` (needs iso, scale 0...2). The old `.iso` table is unchanged. `GrainV2Tests` 4/4.
+- **(g) C4 three v2 looks** `goldenDay2`, `coolFade2`, `softPortrait2` (values of `look_v2_specs_final.json` = prototype
+  §5.A; vibrance 0.10 / 0 / 0.10, L21), appended to `FilmLooks2026.looks`; intensity and finish copy goldenDay /
+  trialCoolFade / softPortrait. `tungstenGlow2` is not added (L19). 18 -> 21 names and `SupportedLooks`.
+  `FilmLooksTests` all green on the 21 (skin, white/black/gamut, steep slope, off-grid interpolation: max ΔE00 1.24 / 1.03 /
+  0.47). Nearest neighbours (chart ΔE00): goldenDay2 3.06 (goldenDay), coolFade2 2.02 (trialCoolFade), softPortrait2 2.64
+  (softPortrait). C8 part 2: `Fixtures/looks-v2-0.3.0.json` + `LookV2Tests`: the 3 LUT fingerprints and pixel hashes of
+  Marigold / Breeze / Blush as look + the MoodRoll catalog arguments (L16 values), on USER_mooncake, macOS 15.2 arm64.
 
 ## 2026-11-11 — RR roll-stock grain re-tuned for the filmDevelop decode
 - **What** (`RollStocks.swift`, grain only; note `.orchestration/looks/RR_GRAIN_2026-11-11.md`):

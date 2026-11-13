@@ -7,7 +7,7 @@ final class FilmLooksTests: XCTestCase {
     let trademarks = ["kodak", "kodachrome", "portra", "ektar", "ektacolor", "fuji", "fujifilm", "superia", "velvia", "provia",
                       "ilford", "polaroid", "cinestill", "chrome64", "trix", "agfa", "vsco", "dazz"]
 
-    /// The 18 listed looks, the trial candidates (none since T2) and the retired looks: every LUT check below runs on all of them.
+    /// The 21 listed looks, the trial candidates (none since T2) and the retired looks: every LUT check below runs on all of them.
     var allLooks: [(name: String, summary: String, spec: LookSpec, intensity: Float, finish: FilmFinish, minSkin: Float?)] {
         FilmLooks2026.looks + FilmLooks2026.trialLooks + FilmLooks2026.retiredLooks
     }
@@ -17,7 +17,7 @@ final class FilmLooksTests: XCTestCase {
     }
 
     func testGeneratedLooksGenericNames() throws {
-        XCTAssertEqual(FilmLooks2026.names.count, 18)   // 10 + the 8 trial looks promoted by T2 (2026-11-12); cinemaNegative retired 2026-11-10
+        XCTAssertEqual(FilmLooks2026.names.count, 21)   // 10 + the 8 trial looks promoted by T2 (2026-11-12) + 3 v2 looks (0.3.0); cinemaNegative retired 2026-11-10
         for n in FilmLooks2026.names { XCTAssertNotNil(FilmStock.named(n), n) }
         for l in allLooks {
             let words = (l.name + " " + l.summary).lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)

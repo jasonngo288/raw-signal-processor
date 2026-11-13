@@ -192,8 +192,8 @@ public enum OKLab {
     }
 }
 
-/// The 2026 set: 18 listed generated looks (the 10 of 2026-11-10 + the 8 promoted trial looks, T2 2026-11-12). Every
-/// look is generated in code; there is no bundled LUT library.
+/// The 2026 set: 21 listed generated looks (the 10 of 2026-11-10 + the 8 promoted trial looks, T2 2026-11-12, + the 3 v2
+/// looks of RSP 0.3.0). Every look is generated in code; there is no bundled LUT library.
 public enum FilmLooks2026 {
     // OKLCh hue landmarks (degrees): red ≈ 25, skin ≈ 40–60 (ColorChecker skins ≈ 41), orange ≈ 55, yellow ≈ 100, green ≈ 140, cyan ≈ 200, blue ≈ 260.
     static func spec(_ f: (inout LookSpec) -> Void) -> LookSpec { var s = LookSpec(); f(&s); return s }
@@ -322,6 +322,34 @@ public enum FilmLooks2026 {
              $0.bands = [.init(25, width: 30, chroma: 1.06, lightness: -0.04), .init(140, width: 40, shift: 2, chroma: 0.92, lightness: -0.02),
                          .init(255, width: 40, shift: -4, chroma: 1.05, lightness: -0.02)] },
          0.85, FilmFinish(grainAmount: 0.22, grainSize: 0.055, vignette: 0.03), nil),
+        // Look v2 (RSP 0.3.0; MoodRoll LOOK_V2_PROTOTYPE_2026-11-13 §5.A, `look_v2_specs_final.json`, LINEUP_V2 L19/L21):
+        // new ids, the base looks above stay frozen (D6). Intensity and finish copy the base look (goldenDay,
+        // trialCoolFade, softPortrait); a catalog sets its own through LookArguments. Sky bands at the ×1.15 cap with
+        // skyHold 0.8 (L15). tungstenGlow2 is deferred (L19, sign-off C4).
+        ("goldenDay2", "golden everyday film, deeper: warm gold light, clean deep blacks, firm contrast, amber-olive foliage, held skies, visible grain",
+         spec { $0.temperatureK = 6300; $0.tint = 1; $0.black = 0.006; $0.contrast = 1.22; $0.pivot = 0.5; $0.shoulder = 0.84; $0.white = 0.95
+             $0.saturation = 1.0; $0.highlightDesat = 0.45; $0.density = 0.05; $0.skyHold = 0.8
+             $0.shadowTint = SIMD2(0.003, 0.006); $0.highlightTint = SIMD2(0.003, 0.008); $0.vibrance = 0.10; $0.neutralDrift = 0.028
+             $0.bands = [.init(28, width: 30, shift: 0, chroma: 0.95, lightness: -0.04), .init(52, width: 28, shift: 0, chroma: 0.85, lightness: 0.02),
+                         .init(100, width: 40, shift: -8, chroma: 1.32), .init(140, width: 45, shift: -16, chroma: 1.08, lightness: -0.03),
+                         .init(245, width: 40, shift: -10, chroma: 1.15)] },
+         0.85, FilmFinish(grainAmount: 0.4, grainSize: 0.07, halationAmount: 0.1, halationThreshold: 0.9, halationRadius: 0.4, vignette: 0.04), nil),
+        ("coolFade2", "cool green-teal faded 400: matte lifted blacks, even contrast, teal shadows, muted greens, held skies, medium grain",
+         spec { $0.temperatureK = 5300; $0.tint = -3; $0.black = 0.04; $0.contrast = 1.0; $0.pivot = 0.5; $0.shoulder = 0.84; $0.white = 0.96
+             $0.saturation = 0.9; $0.highlightDesat = 0.3; $0.density = 0.04; $0.skyHold = 0.8
+             $0.shadowTint = SIMD2(-0.014, -0.008); $0.highlightTint = SIMD2(0.0, 0.004); $0.vibrance = 0; $0.neutralDrift = 0.025
+             $0.bands = [.init(25, width: 30, shift: -4, chroma: 0.95), .init(42, width: 28, shift: 1, chroma: 1.4, lightness: 0.02),
+                         .init(100, width: 35, shift: 4, chroma: 0.75), .init(140, width: 45, shift: 10, chroma: 0.85, lightness: -0.02),
+                         .init(205, width: 30, shift: 0, chroma: 1.1), .init(245, width: 40, shift: -22, chroma: 1.15, lightness: -0.02)] },
+         0.85, FilmFinish(grainAmount: 0.42, grainSize: 0.07, vignette: 0.08), nil),
+        ("softPortrait2", "soft pink-peach pastel portrait: lifted blacks, low contrast, warm-pink highlights, sage greens, held skies, fine grain",
+         spec { $0.temperatureK = 5800; $0.tint = 7; $0.black = 0.05; $0.contrast = 0.84; $0.pivot = 0.5; $0.shoulder = 0.86; $0.white = 0.97
+             $0.saturation = 0.95; $0.highlightDesat = 0.3; $0.density = 0.04; $0.skyHold = 0.8
+             $0.shadowTint = SIMD2(0.008, 0.0); $0.highlightTint = SIMD2(0.008, 0.004); $0.vibrance = 0.10; $0.neutralDrift = 0.02
+             $0.bands = [.init(25, width: 25, shift: 0, chroma: 1.0), .init(52, width: 30, shift: 1, chroma: 0.85, lightness: 0.03),
+                         .init(100, width: 35, shift: -4, chroma: 0.95), .init(140, width: 40, shift: -8, chroma: 0.9, lightness: -0.02),
+                         .init(205, width: 35, shift: 0, chroma: 0.9), .init(245, width: 40, shift: -8, chroma: 1.1, lightness: -0.02)] },
+         0.85, FilmFinish(grainAmount: 0.25, grainSize: 0.06, vignette: 0.05), nil),
     ]
 
     public static var names: [String] { looks.map(\.name) }
