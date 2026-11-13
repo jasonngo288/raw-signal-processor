@@ -7,7 +7,14 @@ Contract: MoodRoll `.orchestration/film-lab/RSP_030_SIGNOFF.md` (C1-C11, §5 tes
 `LOOK_V2_PROTOTYPE_2026-11-13.md` §5. One commit per sub-step; `swift test` green after each.
 - **(a) C8 guard fixture** on the unchanged 0.2.0 code: `Fixtures/looks-0.2.0-guard.json`, LUT fingerprints (size + FNV-1a
   of the float bits, title ignored) of the 18 shipped looks; `LookGuardTests` keeps them equal on every later commit (D6).
-  Evidence: written with `RSP_WRITE_LOOK_GUARD=1`, then `swift test --filter LookGuardTests` 1/1.
+  Evidence: written with `RSP_WRITE_LOOK_GUARD=1`, then `swift test --filter LookGuardTests` 1/1; full `swift test` 120/120.
+- **(b) C9 LRU caches:** `LUTLRU` (Look.swift); `LookSpecCache` and `SkyHoldLUTCache` capacity 4, `LogLookPlugin.Cache` 4;
+  same lock, same keys. A 65³ cube is ~4.4 MB, so the worst case is ~18 MB per cache instead of ~190 MB. A develop uses
+  two SkyHold entries per held look; sample generation over many stocks rebuilds LUTs (tens of ms each, accepted).
+  `CacheLRUTests`: 5th insert evicts the LRU entry, a hit refreshes, an evicted look rebuilds byte-identically.
+  Cost seen in tests: the pairwise stock loops in `RollStocksTests` rebuilt a 65³ cube per pair (debug build, ~2.3 s each;
+  the suite went from 11 min to ~2 h), so `chartDistance` keeps a test-local LUT copy. A real develop of one stock is
+  unchanged (cold build once, then cache hits).
 
 ## 2026-11-11 — RR roll-stock grain re-tuned for the filmDevelop decode
 - **What** (`RollStocks.swift`, grain only; note `.orchestration/looks/RR_GRAIN_2026-11-11.md`):

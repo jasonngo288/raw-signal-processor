@@ -382,17 +382,19 @@ public enum SupportedLooks {
 
 // MARK: sky hold gated by the sky mask (plugin `skyMask`, Developer.finish)
 
-/// Look LUTs without the sky hold, built once per (name, size). The held and the unheld look differ only on bright blue
-/// pixels; the mask decides per pixel which one the image gets.
+/// Look LUTs without the sky hold, built once per (name, size), kept in a 4-entry LRU (C9). The held and the unheld look
+/// differ only on bright blue pixels; the mask decides per pixel which one the image gets.
 final class SkyHoldLUTCache: @unchecked Sendable {
+    static let capacity = 4
     static let shared = SkyHoldLUTCache()
     private let lock = NSLock()
-    private var items: [String: CubeLUT] = [:]
+    private var items: LUTLRU
+    init(capacity: Int = SkyHoldLUTCache.capacity) { items = LUTLRU(capacity: capacity) }
+    /// Cached keys, least recently used first (tests).
+    var keys: [String] { lock.lock(); defer { lock.unlock() }; return items.order }
     func lut(_ key: String, _ make: () -> CubeLUT) -> CubeLUT {
         lock.lock(); defer { lock.unlock() }
-        if let l = items[key] { return l }
-        let l = make(); items[key] = l
-        return l
+        return items.value(key, make)
     }
 }
 

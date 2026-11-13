@@ -76,6 +76,15 @@ final class RollStocksTests: XCTestCase {
 
     /// Mean CIEDE2000 between two stocks over the 24 ColorChecker patches and 9 greys, each at its own intensity
     /// (grain not included: it is the same at the same ISO).
+    /// The pairwise loops ask for 19 stock LUTs ~340 times; the engine cache is a 4-entry LRU (RSP 0.3.0, C9), so the
+    /// tests keep their own copy instead of rebuilding a 65³ cube per pair.
+    nonisolated(unsafe) static var lutMemo: [String: CubeLUT] = [:]
+    static func lut(_ r: RollStock) -> CubeLUT {
+        if let l = lutMemo[r.id] { return l }
+        let l = r.stock.lut(); lutMemo[r.id] = l
+        return l
+    }
+
     func chartDistance(_ a: RollStock, _ b: RollStock) -> Double {
         let patches: [SIMD3<Float>] = ColorChecker.referenceLabD50.map { lab in
             let l = ColorChecker.referenceLinearP3(lab)
@@ -85,7 +94,7 @@ final class RollStocksTests: XCTestCase {
             let l = ColorMath.lab(r: Double(Preset26.decode(c.x)), g: Double(Preset26.decode(c.y)), b: Double(Preset26.decode(c.z)))
             return (l.l, l.a, l.b)
         }
-        let la = a.stock.lut(), lb = b.stock.lut()
+        let la = Self.lut(a), lb = Self.lut(b)
         return patches.map { p in
             let x = lab(p + (la.apply(p) - p) * a.intensity), y = lab(p + (lb.apply(p) - p) * b.intensity)
             return ColorMath.deltaE2000(x.0, x.1, x.2, y.0, y.1, y.2)

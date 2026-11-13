@@ -269,14 +269,17 @@ public struct LogLookPlugin: DevelopPlugin {
     public let summary = "apply LOG .cube looks on a scene-linear, log-encoded decode instead of the display base"
     public init() {}
 
+    /// Composite cubes, 4-entry LRU (C9).
     final class Cache: @unchecked Sendable {
+        static let capacity = 4
         static let shared = Cache()
         private let lock = NSLock()
-        private var items: [String: CubeLUT] = [:]
+        private var items: LUTLRU
+        init(capacity: Int = Cache.capacity) { items = LUTLRU(capacity: capacity) }
+        var keys: [String] { lock.lock(); defer { lock.unlock() }; return items.order }
         func get(_ k: String, _ make: () -> CubeLUT) -> CubeLUT {
             lock.lock(); defer { lock.unlock() }
-            if let c = items[k] { return c }
-            let c = make(); items[k] = c; return c
+            return items.value(k, make)
         }
     }
 

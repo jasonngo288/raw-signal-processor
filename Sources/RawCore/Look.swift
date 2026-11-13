@@ -404,18 +404,57 @@ public struct FilmStock: Equatable, Sendable {
     }
 }
 
-/// Generated looks are built once per (name, size): a 33³ OKLab look costs a few ms to generate.
+/// Small least-recently-used store of LUTs (RSP 0.3.0, sign-off C9). Not thread-safe: the owning cache holds its lock.
+/// A 65³ cube is about 4.4 MB, so an unbounded cache over 21 looks (held and unheld) could reach about 190 MB.
+struct LUTLRU {
+    let capacity: Int
+    /// Keys, least recently used first.
+    private(set) var order: [String] = []
+    private var items: [String: CubeLUT] = [:]
+
+    init(capacity: Int) { self.capacity = max(capacity, 1) }
+
+    /// A hit makes the key the most recently used.
+    mutating func get(_ key: String) -> CubeLUT? {
+        guard let l = items[key] else { return nil }
+        touch(key)
+        return l
+    }
+
+    /// Inserts (or replaces) and evicts the least recently used keys beyond `capacity`.
+    mutating func put(_ key: String, _ lut: CubeLUT) {
+        items[key] = lut
+        touch(key)
+        while order.count > capacity { items[order.removeFirst()] = nil }
+    }
+
+    /// `get`, else build with `make` and `put`.
+    mutating func value(_ key: String, _ make: () -> CubeLUT) -> CubeLUT {
+        if let l = get(key) { return l }
+        let l = make()
+        put(key, l)
+        return l
+    }
+
+    private mutating func touch(_ key: String) {
+        if let i = order.firstIndex(of: key) { order.remove(at: i) }
+        order.append(key)
+    }
+}
+
+/// Generated looks are built once per (name, size) and kept in a 4-entry LRU: a 65³ OKLab look costs tens of ms to
+/// generate, and an evicted look rebuilds to the same values.
 final class LookSpecCache: @unchecked Sendable {
+    static let capacity = 4
     static let shared = LookSpecCache()
     private let lock = NSLock()
-    private var items: [String: CubeLUT] = [:]
+    private var items: LUTLRU
+    init(capacity: Int = LookSpecCache.capacity) { items = LUTLRU(capacity: capacity) }
+    /// Cached keys, least recently used first (tests).
+    var keys: [String] { lock.lock(); defer { lock.unlock() }; return items.order }
     func lut(_ name: String, _ spec: LookSpec, size: Int) -> CubeLUT {
         lock.lock(); defer { lock.unlock() }
-        let key = "\(name)|\(size)"
-        if let l = items[key] { return l }
-        let l = spec.lut(size: size, title: name)
-        items[key] = l
-        return l
+        return items.value("\(name)|\(size)") { spec.lut(size: size, title: name) }
     }
 }
 
