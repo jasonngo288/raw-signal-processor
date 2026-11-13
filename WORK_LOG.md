@@ -49,6 +49,9 @@ Contract: MoodRoll `.orchestration/film-lab/RSP_030_SIGNOFF.md` (C1-C11, §5 tes
   0.47). Nearest neighbours (chart ΔE00): goldenDay2 3.06 (goldenDay), coolFade2 2.02 (trialCoolFade), softPortrait2 2.64
   (softPortrait). C8 part 2: `Fixtures/looks-v2-0.3.0.json` + `LookV2Tests`: the 3 LUT fingerprints and pixel hashes of
   Marigold / Breeze / Blush as look + the MoodRoll catalog arguments (L16 values), on USER_mooncake, macOS 15.2 arm64.
+- **(h) `RawCore.engineVersion` "0.3.0"** (`testSupportedLooksAndEngineVersion`). Not tagged, not pushed: tag and push wait
+  for the C10 renders (film-lab), the tech-lead diff review and the User's OK. Not verified: device (C11), the C10 acceptance
+  renders, CI (macos-15).
 
 ## 2026-11-11 — RR roll-stock grain re-tuned for the filmDevelop decode
 - **What** (`RollStocks.swift`, grain only; note `.orchestration/looks/RR_GRAIN_2026-11-11.md`):
