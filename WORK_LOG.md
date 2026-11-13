@@ -2,6 +2,13 @@
 
 Newest first. Each entry: what changed, why, evidence, what is NOT verified yet.
 
+## 2026-11-13 — RawCore 0.3.0 (branch `feature/rsp-0.3.0`, from tag 0.2.0; not tagged)
+Contract: MoodRoll `.orchestration/film-lab/RSP_030_SIGNOFF.md` (C1-C11, §5 tests, §6 step 2 a-h) and
+`LOOK_V2_PROTOTYPE_2026-11-13.md` §5. One commit per sub-step; `swift test` green after each.
+- **(a) C8 guard fixture** on the unchanged 0.2.0 code: `Fixtures/looks-0.2.0-guard.json`, LUT fingerprints (size + FNV-1a
+  of the float bits, title ignored) of the 18 shipped looks; `LookGuardTests` keeps them equal on every later commit (D6).
+  Evidence: written with `RSP_WRITE_LOOK_GUARD=1`, then `swift test --filter LookGuardTests` 1/1.
+
 ## 2026-11-11 — RR roll-stock grain re-tuned for the filmDevelop decode
 - **What** (`RollStocks.swift`, grain only; note `.orchestration/looks/RR_GRAIN_2026-11-11.md`):
   - `RollStock.grain`: ISO 400 amount 0.38 -> 0.35, ISO 200 0.28 -> 0.27. 100 / 160 / 800 / 800T and all sizes are unchanged.

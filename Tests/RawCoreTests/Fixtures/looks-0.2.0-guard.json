@@ -1,0 +1,77 @@
+{
+  "engine" : "0.2.0",
+  "entries" : [
+    {
+      "look" : "softPortrait",
+      "lut" : "65:8244b7a7545f2f5e"
+    },
+    {
+      "look" : "goldenDay",
+      "lut" : "65:5c3612ccf9f85048"
+    },
+    {
+      "look" : "vividFine",
+      "lut" : "65:ddfcb2f359fcf3f5"
+    },
+    {
+      "look" : "pastelCool",
+      "lut" : "65:4bd5329e43dbf173"
+    },
+    {
+      "look" : "everydayGreen",
+      "lut" : "65:eb6ed0534a02f6c5"
+    },
+    {
+      "look" : "tungstenGlow",
+      "lut" : "65:cab1cff01fc274bc"
+    },
+    {
+      "look" : "mutedChrome",
+      "lut" : "65:3c81720cb62a6dba"
+    },
+    {
+      "look" : "monoSoft",
+      "lut" : "33:1ca361b563da0a44"
+    },
+    {
+      "look" : "monoPunch",
+      "lut" : "33:d913bcb0b9a67e2e"
+    },
+    {
+      "look" : "flashDigicam",
+      "lut" : "65:527158af967e423a"
+    },
+    {
+      "look" : "trialCoolFade",
+      "lut" : "65:cdb656bfaeb497cd"
+    },
+    {
+      "look" : "brightTravel",
+      "lut" : "65:fa5af4654a84bf17"
+    },
+    {
+      "look" : "warmEvening",
+      "lut" : "65:011f98ccc065fcf3"
+    },
+    {
+      "look" : "sunFade",
+      "lut" : "65:601469744f97a4fe"
+    },
+    {
+      "look" : "mapleRed",
+      "lut" : "65:5b3b3d7371777e5a"
+    },
+    {
+      "look" : "warmMuted",
+      "lut" : "65:c0d99c6b3ba0389b"
+    },
+    {
+      "look" : "naturalPortrait",
+      "lut" : "65:45e7ee9ec609208b"
+    },
+    {
+      "look" : "cleanLab",
+      "lut" : "65:c683f94b4f85a50a"
+    }
+  ]
+}
