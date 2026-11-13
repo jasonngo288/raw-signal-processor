@@ -225,6 +225,9 @@ public final class Developer: @unchecked Sendable {
     /// Stage 1: decisions, decode, plugins.afterDecode. With `auto`, a given `analysis` is used when it still fits
     /// (`Analysis.staleReason`); otherwise the file is analysed again and the recipe says why.
     public func developBase(url: URL, settings: RenderSettings, auto: Bool, scaleFactor: Float, analysis: Analysis? = nil) throws -> Base {
+        // `headroomRestoreEV` is output only (sign-off C1): only `headroom.decide` of this render may set it.
+        var settings = settings
+        settings.headroomRestoreEV = nil
         var st = settings
         var reasons: [String] = []
         var ctx: SceneContext?
@@ -233,6 +236,9 @@ public final class Developer: @unchecked Sendable {
         let active = try plugins.active(for: settings)
         var developedFor: String?
         var ran = Set<String>()   // plugins that actually did something (recipe.plugins)
+        if (settings.decodeHeadroomEV ?? 0) > 0, !active.contains(where: { $0.id == "headroom" }) {
+            reasons.append("decodeHeadroomEV set but plugin headroom is off: ignored")   // sign-off C2: no pixel changes
+        }
         if auto {
             var a: Analysis
             var reused = false

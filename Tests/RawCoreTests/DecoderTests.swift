@@ -75,7 +75,7 @@ final class DecoderTests: XCTestCase {
         var coreSettings = RenderSettings.explicit
         coreSettings.plugins = []
         let core = try dev.develop(url: url, settings: coreSettings, auto: true, scaleFactor: scale, analysis: an)
-        XCTAssertEqual(Array(full.recipe.pluginsEnabled.prefix(5)), ["highlightRecovery", "cameraMatch", "vignette", "logLook", "filmDevelop"])
+        XCTAssertEqual(Array(full.recipe.pluginsEnabled.prefix(6)), ["highlightRecovery", "headroom", "cameraMatch", "vignette", "logLook", "filmDevelop"])
         XCTAssertTrue(full.recipe.pluginsEnabled.contains("lightLeak"))
         XCTAssertEqual(full.recipe.plugins, ["highlightRecovery"], "vignette had nothing to do without a stock")
         XCTAssertEqual(core.recipe.plugins, [])

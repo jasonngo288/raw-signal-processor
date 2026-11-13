@@ -28,6 +28,17 @@ Contract: MoodRoll `.orchestration/film-lab/RSP_030_SIGNOFF.md` (C1-C11, §5 tes
   prototype's §2/§5.B text, "before the hue bands", is wrong; the skin numbers were measured with this placement).
   v = 0 skips the branch. `VibranceTests` B(1)-(5): v 0 identical LUT for every look whatever vibranceSkin is, grey drift
   unchanged, low chroma gains more than high, hue <= 0.5 deg up to v 0.5, in gamut and monotone greys; guard still green.
+- **(e) Plugin `headroom` (C1-C3, C6; ROADMAP EXTRAS row):** `RenderSettings.decodeHeadroomEV` (0...1.5, nil/0 = off,
+  in `hasOverrides` so `appleDefault` rejects it) and the output-only `headroomRestoreEV`. Registry order
+  `highlightRecovery -> headroom -> cameraMatch`, enabled by default. decide: exposure = min(bias, 0) - D, restore = D +
+  max(bias, 0) (bias = `exposure` when headroom decides; DecisionEngine and highlightRecovery never write it, tested).
+  afterDecode reads only `headroomRestoreEV`; `developBase` clears it on entry, so `auto: false` and a caller-set value are
+  no-ops. Set but unplugged: recipe line "decodeHeadroomEV set but plugin headroom is off: ignored", no pixel change.
+  `HeadroomRestore.lut(gainEV:size:)` (33³, gain quantised to 0.01 EV, 2-entry LRU) is an exact port of the film-lab
+  `LabFlags2.restoreFunc` / `restoreLUT`. `HeadroomTests` 11/11.
+  Note for the tech-lead: because f is normalised to f(1) = 1, the gain below the knee is G / raw(1), not G: x2.05 instead
+  of x2 at D 1.0, x1.50 instead of x1.37 for a +0.45 bias alone. The prototype measured with this curve, so it is kept.
+  Unverified: device output (C11), highlightRecovery stacking (C10), the S1-S4 acceptance renders (film-lab, C10).
 
 ## 2026-11-11 — RR roll-stock grain re-tuned for the filmDevelop decode
 - **What** (`RollStocks.swift`, grain only; note `.orchestration/looks/RR_GRAIN_2026-11-11.md`):

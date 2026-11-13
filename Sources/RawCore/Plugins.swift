@@ -60,8 +60,8 @@ public struct PluginRegistry: Sendable {
     }
 
     /// Everything shipped so far, all enabled by default.
-    public static let standard = PluginRegistry(available: [HighlightRecoveryPlugin(), CameraMatchPlugin(), VignettePlugin(), LogLookPlugin(), FilmDevelopPlugin(), LightLeakPlugin(), SkyMaskPlugin()],
-                                                defaultEnabled: ["highlightRecovery", "cameraMatch", "vignette", "logLook", "filmDevelop", "lightLeak", "skyMask"])
+    public static let standard = PluginRegistry(available: [HighlightRecoveryPlugin(), HeadroomPlugin(), CameraMatchPlugin(), VignettePlugin(), LogLookPlugin(), FilmDevelopPlugin(), LightLeakPlugin(), SkyMaskPlugin()],
+                                                defaultEnabled: ["highlightRecovery", "headroom", "cameraMatch", "vignette", "logLook", "filmDevelop", "lightLeak", "skyMask"])
     /// Roadmap core only.
     public static let none = PluginRegistry(available: [], defaultEnabled: [])
 
@@ -114,6 +114,38 @@ public struct HighlightRecoveryPlugin: DevelopPlugin {
             img = mapped
         }
         return (img, why)
+    }
+}
+
+/// Extra (RSP 0.3.0): decode headroom. With `settings.decodeHeadroomEV` = Δ > 0 the RAW is decoded Δ stops lower, so
+/// channels that Apple's curve would clip (a blue sky) keep their chroma, and the stops are given back in display space
+/// by `HeadroomRestore` (max-channel shoulder) before cameraMatch measures its curve. Registered between
+/// highlightRecovery and cameraMatch. The caller's `exposure` is the stock's bias, stated once and never pre-split:
+/// - decide: exposure = min(bias, 0) − Δ; `headroomRestoreEV` = Δ + max(bias, 0) (a negative bias stays in the decode,
+///   a positive one goes into the restore). cameraMatch then adds its HEIC offset as before.
+/// - afterDecode: reads only `headroomRestoreEV` (nil = no-op), never `exposure` or `decodeHeadroomEV` (sign-off C1).
+/// Δ nil or 0 = nothing happens, pixel-identical and no recipe line.
+public struct HeadroomPlugin: DevelopPlugin {
+    public let id = "headroom"
+    public let summary = "decode Δ EV lower (decodeHeadroomEV) and restore it in display space with a max-channel shoulder"
+    public init() {}
+
+    public func decide(context: SceneContext, defaults: DecodeParameters, settings: inout RenderSettings) -> [String] {
+        let d = settings.decodeHeadroomEV ?? 0
+        guard d > 0 else { return [] }
+        let bias = settings.exposure ?? 0
+        let decode = min(bias, 0) - d, restore = d + max(bias, 0)
+        settings.exposure = decode
+        settings.headroomRestoreEV = restore
+        return [String(format: "decode exposure -%.2f EV, display restore +%.2f EV (exposure bias %+.2f: decode exposure %.2f -> %.2f)",
+                       d, restore, bias, bias, decode)]
+    }
+
+    public func afterDecode(_ image: CIImage, settings st: RenderSettings, ctx: PluginRenderContext) throws -> (CIImage, [String]) {
+        guard let g = st.headroomRestoreEV, g > 0 else { return (image, []) }
+        let q = HeadroomRestore.quantised(g)
+        let out = try ctx.renderer.applyLook(HeadroomRestore.lut(gainEV: q), to: image, intensity: 1)
+        return (out, [String(format: "display restore +%.2f EV (%d³ LUT, max-channel shoulder from output %.2f)", q, HeadroomRestore.cubeSize, HeadroomRestore.kneeOut)])
     }
 }
 

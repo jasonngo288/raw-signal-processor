@@ -80,6 +80,15 @@ public struct RenderSettings: Codable, Equatable, Sendable {
     public var cameraReference: String?
     /// 0...1 strength of the cameraMatch tone curve (nil = 1). The exposure offset is always applied in full.
     public var cameraMatchStrength: Float?
+    /// Decode headroom (plugin `headroom`, RSP 0.3.0): decode this many stops lower than the render's exposure and restore
+    /// them in display space with a max-channel shoulder (`HeadroomRestore`), so channels Apple's curve would clip keep
+    /// their chroma (the sky). 0...1.5; nil or 0 = off, bit-identical. A decode parameter of the RAW file, not a look
+    /// argument (sign-off D2). The caller states only the exposure bias in `exposure`; RSP splits it.
+    public var decodeHeadroomEV: Float?
+    /// OUTPUT ONLY (sign-off C1): the display restore gain in EV that `headroom.decide` chose (Δ + the positive part of the
+    /// exposure bias). `Developer.developBase` clears it on entry, so a value the caller sets is ignored; the restore
+    /// reads only this field, so a render without `auto` (no decide) never restores.
+    public var headroomRestoreEV: Float?
 
     /// Roll position, for per-frame effects (plugin `lightLeak`). `rollID` is part of the seed; frame index is 1-based.
     /// nil index or count = the frame's place in the roll is unknown: no roll effect is drawn (and the recipe says so).
@@ -108,6 +117,7 @@ public struct RenderSettings: Codable, Equatable, Sendable {
         if let c = highlightClarity, !(0...1).contains(c) { throw RawCoreError.invalidSettings("highlightClarity must be in 0...1") }
         if let o = lookIntensityOffset, !(-0.5...0.5).contains(o) { throw RawCoreError.invalidSettings("lookIntensityOffset must be in -0.5...0.5") }
         if let m = cameraMatchStrength, !(0...1).contains(m) { throw RawCoreError.invalidSettings("cameraMatchStrength must be in 0...1") }
+        if let h = decodeHeadroomEV, !(0...1.5).contains(h) { throw RawCoreError.invalidSettings("decodeHeadroomEV must be in 0...1.5") }
         if let n = rollFrameCount, n < 1 { throw RawCoreError.invalidSettings("rollFrameCount must be >= 1") }
         if let i = rollFrameIndex {
             guard i >= 1, i <= (rollFrameCount ?? Int.max) else { throw RawCoreError.invalidSettings("rollFrameIndex must be 1...rollFrameCount") }
@@ -144,6 +154,7 @@ public struct RenderSettings: Codable, Equatable, Sendable {
                                 colorNoiseReductionAmount, moireReductionAmount, extendedDynamicRangeAmount,
                                 neutralTemperature, neutralTint]
         return floats.contains { $0 != nil } || lensCorrection != nil || gamutMapping != nil || ccm != nil || linearExposureEV != nil || toneMapSourceHeadroom != nil || highlightClarity != nil || highlightRecoveryLocal != nil
+            || decodeHeadroomEV != nil
     }
 }
 

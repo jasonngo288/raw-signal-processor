@@ -458,6 +458,66 @@ final class LookSpecCache: @unchecked Sendable {
     }
 }
 
+// MARK: - Decode headroom restore (pure Swift; plugin `headroom` applies it)
+
+/// Display-space restore of a decode made `gainEV` stops lower (RSP 0.3.0, sign-off C6; ported exactly from the film-lab
+/// prototype `LabFlags2.restoreFunc` / `restoreLUT`). Control is on the max channel m = max(r, g, b) in linear Display P3:
+/// f(m) = G·m up to the knee k = c/G (output c = 0.5), then c + (1 − c)(1 − exp(−G(m − k)/(1 − c))), normalised so
+/// f(1) = 1, and rgb ×= f(m)/m. Scaling all three channels by one factor keeps the colour ratios (hue and the chroma
+/// ratio), so nothing needs a gamut pull; the pull toward the luma below only guards rounding when a channel ends above 1.
+public enum HeadroomRestore {
+    /// Linear output where the shoulder starts.
+    public static let kneeOut: Float = 0.5
+    public static let cubeSize = 33
+    /// Restore LUTs kept (one per quantised gain and size, sign-off C9).
+    public static let cacheCapacity = 2
+
+    /// Gains are quantised to 0.01 EV; the cache key and the LUT both use the quantised value.
+    public static func quantised(_ gainEV: Float) -> Float { (gainEV * 100).rounded() / 100 }
+
+    /// The shoulder curve f on the max channel, gain G = 2^gainEV (not quantised here).
+    public static func curve(_ y: Float, gain G: Float) -> Float {
+        let k = kneeOut / G
+        func raw(_ y: Float) -> Float { y <= k ? G * y : kneeOut + (1 - kneeOut) * (1 - exp(-G * (y - k) / (1 - kneeOut))) }
+        return raw(y) / raw(1)
+    }
+
+    /// The restore cube for `gainEV` (quantised to 0.01 EV), cached.
+    public static func lut(gainEV: Float, size: Int = cubeSize) -> CubeLUT {
+        let q = quantised(gainEV)
+        return HeadroomRestoreCache.shared.lut(String(format: "%.2f|%d", q, size)) { make(gainEV: q, size: size) }
+    }
+
+    static func make(gainEV: Float, size: Int) -> CubeLUT {
+        let G = pow(2, gainEV)
+        let w = SIMD3<Float>(0.2289746, 0.6917385, 0.0792869)
+        return CubeLUT.generate(size: size, title: "headroomRestore") { e in
+            let lin = SIMD3(Preset26.decode(e.x), Preset26.decode(e.y), Preset26.decode(e.z))
+            let y = max(lin.x, max(lin.y, lin.z))   // max-channel control: keeps the chroma ratio, never leaves gamut
+            let f = curve(y, gain: G)
+            let r: Float = y > 1e-5 ? f / y : G
+            var o = lin * r
+            let yo = (o * w).sum()
+            let m = max(o.x, max(o.y, o.z))
+            if m > 1 { let t = max((1 - yo) / (m - yo), 0); o = SIMD3(repeating: yo) + (o - SIMD3(repeating: yo)) * t }
+            return SIMD3(Preset26.encode(max(o.x, 0)), Preset26.encode(max(o.y, 0)), Preset26.encode(max(o.z, 0)))
+        }
+    }
+}
+
+/// Restore LUTs by quantised gain, 2-entry LRU (C9).
+final class HeadroomRestoreCache: @unchecked Sendable {
+    static let shared = HeadroomRestoreCache()
+    private let lock = NSLock()
+    private var items: LUTLRU
+    init(capacity: Int = HeadroomRestore.cacheCapacity) { items = LUTLRU(capacity: capacity) }
+    var keys: [String] { lock.lock(); defer { lock.unlock() }; return items.order }
+    func lut(_ key: String, _ make: () -> CubeLUT) -> CubeLUT {
+        lock.lock(); defer { lock.unlock() }
+        return items.value(key, make)
+    }
+}
+
 // MARK: - Light leak (pure Swift; plugin `lightLeak` draws it)
 
 /// Light leak of a stock, per `.orchestration/looks/RR_LOOKS_2026-11-11.md` ("Light leak spec"). Every number here is
