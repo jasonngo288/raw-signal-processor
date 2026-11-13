@@ -1,0 +1,121 @@
+{
+  "engine" : "0.3.0",
+  "entries" : [
+    {
+      "fields" : "source=spec(everydayGreen) | intensity=1060320051 | finish={\"grainAmount\":0.27,\"grainSeed\":1,\"grainSize\":0.06,\"halationAmount\":0,\"halationRadius\":0.5,\"halationThreshold\":0.75,\"vignette\":0.04} | skin=true | minSkin=nil | input=display | space=displayP3 | prim=rec2020 | develop={\"cameraMatchCurveStrength\":0.5,\"clarityScale\":0.4,\"faceSharpDelta\":0.05,\"proRAWDetail\":0.2,\"profile\":\"iso<400\",\"sharpFloor\":0.3,\"sharpScale\":0.55}",
+      "id" : "rr-sao-mai-200",
+      "lut" : "65:eb6ed0534a02f6c5",
+      "pixels" : "0073308cd31060cd"
+    },
+    {
+      "fields" : "source=spec(everydayGreen) | intensity=1062836634 | finish={\"grainAmount\":0.35,\"grainSeed\":1,\"grainSize\":0.07,\"halationAmount\":0,\"halationRadius\":0.5,\"halationThreshold\":0.75,\"vignette\":0.04} | skin=true | minSkin=nil | input=display | space=displayP3 | prim=rec2020 | develop={\"cameraMatchCurveStrength\":0.5,\"clarityScale\":0.4,\"faceSharpDelta\":0.05,\"lumaNRMaxDelta\":0,\"proRAWDetail\":0.2,\"profile\":\"iso400-1599\",\"sharpFloor\":0.3,\"sharpScale\":0.5}",
+      "id" : "rr-sao-hom-400",
+      "lut" : "65:eb6ed0534a02f6c5",
+      "pixels" : "a5d1689faccf2461"
+    },
+    {
+      "fields" : "source=spec(pastelCool) | intensity=1061997773 | finish={\"grainAmount\":0.27,\"grainSeed\":1,\"grainSize\":0.06,\"halationAmount\":0,\"halationRadius\":0.5,\"halationThreshold\":0.75,\"vignette\":0} | skin=true | minSkin=nil | input=display | space=displayP3 | prim=rec2020 | develop={\"cameraMatchCurveStrength\":0.5,\"clarityScale\":0.4,\"faceSharpDelta\":0.05,\"proRAWDetail\":0.2,\"profile\":\"iso<400\",\"sharpFloor\":0.3,\"sharpScale\":0.55}",
+      "id" : "rr-mat-200",
+      "lut" : "65:4bd5329e43dbf173",
+      "pixels" : "055d71e7bdbf6825"
+    },
+    {
+      "fields" : "source=spec(trialCoolFade) | intensity=1062836634 | finish={\"grainAmount\":0.35,\"grainSeed\":1,\"grainSize\":0.07,\"halationAmount\":0,\"halationRadius\":0.5,\"halationThreshold\":0.75,\"vignette\":0.08} | skin=true | minSkin=nil | input=display | space=displayP3 | prim=rec2020 | develop={\"cameraMatchCurveStrength\":0.5,\"clarityScale\":0.4,\"faceSharpDelta\":0.05,\"lumaNRMaxDelta\":0,\"proRAWDetail\":0.2,\"profile\":\"iso400-1599\",\"sharpFloor\":0.3,\"sharpScale\":0.5}",
+      "id" : "rr-gio-400",
+      "lut" : "65:cdb656bfaeb497cd",
+      "pixels" : "96c6ceac8f3f65c3"
+    },
+    {
+      "fields" : "source=spec(goldenDay) | intensity=1062836634 | finish={\"grainAmount\":0.27,\"grainSeed\":1,\"grainSize\":0.06,\"halationAmount\":0.1,\"halationRadius\":0.4,\"halationThreshold\":0.9,\"vignette\":0.04} | skin=true | minSkin=nil | input=display | space=displayP3 | prim=rec2020 | develop={\"cameraMatchCurveStrength\":0.5,\"clarityScale\":0.4,\"faceSharpDelta\":0.05,\"proRAWDetail\":0.2,\"profile\":\"iso<400\",\"sharpFloor\":0.3,\"sharpScale\":0.55}",
+      "id" : "rr-vang-200",
+      "lut" : "65:5c3612ccf9f85048",
+      "pixels" : "20d1772425ebfc59"
+    },
+    {
+      "fields" : "source=spec(warmMuted) | intensity=1062836634 | finish={\"grainAmount\":0.27,\"grainSeed\":1,\"grainSize\":0.06,\"halationAmount\":0,\"halationRadius\":0.5,\"halationThreshold\":0.75,\"vignette\":0.06} | skin=true | minSkin=nil | input=display | space=displayP3 | prim=rec2020 | develop={\"cameraMatchCurveStrength\":0.5,\"clarityScale\":0.4,\"faceSharpDelta\":0.05,\"proRAWDetail\":0.2,\"profile\":\"iso<400\",\"sharpFloor\":0.3,\"sharpScale\":0.55}",
+      "id" : "rr-am-200",
+      "lut" : "65:c0d99c6b3ba0389b",
+      "pixels" : "47fc973e4d17074a"
+    },
+    {
+      "fields" : "source=spec(vividFine) | intensity=1061158912 | finish={\"grainAmount\":0.35,\"grainSeed\":1,\"grainSize\":0.07,\"halationAmount\":0,\"halationRadius\":0.5,\"halationThreshold\":0.75,\"vignette\":0.05} | skin=true | minSkin=nil | input=display | space=displayP3 | prim=rec2020 | develop={\"cameraMatchCurveStrength\":0.5,\"clarityScale\":0.4,\"faceSharpDelta\":0.05,\"lumaNRMaxDelta\":0,\"proRAWDetail\":0.2,\"profile\":\"iso400-1599+vivid\",\"sharpFloor\":0.3,\"sharpScale\":0.7}",
+      "id" : "rr-ruc-400",
+      "lut" : "65:ddfcb2f359fcf3f5",
+      "pixels" : "fc16c9ec882b3fb1"
+    },
+    {
+      "fields" : "source=spec(sunFade) | intensity=1058642330 | finish={\"grainAmount\":0.18,\"grainSeed\":1,\"grainSize\":0.05,\"halationAmount\":0,\"halationRadius\":0.5,\"halationThreshold\":0.75,\"vignette\":0.12} | skin=true | minSkin=nil | input=display | space=displayP3 | prim=rec2020 | develop={\"cameraMatchCurveStrength\":0.5,\"clarityScale\":0.4,\"faceSharpDelta\":0.05,\"proRAWDetail\":0.2,\"profile\":\"iso<400\",\"sharpFloor\":0.3,\"sharpScale\":0.55}",
+      "id" : "rr-hoai-co-100",
+      "lut" : "65:601469744f97a4fe",
+      "pixels" : "2ce20adc319692b8"
+    },
+    {
+      "fields" : "source=spec(sunFade) | intensity=1060320051 | finish={\"grainAmount\":0.27,\"grainSeed\":1,\"grainSize\":0.06,\"halationAmount\":0,\"halationRadius\":0.5,\"halationThreshold\":0.75,\"vignette\":0.12} | skin=true | minSkin=nil | input=display | space=displayP3 | prim=rec2020 | develop={\"cameraMatchCurveStrength\":0.5,\"clarityScale\":0.4,\"faceSharpDelta\":0.05,\"proRAWDetail\":0.2,\"profile\":\"iso<400\",\"sharpFloor\":0.3,\"sharpScale\":0.55}",
+      "id" : "rr-hoai-co-200",
+      "lut" : "65:601469744f97a4fe",
+      "pixels" : "80f500de02645cc6"
+    },
+    {
+      "fields" : "source=spec(warmEvening) | intensity=1060320051 | finish={\"grainAmount\":0.27,\"grainSeed\":1,\"grainSize\":0.06,\"halationAmount\":0.06,\"halationRadius\":0.5,\"halationThreshold\":0.85,\"vignette\":0.15} | skin=true | minSkin=nil | input=display | space=displayP3 | prim=rec2020 | develop={\"cameraMatchCurveStrength\":0.5,\"clarityScale\":0.4,\"faceSharpDelta\":0.05,\"proRAWDetail\":0.2,\"profile\":\"iso<400\",\"sharpFloor\":0.3,\"sharpScale\":0.55}",
+      "id" : "rr-lang-kinh-200",
+      "lut" : "65:011f98ccc065fcf3",
+      "pixels" : "1e2790805522a08d"
+    },
+    {
+      "fields" : "source=spec(warmEvening) | intensity=1061997773 | finish={\"grainAmount\":0.35,\"grainSeed\":1,\"grainSize\":0.07,\"halationAmount\":0.06,\"halationRadius\":0.5,\"halationThreshold\":0.85,\"vignette\":0.15} | skin=true | minSkin=nil | input=display | space=displayP3 | prim=rec2020 | develop={\"cameraMatchCurveStrength\":0.5,\"clarityScale\":0.4,\"faceSharpDelta\":0.05,\"lumaNRMaxDelta\":0,\"proRAWDetail\":0.2,\"profile\":\"iso400-1599\",\"sharpFloor\":0.3,\"sharpScale\":0.5}",
+      "id" : "rr-lang-kinh-400",
+      "lut" : "65:011f98ccc065fcf3",
+      "pixels" : "fc320b9f1afa0f8f"
+    },
+    {
+      "fields" : "source=spec(mapleRed) | intensity=1062836634 | finish={\"grainAmount\":0.18,\"grainSeed\":1,\"grainSize\":0.05,\"halationAmount\":0.05,\"halationRadius\":0.4,\"halationThreshold\":0.9,\"lightLeak\":{\"amount\":0.35,\"aspect\":1.5,\"coreColor\":[1,0.3,0.06],\"coreOutside\":[0,0.1],\"encodedCap\":0.99,\"hueJitter\":8,\"last\":{\"chance\":0.6,\"strength\":[0.35,0.6]},\"middle\":{\"chance\":0.12,\"strength\":[0.15,0.35]},\"outerHue\":70,\"peakAdd\":0.25,\"personFactor\":0.4,\"reach\":0.3,\"reachSigmas\":2.45,\"sizeJitter\":0.3,\"start\":{\"chance\":1,\"strength\":[0.6,0.9]},\"streakChance\":0.5,\"streakStrength\":0.25,\"streakWidth\":[0.05,0.12],\"third\":{\"chance\":0.5,\"strength\":[0.3,0.5]}},\"vignette\":0.06} | skin=true | minSkin=nil | input=display | space=displayP3 | prim=rec2020 | develop={\"cameraMatchCurveStrength\":0.5,\"clarityScale\":0.4,\"faceSharpDelta\":0.05,\"proRAWDetail\":0.2,\"profile\":\"iso<400\",\"sharpFloor\":0.3,\"sharpScale\":0.55}",
+      "id" : "rr-la-phong-100",
+      "lut" : "65:5b3b3d7371777e5a",
+      "pixels" : "e8024837a4aa61c8"
+    },
+    {
+      "fields" : "source=spec(brightTravel) | intensity=1062836634 | finish={\"grainAmount\":0.18,\"grainSeed\":1,\"grainSize\":0.05,\"halationAmount\":0,\"halationRadius\":0.5,\"halationThreshold\":0.75,\"vignette\":0} | skin=true | minSkin=nil | input=display | space=displayP3 | prim=rec2020 | develop={\"cameraMatchCurveStrength\":0.5,\"clarityScale\":0.4,\"faceSharpDelta\":0.05,\"proRAWDetail\":0.2,\"profile\":\"iso<400\",\"sharpFloor\":0.3,\"sharpScale\":0.55}",
+      "id" : "rr-nang-100",
+      "lut" : "65:fa5af4654a84bf17",
+      "pixels" : "68da3f6d16cff36c"
+    },
+    {
+      "fields" : "source=spec(vividFine) | intensity=1064514355 | finish={\"grainAmount\":0.18,\"grainSeed\":1,\"grainSize\":0.05,\"halationAmount\":0,\"halationRadius\":0.5,\"halationThreshold\":0.75,\"vignette\":0.05} | skin=true | minSkin=nil | input=display | space=displayP3 | prim=rec2020 | develop={\"cameraMatchCurveStrength\":0.5,\"clarityScale\":0.4,\"faceSharpDelta\":0.05,\"proRAWDetail\":0.2,\"profile\":\"iso<400+vivid\",\"sharpFloor\":0.3,\"sharpScale\":0.7}",
+      "id" : "rr-ruc-ro-100",
+      "lut" : "65:ddfcb2f359fcf3f5",
+      "pixels" : "7e11dcc685af404e"
+    },
+    {
+      "fields" : "source=spec(softPortrait) | intensity=1062836634 | finish={\"grainAmount\":0.22,\"grainSeed\":1,\"grainSize\":0.055,\"halationAmount\":0,\"halationRadius\":0.5,\"halationThreshold\":0.75,\"vignette\":0.05} | skin=true | minSkin=nil | input=display | space=displayP3 | prim=rec2020 | develop={\"cameraMatchCurveStrength\":0.5,\"clarityScale\":0.4,\"faceSharpDelta\":0.05,\"proRAWDetail\":0.2,\"profile\":\"iso<400+portrait\",\"sharpFloor\":0.3,\"sharpScale\":0.5}",
+      "id" : "rr-da-mem-160",
+      "lut" : "65:8244b7a7545f2f5e",
+      "pixels" : "be981bbab13219fd"
+    },
+    {
+      "fields" : "source=spec(naturalPortrait) | intensity=1062836634 | finish={\"grainAmount\":0.35,\"grainSeed\":1,\"grainSize\":0.07,\"halationAmount\":0,\"halationRadius\":0.5,\"halationThreshold\":0.75,\"vignette\":0.04} | skin=true | minSkin=nil | input=display | space=displayP3 | prim=rec2020 | develop={\"cameraMatchCurveStrength\":0.5,\"clarityScale\":0.4,\"faceSharpDelta\":0.05,\"lumaNRMaxDelta\":0,\"proRAWDetail\":0.2,\"profile\":\"iso400-1599+portrait\",\"sharpFloor\":0.3,\"sharpScale\":0.5}",
+      "id" : "rr-chan-dung-400",
+      "lut" : "65:45e7ee9ec609208b",
+      "pixels" : "60cf74a02e9221dc"
+    },
+    {
+      "fields" : "source=spec(naturalPortrait) | intensity=1065353216 | finish={\"grainAmount\":0.5,\"grainSeed\":1,\"grainSize\":0.08,\"halationAmount\":0,\"halationRadius\":0.5,\"halationThreshold\":0.75,\"vignette\":0.04} | skin=true | minSkin=nil | input=display | space=displayP3 | prim=rec2020 | develop={\"cameraMatchCurveStrength\":0.5,\"clarityScale\":0.4,\"faceSharpDelta\":0.05,\"lumaNRMaxDelta\":0,\"proRAWDetail\":0.2,\"profile\":\"iso400-1599+portrait\",\"sharpFloor\":0.3,\"sharpScale\":0.5}",
+      "id" : "rr-dem-mem-800",
+      "lut" : "65:45e7ee9ec609208b",
+      "pixels" : "5a51b34247c42a11"
+    },
+    {
+      "fields" : "source=spec(tungstenGlow) | intensity=1063675494 | finish={\"grainAmount\":0.55,\"grainSeed\":1,\"grainSize\":0.085,\"halationAmount\":0.45,\"halationRadius\":0.7,\"halationThreshold\":0.85,\"vignette\":0.1} | skin=true | minSkin=1056964608 | input=display | space=displayP3 | prim=rec2020 | develop={\"cameraMatchCurveStrength\":0.5,\"clarityScale\":0.4,\"faceSharpDelta\":0.05,\"lumaNRMaxDelta\":0,\"proRAWDetail\":0.2,\"profile\":\"iso400-1599\",\"sharpFloor\":0.3,\"sharpScale\":0.5}",
+      "id" : "rr-den-vang-800t",
+      "lut" : "65:cab1cff01fc274bc",
+      "pixels" : "b3cffd6b79f30b08"
+    },
+    {
+      "fields" : "source=spec(cleanLab) | intensity=1062836634 | finish={\"grainAmount\":0.28,\"grainSeed\":1,\"grainSize\":0.07,\"halationAmount\":0,\"halationRadius\":0.5,\"halationThreshold\":0.75,\"vignette\":0.03} | skin=true | minSkin=nil | input=display | space=displayP3 | prim=rec2020 | develop={\"cameraMatchCurveStrength\":0.5,\"clarityScale\":0.4,\"faceSharpDelta\":0.05,\"lumaNRMaxDelta\":0,\"proRAWDetail\":0.2,\"profile\":\"iso400-1599\",\"sharpFloor\":0.3,\"sharpScale\":0.5}",
+      "id" : "rr-chuan-400",
+      "lut" : "65:c683f94b4f85a50a",
+      "pixels" : "20af3c48e1aee26b"
+    }
+  ],
+  "environment" : "Version 15.2 (Build 24C101) arm64",
+  "fixture" : "USER_mooncake.dng"
+}

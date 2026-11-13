@@ -15,6 +15,13 @@ Contract: MoodRoll `.orchestration/film-lab/RSP_030_SIGNOFF.md` (C1-C11, §5 tes
   Cost seen in tests: the pairwise stock loops in `RollStocksTests` rebuilt a 65³ cube per pair (debug build, ~2.3 s each;
   the suite went from 11 min to ~2 h), so `chartDistance` keeps a test-local LUT copy. A real develop of one stock is
   unchanged (cold build once, then cache hits).
+- **(d) C7 baseline, committed before (c):** `LookArgumentsTests.fields` writes `source=<case>(<look name>)` instead of
+  `String(describing: source)`; LUT values stay guarded by `lut`, pixels by `pixels`. Done before vibrance because adding
+  `LookSpec.vibrance` changes the `String(describing:)` text of every spec stock, which would leave (c) red.
+  Procedure: new code against the 0.1.0 file gave exactly 38 failures, all `fields` (19 stocks x id / look + arguments),
+  0 `lut`, 0 `pixels` (same macOS 15.2 24C101 arm64 and USER_mooncake.dng as the file, so pixels were compared). Then
+  `RSP_WRITE_BASELINE=1` into `Fixtures/rollstocks-0.3.0-baseline.json` (`engine` "0.3.0"): all 19 `lut` and `pixels`
+  equal to 0.1.0, and each `fields` line differs only in its `source=` part. The 0.1.0 file is deleted.
 
 ## 2026-11-11 — RR roll-stock grain re-tuned for the filmDevelop decode
 - **What** (`RollStocks.swift`, grain only; note `.orchestration/looks/RR_GRAIN_2026-11-11.md`):

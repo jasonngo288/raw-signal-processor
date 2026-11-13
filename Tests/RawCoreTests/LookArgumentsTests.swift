@@ -4,14 +4,16 @@ import XCTest
 @testable import RawCore
 
 /// P1.1 identity (T2): every roll stock resolved from its id must equal the same look + `LookArguments`, field for field
-/// (except `name` / `summary`), LUT value for LUT value and pixel for pixel. The baseline in
-/// `Fixtures/rollstocks-0.1.0-baseline.json` was captured from RSP 0.1.0 (7a304c5) before the refactor
+/// (except `name` / `summary`), LUT value for LUT value and pixel for pixel. The first baseline was captured from RSP
+/// 0.1.0 (7a304c5) before the refactor. RSP 0.3.0 (sign-off C7) hashes an explicit source identity instead of
+/// `String(describing: source)`, so a new `LookSpec` field no longer breaks the file; `Fixtures/rollstocks-0.3.0-baseline.json`
+/// was regenerated once, with only the `fields` text changing (`lut` and `pixels` equal to 0.1.0)
 /// (`RSP_WRITE_BASELINE=1 swift test --filter LookArgumentsTests/testRollStocksMatchTheBaseline`).
 final class LookArgumentsTests: XCTestCase {
     static let root = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     static let baselineURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        .appendingPathComponent("Fixtures/rollstocks-0.1.0-baseline.json")
+        .appendingPathComponent("Fixtures/rollstocks-0.3.0-baseline.json")
 
     struct Baseline: Codable {
         struct Entry: Codable, Equatable {
@@ -50,9 +52,19 @@ final class LookArgumentsTests: XCTestCase {
         return String(format: "%016llx", h)
     }
 
-    /// Every `FilmStock` field except `name` and `summary`.
-    static func fields(_ s: FilmStock) -> String {
-        ["source=\(s.source)", "intensity=\(s.lookIntensity.bitPattern)", "finish=\(s.finish.compactJSON())",
+    /// Stable identity of the look source: the case and the look name (LUT values are guarded by `lut`, pixels by
+    /// `pixels`), never `String(describing:)`, whose text changes with every new `LookSpec` field.
+    static func sourceIdentity(_ s: FilmStock, look: String) -> String {
+        switch s.source {
+        case .builtIn(let b): return "builtIn(\(b.rawValue))"
+        case .preset: return "preset(\(look))"
+        case .spec: return "spec(\(look))"
+        }
+    }
+
+    /// Every `FilmStock` field except `name` and `summary`; `look` is the look the stock is built on.
+    static func fields(_ s: FilmStock, look: String) -> String {
+        ["source=\(sourceIdentity(s, look: look))", "intensity=\(s.lookIntensity.bitPattern)", "finish=\(s.finish.compactJSON())",
          "skin=\(s.allowsSkinProtection)", "minSkin=\(s.minSkinProtection.map { "\($0.bitPattern)" } ?? "nil")",
          "input=\(s.lookInput)", "space=\(s.lookColorSpace)", "prim=\(s.logPrimaries)",
          "develop=\(s.develop?.compactJSON() ?? "nil")"].joined(separator: " | ")
@@ -86,9 +98,9 @@ final class LookArgumentsTests: XCTestCase {
         for r in RollStocks.all {
             let s = try XCTUnwrap(FilmStock.named(r.id), r.id)
             let px = withPixels ? Self.fnv(try render(Self.settings(r.id), dev: dev, url: url, scale: scale, analysis: an)) : nil
-            entries.append(.init(id: r.id, fields: Self.fields(s), lut: Self.lutFingerprint(s), pixels: px))
+            entries.append(.init(id: r.id, fields: Self.fields(s, look: r.look), lut: Self.lutFingerprint(s), pixels: px))
         }
-        return Baseline(engine: "0.1.0", fixture: url.lastPathComponent, environment: Self.environment, entries: entries)
+        return Baseline(engine: "0.3.0", fixture: url.lastPathComponent, environment: Self.environment, entries: entries)
     }
 
     /// P1.1: the rr-… path still gives what 0.1.0 gave (same fields, same LUT values, same pixels; pixels against the
@@ -114,14 +126,14 @@ final class LookArgumentsTests: XCTestCase {
             XCTAssertNoThrow(try st.validate(), r.id)
             let merged = try XCTUnwrap(try st.resolvedStock(), r.id)
             XCTAssertEqual(merged.name, r.look, "merged stock is named after the look")
-            XCTAssertEqual(Self.fields(byId), b.fields, "\(r.id) fields vs 0.1.0")
-            XCTAssertEqual(Self.fields(merged), b.fields, "\(r.id) look + arguments fields vs 0.1.0")
-            XCTAssertEqual(Self.lutFingerprint(byId), b.lut, "\(r.id) LUT vs 0.1.0")
-            XCTAssertEqual(Self.lutFingerprint(merged), b.lut, "\(r.id) look + arguments LUT vs 0.1.0")
+            XCTAssertEqual(Self.fields(byId, look: r.look), b.fields, "\(r.id) fields vs baseline")
+            XCTAssertEqual(Self.fields(merged, look: r.look), b.fields, "\(r.id) look + arguments fields vs baseline")
+            XCTAssertEqual(Self.lutFingerprint(byId), b.lut, "\(r.id) LUT vs baseline")
+            XCTAssertEqual(Self.lutFingerprint(merged), b.lut, "\(r.id) look + arguments LUT vs baseline")
             let pxId = try render(Self.settings(r.id), dev: dev, url: url, scale: scale, analysis: an)
             let pxArgs = try render(st, dev: dev, url: url, scale: scale, analysis: an)
             XCTAssertTrue(pxId == pxArgs, "\(r.id): look + arguments must be pixel-identical to the rr id")
-            if samePlace { XCTAssertEqual(Self.fnv(pxId), b.pixels, "\(r.id) pixels vs 0.1.0") }
+            if samePlace { XCTAssertEqual(Self.fnv(pxId), b.pixels, "\(r.id) pixels vs baseline") }
         }
     }
 
