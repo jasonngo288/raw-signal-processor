@@ -57,6 +57,23 @@ Contract: MoodRoll `.orchestration/film-lab/RSP_030_SIGNOFF.md` (C1-C11, §5 tes
   `looks-v2-0.3.0.json`: only the coolFade2 LUT and Breeze pixel hash change; Marigold, Blush and the 18-look guard are
   unchanged. `testLooksDistinctFromNeighbours` now asserts nearest >= 2.0 for the 3 v2 looks (tech-lead R2); shadowDesat
   alone gave 1.97, so it needed the retune.
+- **(j) CI: LUT checks across toolchains** (CI runs 43194716672 at 0.2.0 and 43530260851 at 5f4ebfc failed the same way).
+  - Root cause: LUT values are pure Swift float maths, and their bits depend on the toolchain and libm. The macos-15 runner
+    (macOS 15.8.2 24H232, Xcode 16.4, Swift 6.1.2, arm64 VM) gives other hashes than the fixture machine (macOS 15.2 24C101,
+    Xcode 16.2, Swift 6.0.3, arm64) for all 16 colour looks; the 2 mono looks (no OKLab: no cbrt/atan2/cos/sin) match bit
+    for bit. Both CI runs give the same CI hashes (deterministic, not a GPU or runtime effect). Core Image is not involved
+    (LUTs are generated on the CPU; pixel hashes are already compared only on the fixture environment).
+  - Fix (tests only): `LookGuardTests.checkLUT` tries the exact hash first. Only when the environment differs from the one
+    in the new `Fixtures/lut-samples-0.3.0.json` or `CI=true` (GitHub Actions) does a mismatch fall back to 9³ lattice samples
+    (UInt16) of every listed look, max |d| <= 1/255 per channel, with the measured max printed (`[lut-tolerance]`). On the
+    fixture machine the exact check is unchanged. Used by the 18-look guard, the roll-stock baseline and the v2 fixture.
+    The samples were written only after all 21 exact fingerprints matched. `testSampleFallbackCatchesRealChanges`: a 2/255
+    shift fails the bound, 1e-5 noise passes.
+  - CI step "DNG tags of files CIRAWFilter could not open" crashed only because the bench never ran after the Test step
+    failed (no `bench-out/summary.json`); it now says so and exits 0. Unreadable corpus files were already reported, not
+    fatal, by `raw-bench bench`.
+- **(k) xcodeproj regenerated** (`cd App && xcodegen generate`): drops the empty RawCore Resources phase left after the
+  0.2.0 removal of `Sources/RawCore/Looks/` (the 11 lines CI reported).
 
 ## 2026-11-11 — RR roll-stock grain re-tuned for the filmDevelop decode
 - **What** (`RollStocks.swift`, grain only; note `.orchestration/looks/RR_GRAIN_2026-11-11.md`):

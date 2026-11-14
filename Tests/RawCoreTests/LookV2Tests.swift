@@ -71,7 +71,10 @@ final class LookV2Tests: XCTestCase {
             return
         }
         let f = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: Self.fixtureURL))
-        XCTAssertEqual(looks, f.looks, "v2 look LUTs changed")
+        XCTAssertEqual(looks.map(\.look), f.looks.map(\.look))
+        for (l, e) in zip(Self.v2, f.looks) {
+            LookGuardTests.checkLUT(try XCTUnwrap(FilmStock.named(l)).lut(), look: l, expected: e.lut, "\(l) v2 LUT")
+        }
         XCTAssertEqual(f.stocks.map(\.arguments), Self.stocks.map { $0.args.compactJSON() })
         guard f.environment == LookArgumentsTests.environment, dng == f.fixture else { return }
         XCTAssertEqual(try pixels(), f.stocks, "v2 stock pixels changed")

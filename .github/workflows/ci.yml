@@ -65,7 +65,12 @@ jobs:
         if: always()
         run: |
           python3 - <<'PY'
-          import json, subprocess
+          import json, os, subprocess, sys
+          # Report-only step. It runs with if: always(), so when an earlier step failed the bench never wrote its summary:
+          # say so instead of failing with a traceback (the earlier failure is already the job's result).
+          if not os.path.exists("bench-out/summary.json"):
+              print("bench-out/summary.json not found: the bench step did not run (an earlier step failed); nothing to report")
+              sys.exit(0)
           for f in json.load(open("bench-out/summary.json")):
               if f.get("error"):
                   path = ("corpus-cache/" if f.get("corpus", {}).get("location") != "originals" else "originals/") + f["file"]
