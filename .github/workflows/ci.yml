@@ -7,7 +7,7 @@ on:
 jobs:
   macos:
     runs-on: macos-15
-    timeout-minutes: 45
+    timeout-minutes: 75   # 45 cancelled the bench on 0.3.0 (run 43536454430): tests ~15 min (21 looks, 4-entry LUT LRU), bench ~27 min
     steps:
       - uses: actions/checkout@v4
       - name: Toolchain

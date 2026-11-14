@@ -74,6 +74,9 @@ Contract: MoodRoll `.orchestration/film-lab/RSP_030_SIGNOFF.md` (C1-C11, §5 tes
     fatal, by `raw-bench bench`.
 - **(k) xcodeproj regenerated** (`cd App && xcodegen generate`): drops the empty RawCore Resources phase left after the
   0.2.0 removal of `Sources/RawCore/Looks/` (the 11 lines CI reported).
+- **(l) CI job timeout 45 -> 75 min.** Run 43536454430 (at (k)): Test green on CI (`Executed 148 tests, with 0 failures`),
+  the tolerance path used 57 times with max |d| 0.000015 (one UInt16 step: float noise between toolchains), xcodeproj check
+  green; the job was cancelled at 45 min inside the corpus bench (tests ~15 min, bench ~27 min).
 
 ## 2026-11-11 — RR roll-stock grain re-tuned for the filmDevelop decode
 - **What** (`RollStocks.swift`, grain only; note `.orchestration/looks/RR_GRAIN_2026-11-11.md`):
