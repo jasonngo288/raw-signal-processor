@@ -218,7 +218,6 @@
 			buildConfigurationList = 8FC0FC0D5953E2D664AB7253 /* Build configuration list for PBXNativeTarget "RawCore" */;
 			buildPhases = (
 				9E41EE30EF13965814999CEB /* Sources */,
-				7F322CD1070245694915D519 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -271,16 +270,6 @@
 			);
 		};
 /* End PBXProject section */
-
-/* Begin PBXResourcesBuildPhase section */
-		7F322CD1070245694915D519 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		2427C067A909DF65AF2A7AD3 /* Sources */ = {
