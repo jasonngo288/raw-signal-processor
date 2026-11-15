@@ -75,6 +75,9 @@ public struct RenderSettings: Codable, Equatable, Sendable {
     /// scene (dark, people, landscape), bounded -0.15...+0.10. The preset itself never changes per photo (one roll,
     /// one stock); 0 = lock the intensity exactly.
     public var lookIntensityOffset: Float?
+    /// 0.5...1: strength of the finish found by `qualityGuard` on a preview; given, the guard applies it without
+    /// measuring (preview and final use the same parameter). nil = the guard measures this render.
+    public var qualityGuardStrength: Float?
     /// Path of the camera's own HEIC from the same shutter press (CaptureKit `apple.heic`). With the cameraMatch
     /// plugin, our exposure and tones are matched to it. Not a decode override by itself.
     public var cameraReference: String?
@@ -115,6 +118,7 @@ public struct RenderSettings: Codable, Equatable, Sendable {
         if let p = skinProtection, !(0...1).contains(p) { throw RawCoreError.invalidSettings("skinProtection must be in 0...1") }
         if let e = linearExposureEV, !(-4...4).contains(e) { throw RawCoreError.invalidSettings("linearExposureEV must be in -4...4") }
         if let c = highlightClarity, !(0...1).contains(c) { throw RawCoreError.invalidSettings("highlightClarity must be in 0...1") }
+        if let g = qualityGuardStrength, !(0.5...1).contains(g) { throw RawCoreError.invalidSettings("qualityGuardStrength must be in 0.5...1") }
         if let o = lookIntensityOffset, !(-0.5...0.5).contains(o) { throw RawCoreError.invalidSettings("lookIntensityOffset must be in -0.5...0.5") }
         if let m = cameraMatchStrength, !(0...1).contains(m) { throw RawCoreError.invalidSettings("cameraMatchStrength must be in 0...1") }
         if let h = decodeHeadroomEV, !(0...1.5).contains(h) { throw RawCoreError.invalidSettings("decodeHeadroomEV must be in 0...1.5") }

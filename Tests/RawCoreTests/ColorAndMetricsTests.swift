@@ -255,7 +255,8 @@ final class LookAndSettingsTests: XCTestCase {
         XCTAssertNil(dec.settings.detailAmount, "detail default 0: the face rule lowers sharpness instead (above)")
         XCTAssertEqual(dec.settings.lensCorrection, true)
         XCTAssertEqual(dec.settings.skinProtection, DecisionEngine.Threshold.skinProtection)
-        XCTAssertEqual(dec.reasons.count, 9, "7 decode rules + 2 look-intensity reasons (ISO 3200, people)")
+        XCTAssertEqual(dec.reasons.count, 10, "7 decode rules + 2 look-intensity reasons (ISO 3200, people) + the scene line")
+        XCTAssertTrue(dec.reasons.last!.hasPrefix("scene: "))
         XCTAssertEqual(dec.settings.lookIntensityOffset!, -0.10, accuracy: 1e-6)
         XCTAssertNoThrow(try dec.settings.validate())
 

@@ -75,6 +75,33 @@ final class FilmFinisherTests: XCTestCase {
         XCTAssertEqual(out.pixels[3], before.pixels[3], accuracy: 1e-4, "far corner untouched")
     }
 
+    /// qualityGuard on synthetic frames: a finish that blows the frame up is blended back; a gentle one is untouched.
+    func testQualityGuardBlendsBackOnlyWhenNeeded() throws {
+        let renderer = Renderer()
+        let base = flat(320, 240, 0.18)
+        var ctx = PluginRenderContext(renderer: renderer, decodeBase: { base })
+        ctx.lookBase = base
+        let plugin = QualityGuardPlugin()
+        // Gentle finish (+10 %): passes, untouched, no recipe line.
+        let gentle = base.applyingFilter("CIColorMatrix", parameters: ["inputRVector": CIVector(x: 1.1, y: 0, z: 0, w: 0),
+            "inputGVector": CIVector(x: 0, y: 1.1, z: 0, w: 0), "inputBVector": CIVector(x: 0, y: 0, z: 1.1, w: 0)])
+        let (g, gWhy) = try plugin.afterFinish(gentle, settings: .explicit, finish: nil, ctx: ctx)
+        XCTAssertTrue(gWhy.isEmpty)
+        XCTAssertEqual(try renderer.linearImage(g).pixels[0], try renderer.linearImage(gentle).pixels[0], accuracy: 1e-4)
+        // Harsh finish (x2, +1 EV): blended back, logged, ends nearer the base.
+        let harsh = base.applyingFilter("CIColorMatrix", parameters: ["inputRVector": CIVector(x: 2, y: 0, z: 0, w: 0),
+            "inputGVector": CIVector(x: 0, y: 2, z: 0, w: 0), "inputBVector": CIVector(x: 0, y: 0, z: 2, w: 0)])
+        let (h, hWhy) = try plugin.afterFinish(harsh, settings: .explicit, finish: nil, ctx: ctx)
+        XCTAssertEqual(hWhy.count, 1); XCTAssertTrue(hWhy[0].contains("median"), hWhy[0])
+        let y = try renderer.linearImage(h).pixels[1]
+        XCTAssertLessThan(y, 0.36 - 0.02); XCTAssertGreaterThan(y, 0.18)
+        // Given strength (preview → final): applied without measuring.
+        var st = RenderSettings.explicit; st.qualityGuardStrength = 0.5
+        let (f, fWhy) = try plugin.afterFinish(harsh, settings: st, finish: nil, ctx: ctx)
+        XCTAssertTrue(fWhy[0].contains("not re-measured"))
+        XCTAssertEqual(try renderer.linearImage(f).pixels[1], 0.27, accuracy: 0.01, "half way between 0.18 and 0.36 (linear)")
+    }
+
     func testPluginRegistryUnplugs() throws {
         var st = RenderSettings.explicit
         let ids = try PluginRegistry.standard.active(for: st).map(\.id)

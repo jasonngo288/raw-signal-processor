@@ -458,6 +458,41 @@ func gate3Command(_ paths: [String]) throws -> Bool {
     return pass
 }
 
+/// qualityGuard evidence: develop every RR roll stock on every file with the default plugins + qualityGuard and
+/// report where the guard fires and at which strength. Nothing is saved.
+func guardCommand(_ dirs: [String], longEdge: Int) throws -> String {
+    var urls: [URL] = []
+    for dir in dirs {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []
+        urls += names.filter { rawExtensions.contains(($0 as NSString).pathExtension.lowercased()) }.sorted().map { URL(fileURLWithPath: dir).appendingPathComponent($0) }
+    }
+    var md = "# qualityGuard dry run (RR roll stocks, default plugins + qualityGuard, long edge \(longEdge))\n\n"
+    md += String(format: "Fires when the finish clips > +%.1f%% of pixels or moves the median > ±%.1f EV vs the frame before the look.\n\n",
+                 QualityGuardPlugin.maxClipIncrease * 100, QualityGuardPlugin.maxExposureDriftEV)
+    md += "| file | stock | guard | scene |\n|---|---|---|---|\n"
+    var fired = 0, total = 0
+    for url in urls {
+        log("guard \(url.lastPathComponent)")
+        let scale: Float, an: Developer.Analysis
+        do { scale = try decoder.scaleFactor(url: url, longEdge: longEdge); an = try dev.analyze(url: url) } catch {
+            md += "| \(url.lastPathComponent) | – | error: \(error) | |\n"; continue
+        }
+        for stock in RollStocks.stocks {
+            var st = RenderSettings(mode: .explicit)
+            st.stock = stock.name
+            st.plugins = PluginRegistry.standard.defaultEnabled + ["qualityGuard"]
+            let o = try dev.develop(url: url, settings: st, auto: true, scaleFactor: scale, analysis: an)
+            total += 1
+            if let g = o.recipe.decisions.first(where: { $0.hasPrefix("[qualityGuard]") }) {
+                fired += 1
+                md += "| \(url.lastPathComponent) | \(stock.name) | \(g.dropFirst(15)) | \(an.context.prediction.summary.dropFirst(7)) |\n"
+            }
+        }
+    }
+    md += "\n**Fired on \(fired) of \(total) renders.**\n"
+    return md
+}
+
 func run() throws -> Int32 {
     let a = Args(Array(CommandLine.arguments.dropFirst()))
     guard let cmd = a.positional.first else { print(usage); return 2 }
@@ -546,6 +581,9 @@ func run() throws -> Int32 {
     case "gate3":
         guard rest.count >= 2 else { print(usage); return 2 }
         return try gate3Command(rest) ? 0 : 1
+    case "guard":
+        guard !rest.isEmpty else { print(usage); return 2 }
+        print(try guardCommand(rest, longEdge: a.options["long-edge"].flatMap(Int.init) ?? 768))
     case "looks":
         guard !rest.isEmpty, let out = a.options["out"] else { print(usage); return 2 }
         let run = try looksCommand(rest, out: out, looks: a.options["looks"].map { $0.split(separator: ",").map(String.init) },

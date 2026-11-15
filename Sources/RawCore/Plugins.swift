@@ -48,6 +48,8 @@ public struct PluginRenderContext {
     /// Vision person mask of the analysis (any size), when the caller has one. Used by `lightLeak` (x0.4 inside it).
     /// OPEN: Developer.swift does not fill it yet, so the leak is not attenuated on people until it does.
     public var personMask: CIImage? = nil
+    /// The image before the look (finish stage only): what `qualityGuard` compares the finished image with.
+    public var lookBase: CIImage? = nil
 }
 
 public struct PluginRegistry: Sendable {
@@ -60,7 +62,10 @@ public struct PluginRegistry: Sendable {
     }
 
     /// Everything shipped so far, all enabled by default.
-    public static let standard = PluginRegistry(available: [HighlightRecoveryPlugin(), HeadroomPlugin(), CameraMatchPlugin(), VignettePlugin(), LogLookPlugin(), FilmDevelopPlugin(), LightLeakPlugin(), SkyMaskPlugin()],
+    public static let standard = PluginRegistry(available: [HighlightRecoveryPlugin(), HeadroomPlugin(), CameraMatchPlugin(), VignettePlugin(), LogLookPlugin(), FilmDevelopPlugin(), LightLeakPlugin(), SkyMaskPlugin(), QualityGuardPlugin()],
+                                                // qualityGuard is registered but OFF by default: RSP 0.3.0 renders are pixel-frozen for MoodRoll
+                                                // (rollstocks baseline), and the guard would change any frame where it fires. Turn it on after
+                                                // `raw-bench guard` shows how often it fires (WORK_LOG 2026-11-15).
                                                 defaultEnabled: ["highlightRecovery", "headroom", "cameraMatch", "vignette", "logLook", "filmDevelop", "lightLeak", "skyMask"])
     /// Roadmap core only.
     public static let none = PluginRegistry(available: [], defaultEnabled: [])
@@ -293,6 +298,70 @@ public struct VignettePlugin: DevelopPlugin {
         return (FilmFinisher.vignette(image, v), [String(format: "vignette %.2f", v)])
     }
 }
+/// Extra (2026-11-15 architecture review, "Quality Guard / Recheck"): after the look, skin protection, grain, halation
+/// and the other finish plugins, measure the finished frame against the frame before the look (`ctx.lookBase`) on a
+/// small render. If the finish clipped more than `maxClipIncrease` of the pixels or moved the median luminance by more
+/// than `maxExposureDriftEV`, blend the finish back toward the base (75 %, then 50 %) and keep the first strength
+/// that passes; never below 50 %. It judges the film stage only (the look is display-referred and must not repair
+/// tone, AGENTS goal 3): fades and lifted blacks are look intent and are not checked.
+/// Preview → final: a render can carry `RenderSettings.qualityGuardStrength` (found on a preview), which is applied
+/// without measuring, so the full-resolution render uses the same parameter (and costs no extra renders).
+/// Must be the last plugin of the registry (it judges what the others did).
+public struct QualityGuardPlugin: DevelopPlugin {
+    public let id = "qualityGuard"
+    public let summary = "recheck after the finish: blend back toward the base if it clips or drifts too much"
+    public init() {}
+
+    public static let maxClipIncrease = 0.005
+    public static let maxExposureDriftEV = 0.5
+    public static let strengths: [Float] = [0.75, 0.5]
+    public static let measureLongEdge: CGFloat = 384
+
+    public struct Measure: Equatable, Sendable { public var clipped: Double; public var medianY: Double }
+
+    public static func measure(_ img: CIImage, renderer: Renderer) throws -> Measure {
+        let lin = try renderer.linearImage(CameraMatchPlugin.small(img, longEdge: measureLongEdge))
+        let y = lin.pixelsLuminanceUnclamped().sorted()
+        return Measure(clipped: ImageMetrics.measure(lin).clippedFraction, medianY: Double(y[y.count / 2]))
+    }
+
+    /// Pure verdict: nil = passes, else why it fails.
+    public static func problem(_ m: Measure, base b: Measure) -> String? {
+        var out: [String] = []
+        let inc = m.clipped - b.clipped
+        if inc > maxClipIncrease { out.append(String(format: "clipped %.2f%% -> %.2f%% (> +%.1f%%)", b.clipped * 100, m.clipped * 100, maxClipIncrease * 100)) }
+        if b.medianY > 1e-4, m.medianY > 1e-4 {
+            let drift = log2(m.medianY / b.medianY)
+            if abs(drift) > maxExposureDriftEV { out.append(String(format: "median %+.2f EV (> ±%.1f)", drift, maxExposureDriftEV)) }
+        }
+        return out.isEmpty ? nil : out.joined(separator: ", ")
+    }
+
+    static func blend(base: CIImage, finished: CIImage, strength: Float) -> CIImage {
+        finished.applyingFilter("CIDissolveTransition", parameters: [kCIInputTargetImageKey: finished, kCIInputImageKey: base, "inputTime": strength])
+            .cropped(to: finished.extent)
+    }
+
+    public func afterFinish(_ image: CIImage, settings st: RenderSettings, finish: FilmFinish?, ctx: PluginRenderContext) throws -> (CIImage, [String]) {
+        guard let base = ctx.lookBase else { return (image, []) }
+        if let s = st.qualityGuardStrength {
+            guard s < 1 else { return (image, []) }
+            return (Self.blend(base: base, finished: image, strength: s), [String(format: "finish strength %.2f (given, e.g. from the preview): not re-measured", s)])
+        }
+        let b = try Self.measure(base, renderer: ctx.renderer)
+        guard let why = Self.problem(try Self.measure(image, renderer: ctx.renderer), base: b) else { return (image, []) }
+        for s in Self.strengths {
+            let c = Self.blend(base: base, finished: image, strength: s)
+            if Self.problem(try Self.measure(c, renderer: ctx.renderer), base: b) == nil {
+                return (c, [String(format: "finish %@ -> blended back to %.2f of the finish (passes)", why, s)])
+            }
+        }
+        let floor = Self.strengths.last!
+        return (Self.blend(base: base, finished: image, strength: floor),
+                [String(format: "finish %@ -> still failing at %.2f, kept %.2f (floor)", why, floor, floor)])
+    }
+}
+
 /// Extra: looks authored for log footage (`FilmStock.lookInput = .log`). Decodes the file scene-linear (Apple's tone
 /// removed), scales by 1/`LogLook.headroom`, and applies one composite cube: Rec.2020 → log curve → the user's LUT →
 /// Rec.709 output as Display P3. Unplugged, the core applies such a LUT to the display base and says so in the recipe.

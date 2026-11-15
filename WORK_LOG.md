@@ -2,6 +2,32 @@
 
 Newest first. Each entry: what changed, why, evidence, what is NOT verified yet.
 
+## 2026-11-15 — Architecture review items A/B/C (branch `feature/scene-scores-quality-guard`, from main 79f5219)
+Source: the user's "Auto Photo Enhancement" architecture (OpenCV metrics + Core ML scene classes + adaptive parameter
+engine + quality guard). Review: most of it already exists here (SceneContext / CIAreaHistogram / Vision /
+DecisionEngine); OpenCV and a custom Core ML model are not adopted (no gain over pure Swift + Vision, rule 9, no
+labelled dataset, analysis already 2.2–2.8 s on device). The user approved the three gaps A, B, C.
+- **B — smooth scores:** `lookIntensityOffset` terms are now 0…1 smoothstep scores × the old weights. Dark: ramp
+  −4.6 → −6.1 stops (centred on −5.35; ends inside the tuning gap MTN01 −4.57 / CAFE01 −6.13, so every tuning file
+  keeps its value); ISO ±0.5 stop around 1600; people ±50 % around 3 % mask / 1 % face; landscape label 0.4…0.6,
+  × (1 − people) × (1 − dark). Why: frames at −5.34 and −5.36 differed by 0.10 of look; now by ~0.002.
+- **C — `ScenePrediction`** (pure, computed from SceneContext, no schema change): night, high ISO, people, landscape,
+  outdoor / indoor evidence and an environment (needs ≥ 0.5 and a 0.15 margin, else unknown). One `scene:` line in
+  every DecisionEngine result. Indoor/outdoor is reported only: no rule uses it yet (no evidence for one).
+- **A — `qualityGuard` plugin** (afterFinish, last in the registry): finished frame vs the frame before the look on
+  a 384 px render; clipping > +0.5 % or median > ±0.5 EV → blend back 0.75 / 0.5 (floor), logged;
+  `RenderSettings.qualityGuardStrength` = a preview's result applied to the final without re-measuring.
+  **Registered but OFF by default**: 0.3.0 output is pixel-frozen for MoodRoll (rollstocks baseline), and a guard
+  that fires changes pixels. `raw-bench guard <dir>` (CI: originals, 768 px) counts how often it would fire on the
+  19 RR stocks, so turning it on is a decision with numbers.
+- **Tests:** SceneScoresTests (ramps, no cliff at −5.35, monotone, tuning files unchanged, environment margin,
+  guard verdict, registry: last + off by default), FilmFinisherTests.testQualityGuardBlendsBackOnlyWhenNeeded
+  (synthetic: +10 % untouched, ×2 blended to the 0.5 floor, given strength not re-measured). DecisionEngine stress
+  test: 9 → 10 reasons (scene line).
+- **Unverified:** not compiled here (no toolchain; CI). Guard cost at full resolution on device. Whether the guard's
+  limits are right for the looks (the dry run will show which stocks trip it). The pixel baseline on the user's Mac
+  is unaffected by B on tuning files, but frames between the ramp ends (e.g. TOKYO01 −5.32) now get a partial offset.
+
 ## 2026-11-13 — RawCore 0.3.0 (branch `feature/rsp-0.3.0`, from tag 0.2.0; not tagged)
 Contract: MoodRoll `.orchestration/film-lab/RSP_030_SIGNOFF.md` (C1-C11, §5 tests, §6 step 2 a-h) and
 `LOOK_V2_PROTOTYPE_2026-11-13.md` §5. One commit per sub-step; `swift test` green after each.

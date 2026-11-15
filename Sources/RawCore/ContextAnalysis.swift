@@ -104,32 +104,40 @@ public enum DecisionEngine {
         public static let landscapeLabelConfidence = 0.5
         public static let landscapeLabels: Set<String> = ["sky", "land", "mountain", "hill", "beach", "grass", "field", "sunset", "sunrise", "ocean", "lake", "forest"]
         public static let lookIntensityRange: ClosedRange<Float> = -0.15...0.10
+        /// Score ramps (smoothstep), centred on the thresholds above. Dark: 0 at −4.6, 1 at −6.1 stops (ends inside
+        /// the tuning gap MTN01 −4.57 / CAFE01 −6.13). ISO: ±0.5 stop around 1600. People: ±50 % around 3 % mask /
+        /// 1 % face. Label confidence: 0.4…0.6 around 0.5.
+        public static let darkRamp: ClosedRange<Double> = -6.1 ... -4.6
+        public static let isoRampStops = 0.5
+        public static let peopleRamp = 0.5
+        public static let labelRamp: ClosedRange<Double> = 0.4...0.6
     }
 
     /// Roadmap 13, context blending: how much of the (fixed) look this frame gets. Pure, bounded, every reason logged.
+    /// Since 2026-11-15 each term is a 0...1 score (`ScenePrediction`) times its weight instead of a yes/no threshold:
+    /// two frames of one roll at median −5.34 and −5.36 used to differ by 0.10 of look; now they differ by ~0.002.
+    /// The ramps are centred on the old thresholds, and their ends sit inside the gaps between tuning files, so every
+    /// tuning file keeps its old value (MTN01 −4.57 → 0, CAFE01 −6.13 → full).
     public static func lookIntensityOffset(context c: SceneContext) -> (Float, [String]) {
+        let p = c.prediction
         var off: Float = 0
         var why: [String] = []
-        if c.logP50 < Threshold.darkMedianStops {
-            off -= 0.10
-            why.append(String(format: "dark scene (median %.2f stops < %.2f) -> look -0.10 (colour shifts and grain read as noise in the dark)", c.logP50, Threshold.darkMedianStops))
+        func add(_ weight: Float, _ score: Double, _ text: String) {
+            let v = weight * Float(score)
+            guard abs(v) >= 0.0005 else { return }
+            off += v
+            why.append(String(format: "%@ -> look %+.3f", text, v))
         }
-        if let iso = c.iso, iso >= Threshold.veryHighISO {
-            off -= 0.05
-            why.append("ISO \(Int(iso)) >= \(Int(Threshold.veryHighISO)) -> look -0.05")
-        }
-        let people = (c.personFraction ?? 0) >= Threshold.personFraction || (c.largestFaceArea ?? 0) >= Threshold.faceArea
-        if people {
-            off -= 0.05
-            why.append("people in frame -> look -0.05 (on top of skin protection)")
-        } else if c.logP50 >= Threshold.darkMedianStops,
-                  let hit = (c.labels ?? [:]).filter({ Threshold.landscapeLabels.contains($0.key) && $0.value >= Threshold.landscapeLabelConfidence }).max(by: { $0.value < $1.value }) {
-            off += 0.05
-            why.append(String(format: "landscape (%@ %.2f), no people -> look +0.05", hit.key, hit.value))
-        }
+        add(-0.10, p.night, String(format: "dark scene %.2f (median %.2f stops, ramp %.2f…%.2f)", p.night, c.logP50,
+                                   Threshold.darkRamp.lowerBound, Threshold.darkRamp.upperBound))
+        add(-0.05, p.highISO, String(format: "high ISO %.2f (ISO %ld, ramp around %ld)", p.highISO, Int(c.iso ?? 0), Int(Threshold.veryHighISO)))
+        add(-0.05, p.people, String(format: "people %.2f (mask %.1f%%, face %.1f%%; on top of skin protection)", p.people,
+                                    (c.personFraction ?? 0) * 100, (c.largestFaceArea ?? 0) * 100))
+        // Landscape only where there are no people and it is not dark (people and night win, as before).
+        add(0.05, p.landscape * (1 - p.people) * (1 - p.night), String(format: "landscape %.2f (%@), x no-people x not-dark", p.landscape, p.landscapeLabel ?? "none"))
         let r = Threshold.lookIntensityRange
         let clamped = min(max(off, r.lowerBound), r.upperBound)
-        if clamped != off { why.append(String(format: "look offset %.2f clamped to %.2f", off, clamped)) }
+        if abs(clamped - off) > 1e-6 { why.append(String(format: "look offset %.3f clamped to %.2f", off, clamped)) }
         return (clamped, why)
     }
 
@@ -198,6 +206,7 @@ public enum DecisionEngine {
             if off != 0 { st.lookIntensityOffset = off; why += r }
         }
         if why.isEmpty { why.append("no rule fired: Apple defaults kept (explicit)") }
+        why.append(c.prediction.summary)
         return Decision(settings: st, reasons: why)
     }
 }
@@ -361,4 +370,75 @@ public enum SkyMask {
         let coverage = Double(mask.reduce(0, +)) / Double(n)
         return Result(width: w, height: h, mask: mask, coverage: coverage)
     }
+}
+
+/// Scene semantics as 0...1 scores with the evidence behind each (the "feature fusion" layer of the 2026-11-15
+/// architecture review). Pure and derived from `SceneContext`, so a stored analysis needs no new fields.
+/// Measurements decide what they measure (darkness from the scene-linear median, people from the Vision mask / faces);
+/// Vision labels only give environment and landscape, each with its confidence. A label id that Vision never returns
+/// simply never matches.
+public struct ScenePrediction: Codable, Equatable, Sendable {
+    public enum Environment: String, Codable, Sendable { case indoor, outdoor, unknown }
+    /// Dark / night appearance from the scene-linear median (measured, not a label).
+    public var night: Double
+    public var highISO: Double
+    /// People from the Vision person mask and the largest face.
+    public var people: Double
+    /// Best landscape label confidence, ramped (0.4…0.6).
+    public var landscape: Double
+    public var landscapeLabel: String?
+    public var outdoor: Double
+    public var indoor: Double
+    public var environment: Environment
+
+    public static let outdoorLabels: Set<String> = DecisionEngine.Threshold.landscapeLabels.union(
+        ["outdoor", "cloudy", "blue_sky", "cityscape", "skyscraper", "street", "road", "garden", "park", "snow", "desert"])
+    public static let indoorLabels: Set<String> = ["indoor", "interior_room", "room", "living_room", "bedroom", "kitchen", "office",
+                                                   "restaurant", "furniture", "sofa", "couch", "bed", "tableware", "utensil", "stairs", "door", "ceiling"]
+    /// An environment is named only when its evidence is >= this and beats the other side by `environmentMargin`.
+    public static let environmentConfidence = 0.5
+    public static let environmentMargin = 0.15
+
+    /// smoothstep: 0 at `a`, 1 at `b` (works for a > b too).
+    public static func ramp(_ x: Double, from a: Double, to b: Double) -> Double {
+        guard a != b else { return x >= b ? 1 : 0 }
+        let t = min(max((x - a) / (b - a), 0), 1)
+        return t * t * (3 - 2 * t)
+    }
+
+    public init(context c: SceneContext) {
+        typealias T = DecisionEngine.Threshold
+        night = Self.ramp(c.logP50, from: T.darkRamp.upperBound, to: T.darkRamp.lowerBound)
+        if let iso = c.iso, iso > 0 {
+            let stops = log2(iso / T.veryHighISO)
+            highISO = Self.ramp(stops, from: -T.isoRampStops, to: T.isoRampStops)
+        } else { highISO = 0 }
+        let person = c.personFraction ?? 0, face = c.largestFaceArea ?? 0
+        let k = T.peopleRamp
+        people = max(Self.ramp(person, from: T.personFraction * (1 - k), to: T.personFraction * (1 + k)),
+                     Self.ramp(face, from: T.faceArea * (1 - k), to: T.faceArea * (1 + k)))
+        let labels = c.labels ?? [:]
+        func best(_ set: Set<String>) -> (String, Double)? {
+            labels.filter { set.contains($0.key) }.max { $0.value < $1.value }.map { ($0.key, $0.value) }
+        }
+        let land = best(T.landscapeLabels)
+        landscapeLabel = land?.0
+        landscape = Self.ramp(land?.1 ?? 0, from: T.labelRamp.lowerBound, to: T.labelRamp.upperBound)
+        outdoor = best(Self.outdoorLabels)?.1 ?? 0
+        indoor = best(Self.indoorLabels)?.1 ?? 0
+        if outdoor >= Self.environmentConfidence, outdoor - indoor >= Self.environmentMargin { environment = .outdoor }
+        else if indoor >= Self.environmentConfidence, indoor - outdoor >= Self.environmentMargin { environment = .indoor }
+        else { environment = .unknown }
+    }
+
+    /// One recipe line.
+    public var summary: String {
+        String(format: "scene: %@ (outdoor %.2f, indoor %.2f), night %.2f, high ISO %.2f, people %.2f, landscape %.2f%@",
+               environment.rawValue, outdoor, indoor, night, highISO, people, landscape, landscapeLabel.map { " (\($0))" } ?? "")
+    }
+}
+
+public extension SceneContext {
+    /// Scores derived from this context (computed, not stored).
+    var prediction: ScenePrediction { ScenePrediction(context: self) }
 }

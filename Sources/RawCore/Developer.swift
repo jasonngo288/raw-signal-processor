@@ -431,6 +431,7 @@ public final class Developer: @unchecked Sendable {
         let finish = st.finish ?? stock?.finish
         var finishCtx = base.pluginContext
         finishCtx.personMask = base.personMask   // lightLeak holds the leak back on people (spec: x personFactor)
+        finishCtx.lookBase = beforeLook            // qualityGuard compares the finished frame with the frame before the look
         // Exposure-stage plugins (light leak) before grain / halation, so the grain sits on top as on film.
         for p in base.active {
             let (img, why) = try p.beforeGrain(image, settings: st, finish: finish, ctx: finishCtx)
