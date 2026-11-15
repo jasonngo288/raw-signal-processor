@@ -110,7 +110,14 @@ struct VariantResult: Codable {
 }
 
 struct Gates: Codable {
+    /// Decoder control: `explicit` (Apple's defaults written back) vs `appleDefault` on the SAME decoder version.
+    /// When DecoderPolicy pins another version than the OS default, the bench renders `explicit @ Apple default` for this.
     var gate1: Bool
+    var gate1DeltaE: Double? = nil
+    /// Informational, not a gate: the pinned policy version (`explicit`) vs Apple's default version, when they differ.
+    var policyVersion: String? = nil
+    var appleDefaultVersion: String? = nil
+    var policyVsAppleDefaultDeltaE: Double? = nil
     var gate2: Bool
     var gate2Reasons: [String]
     var gate2Core: Bool
@@ -134,9 +141,16 @@ struct FileResult: Codable {
     var native: NativeResult? = nil
 }
 
+/// Bench variant: `explicit` pinned to Apple's default decoder version (only rendered when DecoderPolicy picks another).
+let explicitAtAppleDefault = "explicit @ Apple default"
+
 func gates(_ vs: [VariantResult]) -> Gates? {
     guard let ref = vs.first(where: { $0.name == "appleDefault" }), let exp = vs.first(where: { $0.name == "explicit" }),
           let auto = vs.first(where: { $0.name == "auto" }) else { return nil }
+    // Gate 1 measures decoder control on one decoder version (user decision 2026-11-15). The policy-vs-OS-default
+    // difference is a separate, informational number.
+    let sameVersion = vs.first(where: { $0.name == explicitAtAppleDefault }) ?? exp
+    let versionsDiffer = exp.recipe.decoderVersion != ref.recipe.decoderVersion
     var why: [String] = []
     if auto.deltaE00MeanUnclipped > 3 { why.append(String(format: "ΔE unclipped %.2f > 3", auto.deltaE00MeanUnclipped)) }
     if auto.metrics.blackP1 > ref.metrics.blackP1 + 0.002 { why.append(String(format: "black p1 raised %.4f -> %.4f", ref.metrics.blackP1, auto.metrics.blackP1)) }
@@ -149,7 +163,12 @@ func gates(_ vs: [VariantResult]) -> Gates? {
         if core.metrics.blackP1 > ref.metrics.blackP1 + 0.002 { coreWhy.append("core black p1 raised") }
         if let a = core.ringOnReferenceMask, let r = ref.metrics.highlightRingMeanY, a > r + 0.01 { coreWhy.append("core halo ring brighter") }
     }
-    return Gates(gate1: exp.deltaE00Mean < 0.5, gate2: why.isEmpty, gate2Reasons: why, gate2Core: coreWhy.isEmpty, gate2CoreReasons: coreWhy)
+    return Gates(gate1: sameVersion.recipe.decoderVersion == ref.recipe.decoderVersion && sameVersion.deltaE00Mean < 0.5,
+                 gate1DeltaE: sameVersion.deltaE00Mean,
+                 policyVersion: versionsDiffer ? exp.recipe.decoderVersion : nil,
+                 appleDefaultVersion: versionsDiffer ? ref.recipe.decoderVersion : nil,
+                 policyVsAppleDefaultDeltaE: versionsDiffer ? exp.deltaE00Mean : nil,
+                 gate2: why.isEmpty, gate2Reasons: why, gate2Core: coreWhy.isEmpty, gate2CoreReasons: coreWhy)
 }
 
 /// Writes an image with its recipe embedded and a sidecar .recipe.json next to it (AGENTS.md rule 1).
@@ -187,6 +206,12 @@ func benchFile(_ url: URL, entry: CorpusEntry?, outDir: URL, longEdge: Int, full
     var t0 = Date()
     let ref = try dev.develop(url: url, settings: .appleDefault, auto: false, scaleFactor: scale)
     let refSeconds = Date().timeIntervalSince(t0)
+    // Gate 1 compares on one decoder version: if the policy pins another version than Apple's default, also render
+    // `explicit` on Apple's default version (the `explicit` variant itself stays on the policy version).
+    if try decoder.pinnedVersion(url: url, requested: nil) != ref.recipe.decoderVersion {
+        variants.insert(Variant(name: explicitAtAppleDefault, settings: RenderSettings(mode: .explicit, decoderVersion: ref.recipe.decoderVersion),
+                                auto: false), at: 1)
+    }
     var renders: [(Variant, Developer.Output, Double)] = []
     for v in variants {
         t0 = Date()
@@ -266,19 +291,19 @@ func markdown(_ files: [FileResult]) -> String {
     var md = "# raw-bench summary\n\n"
     md += "Reference = Apple's default CIRAWFilter decode of the same file (pixel-aligned). Metrics: docs/METRICS.md.\n"
     md += "OS: \(ProcessInfo.processInfo.operatingSystemVersionString)\n\n"
-    md += "## Gates\n\n| id | file | category | split | camera | scene median (stops) | Gate 1 | Gate 2 (auto) | Gate 2 (core) | auto decisions |\n|---|---|---|---|---|---|---|---|---|---|\n"
+    md += "Gate 1 = `explicit` vs `appleDefault` on the same decoder version (decoder control). "
+    md += "\"policy vs Apple default\" is informational: ΔE00 mean of the policy-pinned `explicit` vs `appleDefault` when DecoderPolicy pins another version than the OS default.\n\n"
+    md += "## Gates\n\n| id | file | category | split | camera | scene median (stops) | Gate 1 | policy vs Apple default | Gate 2 (auto) | Gate 2 (core) | auto decisions |\n|---|---|---|---|---|---|---|---|---|---|---|\n"
     for f in files {
         let c = f.corpus
-        // Gate 1 compares at different decoder versions when DecoderPolicy pins another version than Apple's default
-        // (kept on purpose, user 2026-11-09): say so, so a version difference is not read as lost decoder control.
-        let vRef = f.variants.first(where: { $0.name == "appleDefault" })?.recipe.decoderVersion
-        let vExp = f.variants.first(where: { $0.name == "explicit" })?.recipe.decoderVersion
-        let versionNote = (vRef != nil && vExp != nil && vRef != vExp) ? " (policy \(vExp!) ≠ Apple default \(vRef!))" : ""
-        let g1 = f.gates.map { ($0.gate1 ? "PASS" : "FAIL") + versionNote } ?? (f.error == nil ? "–" : "ERROR")
+        let g1 = f.gates.map { ($0.gate1 ? "PASS" : "FAIL") + ($0.gate1DeltaE.map { String(format: " (%.2f)", $0) } ?? "") } ?? (f.error == nil ? "–" : "ERROR")
+        let pol = f.gates.map { g in
+            g.policyVsAppleDefaultDeltaE.map { String(format: "%@ vs %@: ΔE00 %.2f", g.policyVersion ?? "?", g.appleDefaultVersion ?? "?", $0) } ?? "same version"
+        } ?? "–"
         let g2 = f.gates.map { $0.gate2 ? "PASS" : "FAIL: " + $0.gate2Reasons.joined(separator: "; ") } ?? (f.error ?? "–")
         let dec = f.variants.first(where: { $0.name == "auto" })?.recipe.decisions.joined(separator: "; ") ?? ""
         let g2c = f.gates.map { $0.gate2Core ? "PASS" : "FAIL: " + $0.gate2CoreReasons.joined(separator: "; ") } ?? "–"
-        md += "| \(c?.id ?? "") | \(f.file) | \(c?.category ?? "") | \(c?.split ?? "") | \(f.camera ?? "?") | \(f2(f.sceneMedianStops)) | \(g1) | \(g2) | \(g2c) | \(dec) |\n"
+        md += "| \(c?.id ?? "") | \(f.file) | \(c?.category ?? "") | \(c?.split ?? "") | \(f.camera ?? "?") | \(f2(f.sceneMedianStops)) | \(g1) | \(pol) | \(g2) | \(g2c) | \(dec) |\n"
     }
     md += "\n"
     for f in files {

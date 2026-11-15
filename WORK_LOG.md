@@ -2,6 +2,23 @@
 
 Newest first. Each entry: what changed, why, evidence, what is NOT verified yet.
 
+## 2026-11-15 — Gate 1 measures decoder control on one decoder version (IPH04 / JMSG7035)
+- **Why:** CI (runs 43563753031, 43667059417) printed Gate 1 FAIL for corpus IPH04 `JMSG7035.DNG` (iPhone SE, tuning):
+  "policy 8.dng ≠ Apple default 7". Gate 1 is meant to prove decoder control (AGENTS.md), but on this file it compared
+  two decoders: `DecoderPolicy` pins `8.dng`, the `appleDefault` reference stays on the OS default `7` (ROADMAP item 8,
+  user 2026-11-09). Known since the 2026-11-09 corpus entry (local: explicit@8.dng 1.99, explicit@7 0.00).
+- **What (option 1 of 3):** `raw-bench bench` renders an extra variant `explicit @ Apple default` (explicit mode,
+  `decoderVersion` = Apple's default) only when the policy version differs; Gate 1 = that variant vs `appleDefault`
+  (versions must match, ΔE00 mean < 0.5). `Gates` gains `gate1DeltaE`, `policyVersion`, `appleDefaultVersion`,
+  `policyVsAppleDefaultDeltaE`; the summary has a new informational column "policy vs Apple default". `explicit` itself
+  stays on the policy version (it is the base of `auto`). DecoderPolicy unchanged. AGENTS.md Gate 1, ROADMAP item 8 and
+  the `DecoderPolicy` comment say "same decoder version". CI's Job summary step reprints the Gates table and the decoder
+  rows of version-differing files at the end of the log (short log tail is readable from the dev container).
+- **Not chosen:** option 2 (documented exception) leaves a red FAIL that means nothing; option 3 (policy change) needs
+  evidence that 8.dng is worse than 7 on native iPhone DNGs: see evidence below.
+- **Evidence:** CI_PENDING
+- **Unverified:** no Swift toolchain in this session; CI is the compiler.
+
 ## 2026-11-13 — RawCore 0.3.0 (branch `feature/rsp-0.3.0`, from tag 0.2.0; not tagged)
 Contract: MoodRoll `.orchestration/film-lab/RSP_030_SIGNOFF.md` (C1-C11, §5 tests, §6 step 2 a-h) and
 `LOOK_V2_PROTOTYPE_2026-11-13.md` §5. One commit per sub-step; `swift test` green after each.

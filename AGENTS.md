@@ -59,7 +59,9 @@ Agent roles and routing: `.orchestration/README.md` and `.claude/agents/` (adapt
    The bench always runs `auto` (default plugins) and `auto core` (no plugins) so the effect of the plugins is visible.
 
 ## Decision gates
-- **Gate 1**: `explicit` (Apple defaults written back) reproduces `appleDefault` — ΔE00 mean < 0.5. Proves we control the decoder.
+- **Gate 1**: `explicit` (Apple defaults written back) reproduces `appleDefault` **on the same decoder version** — ΔE00 mean < 0.5.
+  Proves we control the decoder. Where `DecoderPolicy` pins another version than the OS default (e.g. iPhone SE `8.dng` vs `7`),
+  the bench renders `explicit @ Apple default` for the gate and prints policy vs Apple default as an informational column.
 - **Gate 2**: `auto` stays within ΔE00 ≤ 3 of `appleDefault` **on pixels Apple did not clip** (`deltaE00MeanUnclipped`),
   with black p1 not raised (> +0.002) and halo ring not brighter (> +0.01). Evaluated per file in `summary.md`; holdout files are reported, never tuned on.
 - **Gate 3**: cross-model chart ΔE00 < 2 after CCM (needs ColorChecker shots from ≥ 2 iPhone models — not yet available).

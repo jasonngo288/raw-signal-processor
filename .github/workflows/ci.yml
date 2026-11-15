@@ -101,6 +101,10 @@ jobs:
         run: |
           [ -f bench-out/summary.md ] && cat bench-out/summary.md >> "$GITHUB_STEP_SUMMARY"
           grep '\[gate1\]' test.log >> "$GITHUB_STEP_SUMMARY" || true
+          # Gates table again at the end of the log, so it can be read with a short log tail.
+          [ -f bench-out/summary.md ] && sed -n '/^## Gates/,/^## [^G]/p' bench-out/summary.md | grep '^|' | cut -d'|' -f2-11 || true
+          # Decoder rows (appleDefault / explicit / explicit @ Apple default) of files whose policy version differs.
+          [ -f bench-out/summary.md ] && awk '/^## /{h=$0} /^decoder /{d=$0} /^\| explicit @ Apple default/{print h; print d; print a; print e; print} /^\| appleDefault \|/{a=$0} /^\| explicit \|/{e=$0}' bench-out/summary.md || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
