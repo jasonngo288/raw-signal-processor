@@ -222,6 +222,42 @@ public final class Developer: @unchecked Sendable {
         try finish(developBase(url: url, settings: settings, auto: auto, scaleFactor: scaleFactor, analysis: analysis))
     }
 
+    /// Settings with the `qualityGuard` plugin switched on (added to the explicit list, or to the developer's default set).
+    public func guardEnabled(_ settings: RenderSettings) -> RenderSettings {
+        var s = settings
+        let ids = settings.plugins ?? plugins.defaultEnabled
+        if !ids.contains("qualityGuard") { s.plugins = ids + ["qualityGuard"] }
+        return s
+    }
+
+    /// Preview -> final in one call, so a host does not hand-roll it. The guard MEASURES on a small preview
+    /// (`previewScaleFactor`, default 0.25; the guard itself measures on 384 px renders of it) and the full-resolution
+    /// final reuses that strength through `RenderSettings.qualityGuardStrength`: the final makes no measuring render
+    /// (`recipe.qualityGuardStrength` is the same value, `QualityGuardReport.measures` = 0), and a strength of 1 is a
+    /// no-op. If `scaleFactor <= previewScaleFactor` the render itself is already small, so it develops once and
+    /// measures itself. `settings.qualityGuardStrength` set by the caller skips the preview (it is the strength).
+    /// Returns the final output; `output.recipe.qualityGuardStrength` is the chosen strength (1 = passed untouched).
+    public func developGuarded(url: URL, settings: RenderSettings, auto: Bool, scaleFactor: Float,
+                               previewScaleFactor: Float = 0.25, analysis: Analysis? = nil) throws -> Output {
+        var s = guardEnabled(settings)
+        if s.qualityGuardStrength != nil || scaleFactor <= previewScaleFactor {
+            return try develop(url: url, settings: s, auto: auto, scaleFactor: scaleFactor, analysis: analysis)
+        }
+        let strength = try previewGuardStrength(url: url, settings: settings, auto: auto, previewScaleFactor: previewScaleFactor, analysis: analysis)
+        s.qualityGuardStrength = strength
+        return try develop(url: url, settings: s, auto: auto, scaleFactor: scaleFactor, analysis: analysis)
+    }
+
+    /// Step 1 of preview -> final when the host wants the two steps itself: develop at `previewScaleFactor` with the guard
+    /// and return the strength it chose (0.5...1, 1 = passed untouched). Step 2: develop the final with
+    /// `settings.qualityGuardStrength = strength` and the guard enabled (`guardEnabled`); that final does not measure.
+    public func previewGuardStrength(url: URL, settings: RenderSettings, auto: Bool, previewScaleFactor: Float = 0.25,
+                                     analysis: Analysis? = nil) throws -> Float {
+        var s = guardEnabled(settings)
+        s.qualityGuardStrength = nil
+        return try develop(url: url, settings: s, auto: auto, scaleFactor: previewScaleFactor, analysis: analysis).recipe.qualityGuardStrength ?? 1
+    }
+
     /// Stage 1: decisions, decode, plugins.afterDecode. With `auto`, a given `analysis` is used when it still fits
     /// (`Analysis.staleReason`); otherwise the file is analysed again and the recipe says why.
     public func developBase(url: URL, settings: RenderSettings, auto: Bool, scaleFactor: Float, analysis: Analysis? = nil) throws -> Base {
@@ -432,6 +468,8 @@ public final class Developer: @unchecked Sendable {
         var finishCtx = base.pluginContext
         finishCtx.personMask = base.personMask   // lightLeak holds the leak back on people (spec: x personFactor)
         finishCtx.lookBase = beforeLook            // qualityGuard compares the finished frame with the frame before the look
+        let guardReport = base.active.contains(where: { $0.id == "qualityGuard" }) ? QualityGuardReport() : nil
+        finishCtx.guardReport = guardReport
         // Exposure-stage plugins (light leak) before grain / halation, so the grain sits on top as on film.
         for p in base.active {
             let (img, why) = try p.beforeGrain(image, settings: st, finish: finish, ctx: finishCtx)
@@ -452,6 +490,7 @@ public final class Developer: @unchecked Sendable {
             out.recipe.decisions += why.map { "[\(p.id)] " + $0 }
         }
         out.recipe.plugins = base.active.map(\.id).filter { ran.contains($0) }
+        out.recipe.qualityGuardStrength = guardReport?.strength
         return Output(image: image, recipe: out.recipe, context: base.context)
     }
 }

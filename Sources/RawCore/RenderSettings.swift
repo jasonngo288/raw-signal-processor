@@ -246,6 +246,9 @@ public struct DecodeRecipe: Codable, Equatable, Sendable {
     public var calibration: String? = nil
     /// How the decoder version was chosen ("policy", "requested", "Apple default").
     public var decoderVersionSource: String? = nil
+    /// Output of the `qualityGuard` plugin: 1 = the finish passed untouched (or 1 was given), 0.5...< 1 = blended back,
+    /// nil = the guard was off. Feed it to the final render as `RenderSettings.qualityGuardStrength`. Old recipes lack it (nil).
+    public var qualityGuardStrength: Float? = nil
 
     public init(file: String, settings: RenderSettings, decoderVersion: String, supportedDecoderVersions: [String],
                 defaults: DecodeParameters, effective: DecodeParameters, support: DecoderSupport, nativeSize: [Int],

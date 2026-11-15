@@ -100,6 +100,32 @@ final class DevelopStagesTests: XCTestCase {
     }
 
     /// A base finished with another stock equals a full develop with that stock (no second decode needed).
+    /// qualityGuard result is typed on the recipe; the guard is off by default; preview -> final carries one strength.
+    func testQualityGuardStrengthOnRecipeAndPreviewToFinal() throws {
+        let url = try original()
+        let dev = Developer()
+        let an = try dev.analyze(url: url)
+        var st = RenderSettings.explicit; st.stock = "warm400"
+        let off = try dev.develop(url: url, settings: st, auto: true, scaleFactor: 0.1, analysis: an)
+        XCTAssertNil(off.recipe.qualityGuardStrength, "guard off by default")
+        XCTAssertFalse(off.recipe.pluginsEnabled.contains("qualityGuard"))
+        // Old recipes (no key) still decode.
+        var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(off.recipe)) as! [String: Any]
+        json.removeValue(forKey: "qualityGuardStrength")
+        XCTAssertNil(try JSONDecoder().decode(DecodeRecipe.self, from: JSONSerialization.data(withJSONObject: json)).qualityGuardStrength)
+        // Measured on the preview, the final (bigger) render carries the same strength.
+        let s = try dev.previewGuardStrength(url: url, settings: st, auto: true, previewScaleFactor: 0.05, analysis: an)
+        XCTAssertTrue((0.5...1).contains(s))
+        let final = try dev.developGuarded(url: url, settings: st, auto: true, scaleFactor: 0.2, previewScaleFactor: 0.05, analysis: an)
+        XCTAssertEqual(final.recipe.qualityGuardStrength, s)
+        XCTAssertEqual(final.recipe.settings.qualityGuardStrength, s, "the final was told the strength, not asked to measure")
+        // A strength given by the caller is kept and not re-measured.
+        var given = st; given.qualityGuardStrength = 0.5
+        let g = try dev.developGuarded(url: url, settings: given, auto: true, scaleFactor: 0.2, analysis: an)
+        XCTAssertEqual(g.recipe.qualityGuardStrength, 0.5)
+        XCTAssertTrue(g.recipe.decisions.contains { $0.contains("not re-measured") })
+    }
+
     func testFinishBaseWithAnotherStock() throws {
         let url = try original()
         let dev = Developer()

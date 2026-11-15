@@ -50,6 +50,18 @@ public struct PluginRenderContext {
     public var personMask: CIImage? = nil
     /// The image before the look (finish stage only): what `qualityGuard` compares the finished image with.
     public var lookBase: CIImage? = nil
+    /// Where `qualityGuard` leaves its decision as typed values (strength, number of measuring renders). Filled by
+    /// `Developer.finish`; nil in a hand-built context (the plugin then only writes its recipe line).
+    public var guardReport: QualityGuardReport? = nil
+}
+
+/// Typed result of `qualityGuard` in one render. `strength` 1 = passed untouched (or 1 was given), < 1 = the finish was
+/// blended back; nil = the guard did not run. `measures` counts the small measuring renders it made (0 when a strength
+/// was given: preview -> final costs the final nothing).
+public final class QualityGuardReport: @unchecked Sendable {
+    public var strength: Float?
+    public var measures = 0
+    public init() {}
 }
 
 public struct PluginRegistry: Sendable {
@@ -302,8 +314,10 @@ public struct VignettePlugin: DevelopPlugin {
 /// and the other finish plugins, measure the finished frame against the frame before the look (`ctx.lookBase`) on a
 /// small render. If the finish clipped more than `maxClipIncrease` of the pixels or moved the median luminance by more
 /// than `maxExposureDriftEV`, blend the finish back toward the base (75 %, then 50 %) and keep the first strength
-/// that passes; never below 50 %. It judges the film stage only (the look is display-referred and must not repair
-/// tone, AGENTS goal 3): fades and lifted blacks are look intent and are not checked.
+/// that passes; never below 50 %. The base is the frame BEFORE the look, so the verdict covers look + skin protection
+/// + finish, and blending back weakens all of them (the LUT too), not only grain / halation. A look that legitimately
+/// moves the median by more than 0.5 EV or clips more than 0.5 % of the pixels therefore trips it; small fades and
+/// lifted blacks are look intent and are not checked.
 /// Preview → final: a render can carry `RenderSettings.qualityGuardStrength` (found on a preview), which is applied
 /// without measuring, so the full-resolution render uses the same parameter (and costs no extra renders).
 /// Must be the last plugin of the registry (it judges what the others did).
@@ -337,27 +351,35 @@ public struct QualityGuardPlugin: DevelopPlugin {
         return out.isEmpty ? nil : out.joined(separator: ", ")
     }
 
-    static func blend(base: CIImage, finished: CIImage, strength: Float) -> CIImage {
-        finished.applyingFilter("CIDissolveTransition", parameters: [kCIInputTargetImageKey: finished, kCIInputImageKey: base, "inputTime": strength])
-            .cropped(to: finished.extent)
+    static func blend(base: CIImage, finished: CIImage, strength: Float, renderer: Renderer) -> CIImage {
+        renderer.dissolve(from: base, to: finished, amount: strength)
     }
 
     public func afterFinish(_ image: CIImage, settings st: RenderSettings, finish: FilmFinish?, ctx: PluginRenderContext) throws -> (CIImage, [String]) {
         guard let base = ctx.lookBase else { return (image, []) }
-        if let s = st.qualityGuardStrength {
-            guard s < 1 else { return (image, []) }
-            return (Self.blend(base: base, finished: image, strength: s), [String(format: "finish strength %.2f (given, e.g. from the preview): not re-measured", s)])
+        let report = ctx.guardReport
+        func measure(_ i: CIImage) throws -> Measure {
+            report?.measures += 1
+            return try Self.measure(i, renderer: ctx.renderer)
         }
-        let b = try Self.measure(base, renderer: ctx.renderer)
-        guard let why = Self.problem(try Self.measure(image, renderer: ctx.renderer), base: b) else { return (image, []) }
+        if let s = st.qualityGuardStrength {
+            report?.strength = s
+            guard s < 1 else { return (image, []) }
+            return (Self.blend(base: base, finished: image, strength: s, renderer: ctx.renderer),
+                    [String(format: "finish strength %.2f (given, e.g. from the preview): not re-measured", s)])
+        }
+        let b = try measure(base)
+        guard let why = Self.problem(try measure(image), base: b) else { report?.strength = 1; return (image, []) }
         for s in Self.strengths {
-            let c = Self.blend(base: base, finished: image, strength: s)
-            if Self.problem(try Self.measure(c, renderer: ctx.renderer), base: b) == nil {
+            let c = Self.blend(base: base, finished: image, strength: s, renderer: ctx.renderer)
+            if Self.problem(try measure(c), base: b) == nil {
+                report?.strength = s
                 return (c, [String(format: "finish %@ -> blended back to %.2f of the finish (passes)", why, s)])
             }
         }
         let floor = Self.strengths.last!
-        return (Self.blend(base: base, finished: image, strength: floor),
+        report?.strength = floor
+        return (Self.blend(base: base, finished: image, strength: floor, renderer: ctx.renderer),
                 [String(format: "finish %@ -> still failing at %.2f, kept %.2f (floor)", why, floor, floor)])
     }
 }

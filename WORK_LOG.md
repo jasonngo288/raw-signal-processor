@@ -2,6 +2,22 @@
 
 Newest first. Each entry: what changed, why, evidence, what is NOT verified yet.
 
+## 2026-11-15 — 0.3.1 prep: tech-lead review fixes (branch `feature/scene-scores-quality-guard`)
+Review: MoodRoll `.orchestration/film-lab/RSP_SCENE_SCORES_TECHLEAD_REVIEW.md`. Cost rule from the app: the guard runs at
+develop, so it measures on a SMALL preview and the full-resolution final reuses the strength (never re-measures).
+- **`RawCore.engineVersion` 0.3.0 -> 0.3.1** (must-fix 1; B changes `auto: true` pixels on non-tuning frames). Not tagged.
+- **Structured result:** `DecodeRecipe.qualityGuardStrength: Float?` (1 = passed untouched or 1 given, 0.5..<1 = blended
+  back, nil = guard off; old recipes decode as nil). `QualityGuardReport` (strength + `measures`) in `PluginRenderContext`.
+- **Preview -> final:** `Developer.developGuarded(url:settings:auto:scaleFactor:previewScaleFactor:analysis:)` (preview at
+  0.25 by default, final carries the strength, 0 measuring renders), or the two steps `previewGuardStrength(...)` then a
+  final with `guardEnabled(settings)` + `qualityGuardStrength = s` (s = 1 is a no-op).
+- **Should-fix:** blend uses `renderer.dissolve`; CI guard step has `set -o pipefail`, `guardCommand` records a develop error
+  instead of aborting; doc comment corrected (the base is before the look, so blending back also weakens the LUT).
+  NOT done: continuous strength (SF5), device cost measurement (SF6).
+- **Must-fix 2 support:** `raw-bench scenescores <dirs>` (old hard thresholds vs new scores per file, + max |delta| of the
+  applied intensity per RR stock; reads `<dir>/*/capture.dng` too); CI step `scenescores originals output docs corpus-cache`.
+  Local (originals + docs bundles, 7 files): offset changed on 2 files, max |delta| 0.018. Public corpus numbers: CI log.
+
 ## 2026-11-15 — Architecture review items A/B/C (branch `feature/scene-scores-quality-guard`, from main 79f5219)
 Source: the user's "Auto Photo Enhancement" architecture (OpenCV metrics + Core ML scene classes + adaptive parameter
 engine + quality guard). Review: most of it already exists here (SceneContext / CIAreaHistogram / Vision /

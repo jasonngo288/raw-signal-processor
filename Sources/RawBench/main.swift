@@ -18,6 +18,8 @@ raw-bench — CIRAWFilter spike CLI
   raw-bench chart <raw> --corners x1,y1,x2,y2,x3,y3,x4,y4 [--model KEY] [--reference sheet.txt] [--calibration-out models.json] [--out chart.json]
                    ColorChecker Classic: corners = centres of dark skin (top-left), bluish green (top-right), black (bottom-right),
                    white (bottom-left), normalised 0..1 from the image's top-left. Fits the model's CCM, re-decodes to verify.
+  raw-bench guard <dir>... [--long-edge N]        qualityGuard dry run: how often it fires per RR roll stock
+  raw-bench scenescores <dir>...                  lookIntensityOffset old (hard thresholds) vs new (smooth scores) per file (+ <dir>/*/capture.dng)
   raw-bench gate3 <chart.json> <chart.json>...    Gate 3: ΔE00 between models' corrected charts (pass: mean < 2)
   raw-bench looks <raw|dir>... --out <dir> [--looks a,b] [--long-edge N] [--manifest corpus.json]   film-look set: base once, every look, metrics (look review tool)
   raw-bench lut <in.cube|in.mrlut> --out <out.cube|out.mrlut>   convert LUTs (MoodRoll .mrlut packed format), print round-trip error
@@ -481,7 +483,10 @@ func guardCommand(_ dirs: [String], longEdge: Int) throws -> String {
             var st = RenderSettings(mode: .explicit)
             st.stock = stock.name
             st.plugins = PluginRegistry.standard.defaultEnabled + ["qualityGuard"]
-            let o = try dev.develop(url: url, settings: st, auto: true, scaleFactor: scale, analysis: an)
+            let o: Developer.Output
+            do { o = try dev.develop(url: url, settings: st, auto: true, scaleFactor: scale, analysis: an) } catch {
+                md += "| \(url.lastPathComponent) | \(stock.name) | error: \(error) | |\n"; continue
+            }
             total += 1
             if let g = o.recipe.decisions.first(where: { $0.hasPrefix("[qualityGuard]") }) {
                 fired += 1
@@ -490,6 +495,70 @@ func guardCommand(_ dirs: [String], longEdge: Int) throws -> String {
         }
     }
     md += "\n**Fired on \(fired) of \(total) renders.**\n"
+    return md
+}
+
+/// The scene look-intensity offset before the smooth scores (RSP 0.3.0, hard thresholds), kept here only to compare.
+func legacyLookIntensityOffset(_ c: SceneContext) -> Float {
+    typealias T = DecisionEngine.Threshold
+    var off: Float = 0
+    if c.logP50 < T.darkMedianStops { off -= 0.10 }
+    if let iso = c.iso, iso >= T.veryHighISO { off -= 0.05 }
+    if (c.personFraction ?? 0) >= T.personFraction || (c.largestFaceArea ?? 0) >= T.faceArea {
+        off -= 0.05
+    } else if c.logP50 >= T.darkMedianStops,
+              (c.labels ?? [:]).contains(where: { T.landscapeLabels.contains($0.key) && $0.value >= T.landscapeLabelConfidence }) {
+        off += 0.05
+    }
+    return min(max(off, T.lookIntensityRange.lowerBound), T.lookIntensityRange.upperBound)
+}
+
+/// Raw files of a directory, plus `<dir>/*/capture.dng` (device bundles).
+func rawFiles(in dirs: [String]) -> [URL] {
+    var urls: [URL] = []
+    for dir in dirs {
+        let root = URL(fileURLWithPath: dir)
+        let names = ((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []).sorted()
+        for n in names {
+            let u = root.appendingPathComponent(n)
+            if rawExtensions.contains((n as NSString).pathExtension.lowercased()) { urls.append(u) }
+            else if FileManager.default.fileExists(atPath: u.appendingPathComponent("capture.dng").path) { urls.append(u.appendingPathComponent("capture.dng")) }
+        }
+    }
+    return urls
+}
+
+/// Must-fix 2 (tech-lead review 2026-11-15): how much the smooth scores change `lookIntensityOffset` on every file,
+/// old (hard thresholds) vs new, and the largest change of the applied look intensity per roll stock. Analysis only.
+func sceneScoresCommand(_ dirs: [String]) throws -> String {
+    var md = "# lookIntensityOffset: old (hard thresholds) vs new (smooth scores)\n\n"
+    md += "| file | median | ISO | person % | face % | old | new | delta | scene |\n|---|---|---|---|---|---|---|---|---|\n"
+    var rows: [(String, Float, Float)] = []
+    for url in rawFiles(in: dirs) {
+        let name = url.lastPathComponent == "capture.dng" ? url.deletingLastPathComponent().lastPathComponent + "/capture.dng" : url.lastPathComponent
+        log("scenescores \(name)")
+        let an: Developer.Analysis
+        do { an = try dev.analyze(url: url) } catch { md += "| \(name) | error: \(error) | | | | | | | |\n"; continue }
+        let c = an.context
+        let old = legacyLookIntensityOffset(c), new = DecisionEngine.lookIntensityOffset(context: c).0
+        rows.append((name, old, new))
+        md += String(format: "| %@ | %.2f | %@ | %.1f | %.1f | %+.3f | %+.3f | %+.3f | %@ |\n", name, c.logP50, c.iso.map { String(Int($0)) } ?? "-",
+                     (c.personFraction ?? 0) * 100, (c.largestFaceArea ?? 0) * 100, old, new, new - old, String(c.prediction.summary.dropFirst(7)))
+    }
+    let maxDelta = rows.map { abs($0.2 - $0.1) }.max() ?? 0
+    md += String(format: "\n**%d files, max |delta| of the offset %.3f (changed on %d).**\n\n", rows.count, maxDelta, rows.filter { abs($0.2 - $0.1) > 0.0005 }.count)
+    md += "| stock | base intensity | max |delta| of applied intensity | file |\n|---|---|---|---|\n"
+    for stock in RollStocks.stocks {
+        let mono = stock.lut().isMonochrome   // mono looks ignore the offset
+        var best: (Float, String) = (0, "-")
+        if !mono {
+            for r in rows {
+                let a = min(max(stock.lookIntensity + r.1, 0), 1), b = min(max(stock.lookIntensity + r.2, 0), 1)
+                if abs(b - a) > best.0 { best = (abs(b - a), r.0) }
+            }
+        }
+        md += String(format: "| %@ | %.2f | %.3f%@ | %@ |\n", stock.name, stock.lookIntensity, best.0, mono ? " (mono: offset ignored)" : "", best.1)
+    }
     return md
 }
 
@@ -584,6 +653,9 @@ func run() throws -> Int32 {
     case "guard":
         guard !rest.isEmpty else { print(usage); return 2 }
         print(try guardCommand(rest, longEdge: a.options["long-edge"].flatMap(Int.init) ?? 768))
+    case "scenescores":
+        guard !rest.isEmpty else { print(usage); return 2 }
+        print(try sceneScoresCommand(rest))
     case "looks":
         guard !rest.isEmpty, let out = a.options["out"] else { print(usage); return 2 }
         let run = try looksCommand(rest, out: out, looks: a.options["looks"].map { $0.split(separator: ",").map(String.init) },

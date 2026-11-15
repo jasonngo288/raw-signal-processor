@@ -100,6 +100,21 @@ final class FilmFinisherTests: XCTestCase {
         let (f, fWhy) = try plugin.afterFinish(harsh, settings: st, finish: nil, ctx: ctx)
         XCTAssertTrue(fWhy[0].contains("not re-measured"))
         XCTAssertEqual(try renderer.linearImage(f).pixels[1], 0.27, accuracy: 0.01, "half way between 0.18 and 0.36 (linear)")
+        // Structured result: measured runs report the strength and the number of measuring renders; a given strength measures nothing.
+        let r1 = QualityGuardReport(); var c1 = ctx; c1.guardReport = r1
+        _ = try plugin.afterFinish(gentle, settings: .explicit, finish: nil, ctx: c1)
+        XCTAssertEqual(r1.strength, 1); XCTAssertEqual(r1.measures, 2)
+        let r2 = QualityGuardReport(); var c2 = ctx; c2.guardReport = r2
+        _ = try plugin.afterFinish(harsh, settings: .explicit, finish: nil, ctx: c2)
+        XCTAssertEqual(r2.strength, 0.5); XCTAssertGreaterThan(r2.measures, 2)
+        let r3 = QualityGuardReport(); var c3 = ctx; c3.guardReport = r3
+        _ = try plugin.afterFinish(harsh, settings: st, finish: nil, ctx: c3)
+        XCTAssertEqual(r3.strength, 0.5); XCTAssertEqual(r3.measures, 0, "final with a given strength: zero extra renders")
+        st.qualityGuardStrength = 1
+        let r4 = QualityGuardReport(); var c4 = ctx; c4.guardReport = r4
+        let (same, sameWhy) = try plugin.afterFinish(harsh, settings: st, finish: nil, ctx: c4)
+        XCTAssertTrue(sameWhy.isEmpty); XCTAssertEqual(r4.strength, 1); XCTAssertEqual(r4.measures, 0)
+        XCTAssertEqual(try renderer.linearImage(same).pixels[1], 0.36, accuracy: 0.01, "strength 1 returns the finish unchanged")
     }
 
     func testPluginRegistryUnplugs() throws {
