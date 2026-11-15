@@ -60,7 +60,7 @@ jobs:
         run: .build/release/raw-bench bench originals corpus-cache --manifest corpus/corpus.json --out bench-out --long-edge 1024 --crops
       - name: qualityGuard dry run (how often it would fire per RR stock; changes nothing)
         if: always()
-        run: .build/release/raw-bench guard originals --long-edge 768 | tee bench-out/guard.md
+        run: mkdir -p bench-out && .build/release/raw-bench guard originals --long-edge 768 | tee bench-out/guard.md
       - name: Device pairs (output/, our render vs the camera HEIC)
         if: always()
         run: .build/release/raw-bench pairs output docs --out bench-out/pairs --long-edge 1024

@@ -12,7 +12,8 @@ final class SceneScoresTests: XCTestCase {
         XCTAssertEqual(ScenePrediction.ramp(0, from: 0, to: 1), 0)
         XCTAssertEqual(ScenePrediction.ramp(1, from: 0, to: 1), 1)
         XCTAssertEqual(ScenePrediction.ramp(0.5, from: 0, to: 1), 0.5, accuracy: 1e-12)
-        XCTAssertEqual(ScenePrediction.ramp(-5, from: -4.6, to: -6.1), 0.5, accuracy: 0.01, "decreasing ramp, midpoint -5.35")
+        XCTAssertEqual(ScenePrediction.ramp(-5.35, from: -4.6, to: -6.1), 0.5, accuracy: 1e-9, "decreasing ramp, midpoint -5.35")
+        XCTAssertEqual(ScenePrediction.ramp(-5, from: -4.6, to: -6.1), 0.1754, accuracy: 1e-3, "smoothstep, not linear")
         XCTAssertEqual(ScenePrediction.ramp(3, from: 0, to: 1), 1)
     }
 

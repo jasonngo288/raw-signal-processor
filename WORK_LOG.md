@@ -24,7 +24,11 @@ labelled dataset, analysis already 2.2–2.8 s on device). The user approved the
   guard verdict, registry: last + off by default), FilmFinisherTests.testQualityGuardBlendsBackOnlyWhenNeeded
   (synthetic: +10 % untouched, ×2 blended to the 0.5 floor, given strength not re-measured). DecisionEngine stress
   test: 9 → 10 reasons (scene line).
-- **Unverified:** not compiled here (no toolchain; CI). Guard cost at full resolution on device. Whether the guard's
+- **CI 43665288044:** built; 156/157 tests — the one failure was my test (`testRamp` used −5 as the midpoint; −5.35 is,
+  −5 gives 0.175 by smoothstep), fixed. **Guard dry run: fired on 0 of 95 renders** (19 RR stocks × 5 originals,
+  768 px): the limits do not touch the shipped looks on these files, so enabling it would leave them pixel-identical.
+  The step itself failed only because `bench-out/` did not exist when the bench was skipped (`mkdir -p` added).
+- **Unverified:** guard cost at full resolution on device. Whether the guard's
   limits are right for the looks (the dry run will show which stocks trip it). The pixel baseline on the user's Mac
   is unaffected by B on tuning files, but frames between the ramp ends (e.g. TOKYO01 −5.32) now get a partial offset.
 
