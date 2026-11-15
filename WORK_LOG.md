@@ -16,8 +16,19 @@ Newest first. Each entry: what changed, why, evidence, what is NOT verified yet.
   rows of version-differing files at the end of the log (short log tail is readable from the dev container).
 - **Not chosen:** option 2 (documented exception) leaves a red FAIL that means nothing; option 3 (policy change) needs
   evidence that 8.dng is worse than 7 on native iPhone DNGs: see evidence below.
-- **Evidence:** CI_PENDING
-- **Unverified:** no Swift toolchain in this session; CI is the compiler.
+- **Evidence (CI run 43671804343, macos-15, green: build, iOS build, demo app, `swift test`, bench):** Gate 1 PASS (ΔE00 0.00)
+  on all 24 decodable files, IPH04 included (`explicit @ Apple default` on `7`: 0.00 / p95 0.00); the three Canon EOS RP
+  DNGs still ERROR (no supported decoder, known). Gate 2 auto / core PASS on all 24. IPH04 is the only file where the
+  policy differs: "8.dng vs 7: ΔE00 1.99".
+  IPH04 decoder rows (bench 1024 px): | variant | ΔE mean | p95 | black p1 | mean Y | clipped % | local contrast | halo ring own / ref mask | bright Y | bright LC | chroma |
+  `appleDefault` (7): 0.00 | 0.00 | 0.0000 | 0.100 | 0.35 | 0.679 | 0.19 / 0.19 | 0.752 | 0.399 | 5.5;
+  `explicit` (8.dng): 1.99 | 4.57 | 0.0000 | 0.098 | 0.00 | 0.727 | 0.31 / 0.19 | 0.655 | 0.342 | 5.4.
+- **Option 3 (policy change) not taken:** on this one file 8.dng is not clearly worse. Black p1 is the same, the halo ring
+  on Apple's mask is the same, there is no clipping (0.35 % → 0 %) and global local contrast is higher (0.679 → 0.727).
+  But highlights are darker (bright Y 0.752 → 0.655) with less local contrast in them (bright LC 0.399 → 0.342); own-mask
+  ring 0.31 is measured on a different (smaller) clip set, so not comparable. One backlit SE frame is not enough
+  evidence either way; DecoderPolicy stays as decided on 2026-11-09. Revisit with more native SE-era DNGs (tuning split only).
+- **Unverified:** no Swift toolchain in this session (CI is the compiler); 8.dng vs 7 on other iPhone models / scenes.
 
 ## 2026-11-13 — RawCore 0.3.0 (branch `feature/rsp-0.3.0`, from tag 0.2.0; not tagged)
 Contract: MoodRoll `.orchestration/film-lab/RSP_030_SIGNOFF.md` (C1-C11, §5 tests, §6 step 2 a-h) and
