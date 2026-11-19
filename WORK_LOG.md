@@ -2,6 +2,75 @@
 
 Newest first. Each entry: what changed, why, evidence, what is NOT verified yet.
 
+## 2026-11-19 — Option C review follow-ups (tech-lead V2_STAGE2_SUNC_REVIEW PASS; User decisions; same branch, not committed)
+- **N1 clamp:** with `brightSceneBlend` on, the delivered gain is never below g254. If the blended pass delivers less
+  (`BrightSceneBlend.keepsToday`), today's pass is kept (record, gain and pixels = blend off); the record has
+  `blendedRestoreEV`, `clampedToToday` (true = fired; `applied` false, effective values today's) and a note. Golden frames
+  hitting N1, read from the existing `v2-254-sunC-2stk` vs `v2-254-off-recheck-2stk` recipes (no new render): **none**
+  (all 10 applied frame x stock pairs: on >= off; c0 at 255 was 0.0000 on every one), so the clamp changes no golden pixel.
+- `Developer.stockRenderer` is now a `let`, set by `init(..., stockRenderer:)` (default pass-through, unchanged behaviour).
+- `Parameters.validate` requires `brightSceneBlend.maxRestoreEV >= maxRestoreEV` (`BrightSceneBlend.validate(base:)`).
+- `BrightSceneBlendRecord`: public init; `blend`, `parametersStatus`, `notes` optional when decoding.
+- Bound helper `BrightSceneBlend.restoreBound` (same formula as before, moved out of Developer).
+- **Tests:** +2 (`testBrightSceneBlendBoundClampValidateAndRecordDecoding`: gWanted < g254, clamp decision, validate,
+  record decoding; `testBrightSceneBlendMissingEV100GivesWeightZero`: ISO removed from the analysis -> w 0, note, pixels =
+  off) and N1 asserts (restoreEV on >= off) in the render test. StockRenderTests use the new init.
+- **Evidence:** `swift build` green; `swift test --filter SceneNormalizerTests` 16/16, `--filter StockRenderTests` 5/5,
+  0 failures. Not run (User constraint): full swift test, raw-bench, harness. engineVersion not bumped.
+
+## 2026-11-19 — Sun-frame option C prototype: `SceneNormalizer.Parameters.brightSceneBlend` (same branch; not committed)
+- **What (User 2026-11-19, MoodRoll PIPELINE_V2_CONTRACT round 9; film-lab SUN_DIMNESS_DIAGNOSIS_2026-11-19 option C):** new
+  optional `brightSceneBlend` (`ev100None` 9, `ev100Full` 13, `clipTopCode8bit` 255, `maxRestoreEV` 2.5, all PROVISIONAL;
+  nil = off = default; absent from JSON when nil; missing sub-keys decode as the provisional values). w = smoothstep of
+  `inputs.ev100` (log2(N²/t) − log2(ISO/100); N = EXIF FNumber of the DNG, t / ISO = analysis SceneContext; unknown -> w 0).
+  w > 0: g254 = today's delivered gain; gWanted = median solve with bound 2.5, no highlight rule; then the solve runs again
+  with restore bound quantised(g254 + w·max(gWanted − g254, 0)) and the highlight rule at code 255 (= film-lab's per-frame
+  emulation: interpolate the bound/gain, not the two images). No classifier, no stock input. Record
+  `exposureNormalizer.brightSceneBlend`: ev100, weight, applied, effective code, effective bound, g254, gWanted.
+  Developer.deliverNormalizer: the solve + skin + rule body is now a nested `pass`; the stage-0 master is decoded once.
+- **Evidence:** `swift build` green; `swift test` (debug) 184/184, 0 failures (+2: weight / defaults / coding, and a real
+  render: w 0 = off pixels, w 1 and midpoint recipe fields). raw-bench release, `git archive 0.4.0` vs this tree, 5
+  originals x 5 stocks (same command as the stage-2 entry), parameter nil: legacy 25/25 and v2 25/25 decoded IDAT identical.
+  MoodRoll harness (reduced, User-approved: 19 frames x rr-sao-mai-200 + rr-nang-100; new `run.py --bright-scene-blend`,
+  `--keep-png`; harness `sceneNormalizerJSON`): `v2-254-off-recheck-2stk` 80/80 sha256 = `v2-254` (A/B), 15/15 =
+  `outdoor-2026-11-19-v2-254` (C), 38/38 = film-lab `ref-v2-default`. `v2-254-sunC-2stk`: 14 indoor frames (EV100 < 9)
+  70/70 identical to off; 36/38 identical to film-lab `optC-ev100-blend` (sao-mai). Final medL (sao-mai) C01 51.6, C02 55.3,
+  A01 33.6 (film-lab 51.6 / 55.3 / 33.6); A01 still capped by the 255 rule (+1.19, short +1.16 EV). Only A02 differs from
+  the emulation: exact EV100 11.45 gives w 0.664 and bound 1.52 (film-lab used the rounded 11.4: 1.50); medL 48.5 vs 48.1.
+- **Not done / open:** full 14-stock harness runs (not approved); release test suite; device. The test DNG only darkens
+  (g254 −0.66), so no unit test covers a positive blended gain (the harness does). All ramp numbers wait for overcast /
+  open-shade (EV100 9–12) frames and a person in sun.
+
+## 2026-11-19 — Pipeline v2 stage 2 skeleton (branch `feature/pipeline-v2-stage2` from tag 0.4.0; not committed)
+- **Release-test finding (no change):** `swift test -c release --filter LookV2Tests` fails the same 2 cases on
+  `git archive 0.3.1` as on 0.4.0, so it is pre-existing: goldenDay2 LUT got `65:0b444c747b96336c`, fixture
+  `65:63b60148be018294`; softPortrait2 got `65:bf4b6682510e499d`, fixture `65:8befcba5124d5344`. coolFade2 passes; it is
+  the only v2 look with `vibrance = 0` (that branch is skipped), so the likely cause is `-O` float codegen (FMA contraction /
+  libm `cos` in the vibrance branch, FilmLooks.swift:121-125) vs the debug-built fixtures. Likely, not proven. Fixtures
+  and tests left as they are.
+- **Stage 2 API (MoodRoll PIPELINE_V2_CONTRACT, fixed stock render), new `Sources/RawCore/StockRender.swift`:**
+  `StockRender` (version 0, `parametersStatus` provisional, `Component`: characteristicCurve, dyeCrosstalk,
+  saturationByLuminance, halation, illuminantResponse, grain); `IlluminantMetadata` (cct / tint from
+  `SceneContext`, `asShotNeutral` always nil for now); protocol `StockRenderer.render(image, stock, illuminant)`, which
+  takes no scene label, analysis or exposure input; `PassThroughStockRenderer` (default, pixels unchanged);
+  `StockRenderRecord` (`DecodeRecipe.stockRender`, renderer, stock, illuminant, applied / pending components,
+  `globalExposureOffsetEV` always 0); `StockAnchor` / `StockAnchorDrift` / `StockAnchors.check` (warnings only, never
+  throws; drift = fingerprint differs).
+- **Wiring:** `Developer.stockRenderer` (default pass-through). `Developer.finish` runs it before the look only when
+  `exposureModel == .v2Normalizer`. Legacy never calls it, and legacy recipes have no `stockRender` key.
+- **Not defined (TODO provisional, needs film-lab + User):** every stage-2 stock parameter and its shape (curve toe /
+  shoulder, crosstalk, saturation by luminance, stock halation, the per-stock illuminant formula, grain spec per ISO); the
+  stock-fidelity drift metric and warn level; reading `AsShotNeutral` in stage 0; splitting the current stock LUT
+  (stage 2 + 3 mixed) into stock identity and look.
+- **Tests:** `StockRenderTests` (5): record / pending / no exposure offset / JSON round trip; illuminant without
+  analysis; anchors warn only; legacy with a pixel-changing renderer equals default (hook never runs); v2 pass-through
+  equals the same v2 base finished with the gate off, and a pixel-changing renderer does change v2 (hook is live).
+- **Evidence:** `swift build` green; `swift test` (debug) 182/182, 0 failures (177 + 5 new). raw-bench release, `git archive 0.4.0` vs this tree,
+  `render --mode auto --stock S --roll-id R1 --frame 3 --frames 24 --format png16 --scale 0.25`, 5 originals x 5 stocks
+  (sao-mai-200, den-vang-800t, dem-mem-800, hoai-co-200, chuan-400): legacy 25/25 decoded IDAT identical; with
+  `--exposure-model v2` also 25/25 identical, 25/25 v2 recipes carry `stockRender`, 0/25 legacy recipes do. Not run:
+  release test suite on this branch, MoodRoll harness, device.
+
 ## 2026-11-19 — 0.4.0 pre-release cleanup (branch `feature/pipeline-v2`; not tagged)
 - **Removed `softHighlightRule`** (User 2026-11-19, PIPELINE_V2_CONTRACT round 8; the prototype ended darker than the
   hard cap): `SceneNormalizer.Parameters.SoftHighlightRule` + `softHighlightRule`, its validate checks,

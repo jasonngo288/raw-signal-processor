@@ -323,6 +323,9 @@ public struct DecodeRecipe: Codable, Equatable, Sendable {
     /// Pipeline v2 stage 1: what the scene normalizer read, decided and delivered, plus the Apple HEIC diagnostic ΔEV.
     /// nil with the legacy exposure model (absent from the JSON, as in 0.3.1).
     public var exposureNormalizer: ExposureNormalizerRecord? = nil
+    /// Pipeline v2 stage 2 (fixed stock render): renderer, stock, stage-0 illuminant metadata, components applied / pending.
+    /// nil with the legacy exposure model (absent from the JSON, as in 0.4.0). Skeleton: pass-through, pixels unchanged.
+    public var stockRender: StockRenderRecord? = nil
 
     public init(file: String, settings: RenderSettings, decoderVersion: String, supportedDecoderVersions: [String],
                 defaults: DecodeParameters, effective: DecodeParameters, support: DecoderSupport, nativeSize: [Int],

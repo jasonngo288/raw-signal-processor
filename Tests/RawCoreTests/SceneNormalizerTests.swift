@@ -291,5 +291,150 @@ final class SceneNormalizerTests: XCTestCase {
         p = .provisional; p.nightEV100Full = 6
         XCTAssertThrowsError(try p.validate())
     }
+
+    // MARK: bright-scene blend (option C, User 2026-11-19, PIPELINE_V2_CONTRACT round 9; every number PROVISIONAL)
+
+    func testBrightSceneBlendWeightDefaultsAndCoding() throws {
+        XCTAssertNil(SceneNormalizer.Parameters.provisional.brightSceneBlend, "off by default")
+        let b = SceneNormalizer.Parameters.BrightSceneBlend.provisional
+        XCTAssertEqual(b.ev100None, 9); XCTAssertEqual(b.ev100Full, 13)
+        XCTAssertEqual(b.clipTopCode8bit, 255); XCTAssertEqual(b.maxRestoreEV, 2.5)
+        // w = 0 at and below EV100 9 (and unknown), 1 at and above 13, smoothstep in between.
+        for e in [-3.0, 5, 8.6, 8.999, 9] { XCTAssertEqual(b.weight(ev100: e), 0, "EV100 \(e)") }
+        XCTAssertEqual(b.weight(ev100: nil), 0)
+        XCTAssertEqual(b.weight(ev100: .nan), 0)
+        for e in [13.0, 13.7, 15, 20] { XCTAssertEqual(b.weight(ev100: e), 1, "EV100 \(e)") }
+        XCTAssertEqual(b.weight(ev100: 11), 0.5, accuracy: 1e-12)                  // midpoint
+        XCTAssertEqual(b.weight(ev100: 10), 0.15625, accuracy: 1e-12)              // t 0.25 -> 3t^2 - 2t^3
+        XCTAssertEqual(b.weight(ev100: 12), 0.84375, accuracy: 1e-12)
+        var last = 0.0
+        for i in 0...80 { let w = b.weight(ev100: 8 + Double(i) * 0.075); XCTAssertGreaterThanOrEqual(w, last); last = w }  // monotone
+        // nil is absent from the JSON (recipes unchanged when off); {} decodes to the provisional values.
+        let off = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(SceneNormalizer.Parameters.provisional)) as? [String: Any])
+        XCTAssertNil(off["brightSceneBlend"])
+        var obj = off; obj["brightSceneBlend"] = [String: Any]()
+        let on = try JSONDecoder().decode(SceneNormalizer.Parameters.self, from: JSONSerialization.data(withJSONObject: obj))
+        XCTAssertEqual(on.brightSceneBlend, .provisional)
+        XCTAssertEqual(try JSONDecoder().decode(SceneNormalizer.Parameters.self, from: JSONEncoder().encode(on)), on)
+        var bad = SceneNormalizer.Parameters.provisional; bad.brightSceneBlend = b
+        XCTAssertNoThrow(try bad.validate())
+        bad.brightSceneBlend?.ev100Full = 9
+        XCTAssertThrowsError(try bad.validate())
+        bad.brightSceneBlend = b; bad.brightSceneBlend?.clipTopCode8bit = 256
+        XCTAssertThrowsError(try bad.validate())
+        bad.brightSceneBlend = b; bad.brightSceneBlend?.maxRestoreEV = 5
+        XCTAssertThrowsError(try bad.validate())
+    }
+
+    /// Real render: w = 0 gives the off pixels and today's effective values; w = 1 and the midpoint record EV100, w, code 255
+    /// and the bound g254 + w·(gWanted − g254). The ramp ends are moved around this file's EV100 to reach each w.
+    func testBrightSceneBlendRecipeAndPixels() throws {
+        let url = try appleDNG()
+        let dev = Developer()
+        let analysis = try dev.analyze(url: url)
+        let scale = try dev.decoder.scaleFactor(url: url, longEdge: 384)
+        let offOut = try dev.develop(url: url, settings: v2Settings(), auto: true, scaleFactor: scale, analysis: analysis)
+        let off = try XCTUnwrap(offOut.recipe.exposureNormalizer)
+        XCTAssertNil(off.brightSceneBlend)
+        XCTAssertFalse(String(decoding: try JSONEncoder().encode(offOut.recipe), as: UTF8.self).contains("brightSceneBlend"))
+        let ev = try XCTUnwrap(off.inputs?.ev100, "test DNG needs ISO, shutter and aperture")
+        XCTAssertEqual(ev, try XCTUnwrap(SceneNormalizer.ev100(fNumber: dev.fNumber(url), exposureTime: analysis.context.exposureTime, iso: analysis.context.iso)), accuracy: 1e-12)
+
+        func render(_ none: Double, _ full: Double) throws -> (Developer.Output, ExposureNormalizerRecord) {
+            var b = SceneNormalizer.Parameters.BrightSceneBlend.provisional; b.ev100None = none; b.ev100Full = full
+            var p = SceneNormalizer.Parameters.provisional; p.brightSceneBlend = b
+            var s = v2Settings(); s.sceneNormalizer = p
+            let o = try dev.develop(url: url, settings: s, auto: true, scaleFactor: scale, analysis: analysis)
+            return (o, try XCTUnwrap(o.recipe.exposureNormalizer))
+        }
+        // w = 0 (EV100 below the ramp): same pixels and gain as off; today's code and bound recorded.
+        let (zeroOut, zero) = try render(ev + 1, ev + 5)
+        let z = try XCTUnwrap(zero.brightSceneBlend)
+        XCTAssertEqual(z.ev100, ev); XCTAssertEqual(z.weight, 0); XCTAssertFalse(z.applied)
+        XCTAssertEqual(z.effectiveClipTopCode8bit, 254); XCTAssertEqual(z.effectiveMaxRestoreEV, 1.5)
+        XCTAssertNil(z.todayRestoreEV); XCTAssertNil(z.wantedRestoreEV)
+        XCTAssertEqual(try pixels(zeroOut), try pixels(offOut))
+        XCTAssertEqual(zero.restoreEV, off.restoreEV); XCTAssertEqual(zero.stage1ClippedFraction, off.stage1ClippedFraction)
+
+        // w = 1 (EV100 above the ramp).
+        let (_, one) = try render(ev - 6, ev - 2)
+        let o1 = try XCTUnwrap(one.brightSceneBlend)
+        XCTAssertEqual(o1.weight, 1); XCTAssertTrue(o1.applied)
+        XCTAssertEqual(o1.effectiveClipTopCode8bit, 255)
+        XCTAssertEqual(o1.todayRestoreEV, off.restoreEV)
+        let g254 = try XCTUnwrap(o1.todayRestoreEV), wanted = try XCTUnwrap(o1.wantedRestoreEV)
+        XCTAssertLessThanOrEqual(wanted, 2.5 + 1e-9)
+        XCTAssertEqual(o1.effectiveMaxRestoreEV, Double(HeadroomRestore.quantised(Float(max(wanted, g254, 0)))), accuracy: 1e-9)
+        XCTAssertLessThanOrEqual(try XCTUnwrap(one.restoreEV), o1.effectiveMaxRestoreEV + 1e-9)
+        // N1 (User 2026-11-19): with the blend on the delivered gain is never below the blend-off gain.
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(one.restoreEV), try XCTUnwrap(off.restoreEV) - 1e-9)
+        XCTAssertNotNil(o1.blendedRestoreEV); XCTAssertEqual(o1.clampedToToday, false)
+        XCTAssertTrue(one.stage1ClipMeasure?.contains("code >= 255") ?? false)
+
+        // Midpoint (EV100 in the middle of the ramp): w = 0.5, bound halfway between g254 and gWanted.
+        let (_, mid) = try render(ev - 2, ev + 2)
+        let h = try XCTUnwrap(mid.brightSceneBlend)
+        XCTAssertEqual(h.weight, 0.5, accuracy: 1e-12); XCTAssertTrue(h.applied)
+        XCTAssertEqual(h.todayRestoreEV, g254); XCTAssertEqual(h.wantedRestoreEV, wanted)
+        XCTAssertEqual(h.effectiveMaxRestoreEV, Double(HeadroomRestore.quantised(Float(max(g254 + 0.5 * max(wanted - g254, 0), 0)))), accuracy: 1e-9)
+        XCTAssertEqual(mid.parameters.brightSceneBlend?.ev100None, ev - 2)
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(mid.restoreEV), try XCTUnwrap(off.restoreEV) - 1e-9)    // N1
+        print("[bright-blend] \(url.lastPathComponent): EV100 \(ev) g254 \(g254) wanted \(wanted) w1 gain \(one.restoreEV ?? .nan) mid bound \(h.effectiveMaxRestoreEV) gain \(mid.restoreEV ?? .nan)")
+    }
+
+    /// Unit level (no DNG gives these cases): the bound when gWanted < g254, the N1 clamp decision, validate against the
+    /// base bound, and record decoding with the default-valued fields absent.
+    func testBrightSceneBlendBoundClampValidateAndRecordDecoding() throws {
+        typealias B = SceneNormalizer.Parameters.BrightSceneBlend
+        // gWanted below g254 never lowers the bound: it stays g254 at any w.
+        for w in [0.0, 0.3, 1] { XCTAssertEqual(B.restoreBound(today: 0.75, wanted: 0.5, weight: w), 0.75, accuracy: 1e-6) }
+        XCTAssertEqual(B.restoreBound(today: 0.75, wanted: 2.14, weight: 1), 2.14, accuracy: 1e-6)
+        XCTAssertEqual(B.restoreBound(today: 0.75, wanted: 1.65, weight: 0.5), 1.20, accuracy: 1e-6)   // 0.75 + 0.5 x 0.90
+        XCTAssertEqual(B.restoreBound(today: -0.66, wanted: -0.66, weight: 1), 0)                        // darkening: bound floor 0
+        // N1 clamp: a blended gain below today's keeps today's pass; equal or above does not.
+        XCTAssertTrue(B.keepsToday(blended: 1.00, today: 1.19))
+        XCTAssertFalse(B.keepsToday(blended: 1.19, today: 1.19))
+        XCTAssertFalse(B.keepsToday(blended: 2.14, today: 0.75))
+        // Validation: blend bound >= base bound.
+        var p = SceneNormalizer.Parameters.provisional; p.brightSceneBlend = .provisional
+        XCTAssertNoThrow(try p.validate())
+        p.brightSceneBlend?.maxRestoreEV = 1.0
+        XCTAssertThrowsError(try p.validate())                                  // 1.0 < base 1.5
+        p.maxRestoreEV = 1.0
+        XCTAssertNoThrow(try p.validate())                                      // equal is allowed
+        // Record: public init, and JSON without blend / parametersStatus / notes decodes to the defaults.
+        let rec = ExposureNormalizerRecord.BrightSceneBlendRecord(ev100: 12, weight: 0.84375, applied: true, effectiveClipTopCode8bit: 255,
+                                                                  effectiveMaxRestoreEV: 1.5, todayRestoreEV: 0.75, wantedRestoreEV: 1.64,
+                                                                  blendedRestoreEV: 1.5, clampedToToday: false)
+        XCTAssertEqual(try JSONDecoder().decode(ExposureNormalizerRecord.BrightSceneBlendRecord.self, from: JSONEncoder().encode(rec)), rec)
+        let minimal = #"{"weight":0,"applied":false,"effectiveClipTopCode8bit":254,"effectiveMaxRestoreEV":1.5}"#
+        let d = try JSONDecoder().decode(ExposureNormalizerRecord.BrightSceneBlendRecord.self, from: Data(minimal.utf8))
+        XCTAssertNil(d.ev100); XCTAssertNil(d.todayRestoreEV); XCTAssertNil(d.clampedToToday)
+        XCTAssertEqual(d.blend, ExposureNormalizerRecord.BrightSceneBlendRecord.defaultBlend)
+        XCTAssertEqual(d.parametersStatus, ExposureNormalizerRecord.BrightSceneBlendRecord.defaultStatus)
+        XCTAssertEqual(d.notes, [])
+    }
+
+    /// Missing EV100 (ISO removed from the analysis): w = 0 even with a ramp every real EV100 would be above, a note says
+    /// why, and the pixels equal the blend-off render of the same analysis.
+    func testBrightSceneBlendMissingEV100GivesWeightZero() throws {
+        let url = try appleDNG()
+        let dev = Developer()
+        var analysis = try dev.analyze(url: url)
+        analysis.context.iso = nil
+        let scale = try dev.decoder.scaleFactor(url: url, longEdge: 256)
+        let offOut = try dev.develop(url: url, settings: v2Settings(), auto: true, scaleFactor: scale, analysis: analysis)
+        XCTAssertNil(offOut.recipe.exposureNormalizer?.inputs?.ev100)
+        var b = SceneNormalizer.Parameters.BrightSceneBlend.provisional; b.ev100None = -100; b.ev100Full = -90
+        var p = SceneNormalizer.Parameters.provisional; p.brightSceneBlend = b
+        var s = v2Settings(); s.sceneNormalizer = p
+        let on = try dev.develop(url: url, settings: s, auto: true, scaleFactor: scale, analysis: analysis)
+        let r = try XCTUnwrap(on.recipe.exposureNormalizer?.brightSceneBlend)
+        XCTAssertNil(r.ev100); XCTAssertEqual(r.weight, 0); XCTAssertFalse(r.applied)
+        XCTAssertEqual(r.effectiveClipTopCode8bit, 254); XCTAssertEqual(r.effectiveMaxRestoreEV, 1.5)
+        XCTAssertTrue(r.notes.contains { $0.contains("EV100 unknown") })
+        XCTAssertEqual(try pixels(on), try pixels(offOut))
+        XCTAssertEqual(on.recipe.exposureNormalizer?.restoreEV, offOut.recipe.exposureNormalizer?.restoreEV)
+    }
 }
 #endif

@@ -199,6 +199,73 @@ public enum SceneNormalizer {
         public static let defaultClipTopCode8bit = 254
         /// `clipTopCode8bit`, nil = the default.
         public var effectiveClipTopCode8bit: Int { clipTopCode8bit ?? Parameters.defaultClipTopCode8bit }
+        /// Bright-scene blend of the stage-1 highlight rule (sun-frame dimness option C, User 2026-11-19, MoodRoll
+        /// PIPELINE_V2_CONTRACT round 9). nil = off (default): stage 1 is exactly the rule above. Absent from the JSON when nil.
+        public var brightSceneBlend: BrightSceneBlend? = nil
+
+        /// Option C: a continuous weight w = smoothstep((EV100 − ev100None) / (ev100Full − ev100None)) blends the stage-1
+        /// display gain from today's rule (`clipTopCode8bit`, `maxRestoreEV`) toward `clipTopCode8bit` / `maxRestoreEV` of
+        /// this struct. No scene classifier, no stock input. How (as film-lab emulated it, SUN_DIMNESS_DIAGNOSIS 2026-11-19
+        /// §3 C): g254 = the gain today's rule delivers, gWanted = the gain the median asks for with the bound `maxRestoreEV`
+        /// here (before any highlight rule); the solve then runs once more with the highlight rule at `clipTopCode8bit` here
+        /// and the restore bound g254 + w·(gWanted − g254) (quantised 0.01 EV). w = 0 (EV100 at or below `ev100None`, or
+        /// unknown) = today's pixels exactly. EVERY number here is PROVISIONAL: the ramp ends were fitted to 6 bright frames
+        /// from one phone (9 = just above the highest indoor EV100 of the golden set, 8.6; 13 = between GS-A01 12.9 and
+        /// GS-C02 13.7; 2.5 = first 0.5 step above the largest wanted gain, 2.33 on GS-A01). Missing keys decode as these.
+        public struct BrightSceneBlend: Codable, Equatable, Sendable {
+            /// EV100 at and below which w = 0 (PROVISIONAL).
+            public var ev100None: Double = 9
+            /// EV100 at and above which w = 1 (PROVISIONAL).
+            public var ev100Full: Double = 13
+            /// Stage-1 hard-clip code at w > 0 (PROVISIONAL).
+            public var clipTopCode8bit: Int = 255
+            /// Restore bound for the wanted gain at w = 1 (PROVISIONAL).
+            public var maxRestoreEV: Double = 2.5
+
+            public init() {}
+            public static let provisional = BrightSceneBlend()
+
+            public init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                let d = BrightSceneBlend()
+                ev100None = try c.decodeIfPresent(Double.self, forKey: .ev100None) ?? d.ev100None
+                ev100Full = try c.decodeIfPresent(Double.self, forKey: .ev100Full) ?? d.ev100Full
+                clipTopCode8bit = try c.decodeIfPresent(Int.self, forKey: .clipTopCode8bit) ?? d.clipTopCode8bit
+                maxRestoreEV = try c.decodeIfPresent(Double.self, forKey: .maxRestoreEV) ?? d.maxRestoreEV
+            }
+
+            /// Restore bound of the blended pass: quantised(max(g254 + w·max(gWanted − g254, 0), 0)), 0.01 EV grid. A gWanted
+            /// below g254 does not lower the bound (it stays g254, or 0 when g254 is a darkening).
+            public static func restoreBound(today g254: Double, wanted: Double, weight w: Double) -> Double {
+                Double(HeadroomRestore.quantised(Float(max(g254 + w * max(wanted - g254, 0), 0))))
+            }
+
+            /// N1 clamp (User 2026-11-19): true = the blended pass delivered less gain than the blend-off pass, so the
+            /// blend-off pass is kept. The delivered gain is never below g254.
+            public static func keepsToday(blended: Double, today g254: Double) -> Bool { blended < g254 - 1e-9 }
+
+            /// 0...1 smoothstep of EV100 from `ev100None` (0) to `ev100Full` (1); 0 when EV100 is unknown.
+            public func weight(ev100: Double?) -> Double {
+                guard let e = ev100, e.isFinite else { return 0 }
+                return ScenePrediction.ramp(e, from: ev100None, to: ev100Full)
+            }
+
+            public func validate() throws {
+                func check(_ ok: Bool, _ what: String) throws { if !ok { throw RawCoreError.invalidSettings("sceneNormalizer.brightSceneBlend: \(what)") } }
+                try check([ev100None, ev100Full, maxRestoreEV].allSatisfy { $0.isFinite }, "all values must be finite")
+                try check(ev100None < ev100Full, "ev100None < ev100Full")
+                try check((0...4).contains(maxRestoreEV), "maxRestoreEV in 0...4")
+                try check((1...255).contains(clipTopCode8bit), "clipTopCode8bit in 1...255")
+            }
+
+            /// Also checked against the base parameters: the blend's restore bound must be >= the base `maxRestoreEV`.
+            public func validate(base: Parameters) throws {
+                try validate()
+                if !(maxRestoreEV >= base.maxRestoreEV) {
+                    throw RawCoreError.invalidSettings("sceneNormalizer.brightSceneBlend: maxRestoreEV \(maxRestoreEV) must be >= base maxRestoreEV \(base.maxRestoreEV)")
+                }
+            }
+        }
 
         public init() {}
         public static let provisional = Parameters()
@@ -220,6 +287,7 @@ public enum SceneNormalizer {
             skinFloorL = try c.decode(Double.self, forKey: .skinFloorL)
             maxSkinLiftEV = try c.decode(Double.self, forKey: .maxSkinLiftEV)
             clipTopCode8bit = try c.decodeIfPresent(Int.self, forKey: .clipTopCode8bit) ?? Parameters.defaultClipTopCode8bit
+            brightSceneBlend = try c.decodeIfPresent(BrightSceneBlend.self, forKey: .brightSceneBlend)
         }
 
         public func validate() throws {
@@ -238,6 +306,7 @@ public enum SceneNormalizer {
             try check((0...4).contains(maxRestoreEV), "maxRestoreEV in 0...4")
             try check((0...95).contains(skinFloorL) && (0...2).contains(maxSkinLiftEV), "skinFloorL in 0...95, maxSkinLiftEV in 0...2")
             try check((1...255).contains(effectiveClipTopCode8bit), "clipTopCode8bit in 1...255")
+            try brightSceneBlend?.validate(base: self)
         }
     }
 
@@ -425,6 +494,8 @@ public struct ExposureNormalizerRecord: Codable, Equatable, Sendable {
     public var medianRestoreEV: Double?
     /// log2(target median / delivered median), target incl. the skin lift: > 0 = delivered darker than decided.
     public var shortfallEV: Double?
+    /// Bright-scene blend (option C, PROVISIONAL); nil when `parameters.brightSceneBlend` is nil (absent from the JSON).
+    public var brightSceneBlend: BrightSceneBlendRecord?
     /// How the stage-1 image and the highlight probes were decoded.
     public var stage1Decode: Stage1Decode?
     /// Why the normalizer did not run (render without analysis), nil when it ran.
@@ -445,5 +516,56 @@ public struct ExposureNormalizerRecord: Codable, Equatable, Sendable {
         public var probeLongEdge: Int
         public var measureLongEdge: Int
         public var differsFromDelivered: [String] = []
+    }
+
+    /// What the bright-scene blend did (option C, PROVISIONAL). `ev100` = `inputs.ev100` (log2(N²/t) − log2(ISO/100):
+    /// N = EXIF FNumber of the DNG, t and ISO = the analysis `SceneContext.exposureTime` / `iso`). `weight` = w.
+    /// `effectiveClipTopCode8bit` / `effectiveMaxRestoreEV` = the highlight code and restore bound the delivered solve used
+    /// (today's values when w = 0). `todayRestoreEV` = g254 (gain under today's rule), `wantedRestoreEV` = gWanted (the
+    /// median's gain with the blend's bound, before any highlight rule); both nil when w = 0 or not applied.
+    /// `blendedRestoreEV` = the gain of the blended pass; `clampedToToday` = true when it was below g254 and today's pass was
+    /// kept (N1, User 2026-11-19; then `applied` is false and the effective values are today's). `applied` = the blended
+    /// pass is the delivered one.
+    public struct BrightSceneBlendRecord: Codable, Equatable, Sendable {
+        public static let defaultBlend = "restore bound = g254 + w*(gWanted - g254), quantised 0.01 EV, solved under the blend's clip code when w > 0 (film-lab option C emulation); delivered gain never below g254"
+        public static let defaultStatus = "provisional: ramp ends 9/13 EV100, code 255 and 2.5 EV fitted to 6 bright frames from one phone (PIPELINE_V2_CONTRACT round 9)"
+        public var ev100: Double?
+        public var weight: Double
+        public var applied: Bool
+        public var effectiveClipTopCode8bit: Int
+        public var effectiveMaxRestoreEV: Double
+        public var todayRestoreEV: Double?
+        public var wantedRestoreEV: Double?
+        public var blendedRestoreEV: Double?
+        public var clampedToToday: Bool?
+        public var blend: String = BrightSceneBlendRecord.defaultBlend
+        public var parametersStatus: String = BrightSceneBlendRecord.defaultStatus
+        public var notes: [String] = []
+
+        public init(ev100: Double?, weight: Double, applied: Bool, effectiveClipTopCode8bit: Int, effectiveMaxRestoreEV: Double,
+                    todayRestoreEV: Double? = nil, wantedRestoreEV: Double? = nil, blendedRestoreEV: Double? = nil,
+                    clampedToToday: Bool? = nil, notes: [String] = []) {
+            self.ev100 = ev100; self.weight = weight; self.applied = applied
+            self.effectiveClipTopCode8bit = effectiveClipTopCode8bit; self.effectiveMaxRestoreEV = effectiveMaxRestoreEV
+            self.todayRestoreEV = todayRestoreEV; self.wantedRestoreEV = wantedRestoreEV
+            self.blendedRestoreEV = blendedRestoreEV; self.clampedToToday = clampedToToday; self.notes = notes
+        }
+
+        /// Fields with a default (`blend`, `parametersStatus`, `notes`) may be absent from the JSON.
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            ev100 = try c.decodeIfPresent(Double.self, forKey: .ev100)
+            weight = try c.decode(Double.self, forKey: .weight)
+            applied = try c.decode(Bool.self, forKey: .applied)
+            effectiveClipTopCode8bit = try c.decode(Int.self, forKey: .effectiveClipTopCode8bit)
+            effectiveMaxRestoreEV = try c.decode(Double.self, forKey: .effectiveMaxRestoreEV)
+            todayRestoreEV = try c.decodeIfPresent(Double.self, forKey: .todayRestoreEV)
+            wantedRestoreEV = try c.decodeIfPresent(Double.self, forKey: .wantedRestoreEV)
+            blendedRestoreEV = try c.decodeIfPresent(Double.self, forKey: .blendedRestoreEV)
+            clampedToToday = try c.decodeIfPresent(Bool.self, forKey: .clampedToToday)
+            blend = try c.decodeIfPresent(String.self, forKey: .blend) ?? Self.defaultBlend
+            parametersStatus = try c.decodeIfPresent(String.self, forKey: .parametersStatus) ?? Self.defaultStatus
+            notes = try c.decodeIfPresent([String].self, forKey: .notes) ?? []
+        }
     }
 }

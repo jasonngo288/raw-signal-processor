@@ -23,9 +23,13 @@ public final class Developer: @unchecked Sendable {
     public let renderer: Renderer
     public var plugins: PluginRegistry
     public var calibration: CalibrationTable
+    /// Pipeline v2 stage 2 (fixed stock render), run by `finish` only with `exposureModel == .v2Normalizer`.
+    /// Default = the skeleton pass-through (pixels unchanged). Set once in `init` (a `let`, so no develop can see it change).
+    public let stockRenderer: any StockRenderer
 
-    public init(renderer: Renderer = Renderer(), plugins: PluginRegistry = .standard, calibration: CalibrationTable = .empty) {
-        self.renderer = renderer; self.plugins = plugins; self.calibration = calibration
+    public init(renderer: Renderer = Renderer(), plugins: PluginRegistry = .standard, calibration: CalibrationTable = .empty,
+                stockRenderer: any StockRenderer = PassThroughStockRenderer()) {
+        self.renderer = renderer; self.plugins = plugins; self.calibration = calibration; self.stockRenderer = stockRenderer
     }
 
     /// Scene analysis of one file. Codable so it can be made at capture time and stored next to the DNG
@@ -567,12 +571,38 @@ public final class Developer: @unchecked Sendable {
             r.notes.append(String(format: "no target or no measurable decode: fixed restore +%.2f EV (the highlight cut only)", q))
             return try renderer.applyLook(HeadroomRestore.lutV2(gainEV: q), to: image, intensity: 1)
         }
-        let p = r.parameters
+        let p0 = r.parameters
         r.decodeMedianL = SceneNormalizer.lstar(m0)
         func restored(_ g: Double) throws -> CIImage {
             let q = HeadroomRestore.quantised(Float(g))
             return q != 0 ? try renderer.applyLook(HeadroomRestore.lutV2(gainEV: q), to: probe, intensity: 1) : probe
         }
+        // Stage-0 master + its recoverable mask: decoded once (the first highlight rule), reused by later passes.
+        var masterCache: (master: LinearImage, recoverable: [Bool])?
+        func masterRecoverable() throws -> (master: LinearImage, recoverable: [Bool]) {
+            if let c = masterCache { return c }
+            let master: LinearImage? = try autoreleasepool {
+                var b = stage1
+                b.mode = .sceneLinear
+                b.exposure = nil; b.baselineExposure = nil; b.shadowBias = nil; b.boostAmount = nil; b.boostShadowAmount = nil
+                b.localToneMapAmount = nil; b.extendedDynamicRangeAmount = nil; b.gamutMapping = nil
+                b.toneMapSourceHeadroom = nil; b.highlightClarity = nil; b.highlightRecoveryLocal = nil
+                return try materialized(try decoder.decode(url: url, settings: b, scaleFactor: sc).image,
+                                        longEdge: CameraMatchPlugin.histogramLongEdge).map { try renderer.linearImage($0) }
+            }
+            guard let master, let probeLin = try? renderer.linearImage(probe), probeLin.width == master.width, probeLin.height == master.height else {
+                throw RawCoreError.invalidSettings("v2 normalizer: stage-0 master and stage-1 image do not align (cannot measure clipping)")
+            }
+            let recoverable: [Bool] = (0..<master.pixelCount).map {
+                max(master.pixels[$0 * 3], master.pixels[$0 * 3 + 1], master.pixels[$0 * 3 + 2]) < Float(SceneContext.clipLevel)
+            }
+            masterCache = (master, recoverable)
+            return (master, recoverable)
+        }
+        // One stage-1 pass: median solve with `p`'s bounds, skin floor, then (when `rule`) the highlight rule at `topCode`.
+        // Writes its record fields into `r`. With the bright-scene blend off this is the only pass (0.4.0 behaviour).
+        func pass(_ p: SceneNormalizer.Parameters, topCode: Int, rule: Bool, _ r: inout ExposureNormalizerRecord) throws
+            -> (g: Double, m: Double, n: Int, want: Double, delivered: Double, limit: Double, miss: Double) {
         // Fixed-point iteration on the measured median (at most 4 measurements, stop within 0.02 EV).
         func solve(_ want: Double, from g0: Double) throws -> (Double, Double, Int) {
             var g = g0, m = m0, n = 0
@@ -602,28 +632,14 @@ public final class Developer: @unchecked Sendable {
                 r.skinMedianLAfter = try skinMedianL(restored(g), mask: mask)?.0
             }
         }
+        guard rule else { return (g, m, n, want, 0, 0, log2(want / max(m, 1e-6))) }
         // Highlight rule on the stage-1 OUTPUT (review M2, contract clipping definition, User 2026-11-18): pipeline-induced
         // clip = share of pixels recoverable in the stage-0 master (scene-linear, max channel < `SceneContext.clipLevel`, the
         // sensor-clip level) but hard-clipped in the restored stage-1 image (any channel at the 8-bit top code). No
         // specular / sun / window exclusion (no such mask yet): those pixels count. The gain is capped so the induced clip
         // stays <= allowance (or <= what the decode already induces at gain 0, if that is higher). The gain only goes down
         // here; bisection on the 0.01 EV quantisation grid. What the median then misses is recorded (shortfallEV).
-        let master: LinearImage? = try autoreleasepool {
-            var b = stage1
-            b.mode = .sceneLinear
-            b.exposure = nil; b.baselineExposure = nil; b.shadowBias = nil; b.boostAmount = nil; b.boostShadowAmount = nil
-            b.localToneMapAmount = nil; b.extendedDynamicRangeAmount = nil; b.gamutMapping = nil
-            b.toneMapSourceHeadroom = nil; b.highlightClarity = nil; b.highlightRecoveryLocal = nil
-            return try materialized(try decoder.decode(url: url, settings: b, scaleFactor: sc).image,
-                                    longEdge: CameraMatchPlugin.histogramLongEdge).map { try renderer.linearImage($0) }
-        }
-        guard let master, let probeLin = try? renderer.linearImage(probe), probeLin.width == master.width, probeLin.height == master.height else {
-            throw RawCoreError.invalidSettings("v2 normalizer: stage-0 master and stage-1 image do not align (cannot measure clipping)")
-        }
-        let recoverable: [Bool] = (0..<master.pixelCount).map {
-            max(master.pixels[$0 * 3], master.pixels[$0 * 3 + 1], master.pixels[$0 * 3 + 2]) < Float(SceneContext.clipLevel)
-        }
-        let topCode = p.effectiveClipTopCode8bit
+        let (master, recoverable) = try masterRecoverable()
         let hardClip = Self.hardClipLinear(code: topCode)
         r.stage1ClipMeasure = Self.inducedClipMeasure(code: topCode)
         r.masterClippedFraction = Double(recoverable.lazy.filter { !$0 }.count) / Double(max(master.pixelCount, 1))
@@ -668,6 +684,53 @@ public final class Developer: @unchecked Sendable {
             r.notes.append(String(format: "display gain %+.2f EV (bound -%.2f...+%.2f%@) leaves the median %+.2f EV from target", g, p.maxCutEV, p.maxRestoreEV,
                                   r.medianRestoreEV == nil ? "" : ", highlight rule", miss))
         }
+        return (g, m, n, want, delivered, limit, miss)
+        }
+        let before = r
+        var res = try pass(p0, topCode: p0.effectiveClipTopCode8bit, rule: true, &r)
+        // Bright-scene blend (option C, PROVISIONAL; nil = off, nothing below runs). w from the EV100 of `inputs`.
+        if let b = p0.brightSceneBlend {
+            let ev = r.inputs?.ev100
+            let w = b.weight(ev100: ev)
+            var rec = ExposureNormalizerRecord.BrightSceneBlendRecord(ev100: ev, weight: w, applied: false,
+                                                                      effectiveClipTopCode8bit: p0.effectiveClipTopCode8bit,
+                                                                      effectiveMaxRestoreEV: p0.maxRestoreEV)
+            if ev == nil { rec.notes.append("EV100 unknown (ISO, shutter or aperture missing): w = 0") }
+            if w > 0 {
+                let g254 = res.g
+                var scratch = before
+                var pw = p0; pw.maxRestoreEV = b.maxRestoreEV
+                let wanted = try pass(pw, topCode: b.clipTopCode8bit, rule: false, &scratch)
+                let bound = SceneNormalizer.Parameters.BrightSceneBlend.restoreBound(today: g254, wanted: wanted.g, weight: w)
+                var pc = p0; pc.maxRestoreEV = bound
+                var blended = before
+                let out = try pass(pc, topCode: b.clipTopCode8bit, rule: true, &blended)
+                rec.todayRestoreEV = g254; rec.wantedRestoreEV = wanted.g
+                rec.blendedRestoreEV = out.g
+                if SceneNormalizer.Parameters.BrightSceneBlend.keepsToday(blended: out.g, today: g254) {
+                    // N1 (User 2026-11-19): never darker than the blend-off gain. The 255 limit max(allowance, clip at gain 0)
+                    // can be stricter than the 254 one when the decode already clips at 254; then today's pass is kept as is
+                    // (record, gain, pixels = blend off).
+                    res.n += wanted.n + out.n
+                    rec.clampedToToday = true
+                    rec.notes.append(String(format: "blended gain %+.2f EV under code %d < today's %+.2f EV: today's pass kept (N1 clamp)", out.g, b.clipTopCode8bit, g254))
+                } else {
+                    r = blended
+                    res = (out.g, out.m, res.n + wanted.n + out.n, out.want, out.delivered, out.limit, out.miss)
+                    rec.applied = true
+                    rec.clampedToToday = false
+                    rec.effectiveClipTopCode8bit = b.clipTopCode8bit; rec.effectiveMaxRestoreEV = bound
+                }
+            }
+            r.brightSceneBlend = rec
+            decisions.append(String(format: "[normalizer] bright-scene blend (provisional): EV100 %@ -> w %.3f (ramp %.1f...%.1f), clip code %d, restore bound %.2f EV%@",
+                                    ev.map { String(format: "%.2f", $0) } ?? "n/a", w, b.ev100None, b.ev100Full,
+                                    rec.effectiveClipTopCode8bit, rec.effectiveMaxRestoreEV,
+                                    rec.todayRestoreEV == nil ? "" : String(format: " (g254 %+.2f, wanted %+.2f, blended %+.2f%@)", rec.todayRestoreEV ?? 0,
+                                                                            rec.wantedRestoreEV ?? 0, rec.blendedRestoreEV ?? 0,
+                                                                            rec.clampedToToday == true ? ", clamped to today" : "")))
+        }
+        let (g, m, n, want, delivered, limit, miss) = res
         r.restoreEV = g; r.restoreIterations = n
         stage1Image = try restored(g)
         r.deliveredMedianL = SceneNormalizer.lstar(m)
@@ -728,6 +791,17 @@ public final class Developer: @unchecked Sendable {
         var ran = base.ran
         var image = base.image
         let stock = try st.resolvedStock()
+        if st.resolvedExposureModel == .v2Normalizer {
+            // Pipeline v2 stage 2, fixed stock render: stage-1 image + stock + stage-0 illuminant only (no scene label, no
+            // exposure input). Before the look, so skin protection and qualityGuard compare against the stage-2 output.
+            // TODO(stage 2): the stock LUT below still mixes stock identity (stage 2) and look (stage 3); split when the
+            // stage-2 parameters exist.
+            let illuminant = IlluminantMetadata(context: base.context)
+            let r = try stockRenderer.render(image, stock: stock, illuminant: illuminant)
+            image = r.image
+            out.recipe.stockRender = StockRenderRecord(renderer: stockRenderer.id, stock: st.stock, illuminant: illuminant,
+                                                       applied: r.applied, notes: r.notes)
+        }
         let beforeLook = image
         if let args = st.lookArguments, let look = st.stock {
             out.recipe.decisions.append("look=\(look) args=\(args.compactJSON())")
