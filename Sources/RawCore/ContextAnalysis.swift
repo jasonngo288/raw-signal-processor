@@ -61,6 +61,9 @@ public struct SceneContext: Codable, Equatable, Sendable {
                             logP999: pct(99.9))
     }
 
+    /// Clip level of `clippedFraction` and of the sensor-clip share in `measure` (any channel >= this).
+    public static let clipLevel = 0.98
+
     /// Fraction of pixels with any channel >= 0.98 (display-clamped render).
     public static func clippedFraction(_ img: LinearImage) -> Double {
         var c = 0

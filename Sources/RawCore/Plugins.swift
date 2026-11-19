@@ -24,6 +24,9 @@ public protocol DevelopPlugin: Sendable {
     /// Look stage for a stock whose LUT is not made for the display base (`FilmStock.lookInput`). Return the looked
     /// image (full strength) to take over the look, or nil to leave it to the core.
     func look(stock: FilmStock, settings: RenderSettings, ctx: PluginRenderContext) throws -> (CIImage, [String])?
+    /// Only with `RenderSettings.outputCrop`: true = `afterFinish` runs after the crop and grain (qualityGuard);
+    /// false (default) = it is a full-frame effect and runs before the crop (vignette). No effect without a crop.
+    var runsAfterCrop: Bool { get }
 }
 
 public extension DevelopPlugin {
@@ -35,6 +38,7 @@ public extension DevelopPlugin {
     func beforeGrain(_ image: CIImage, settings: RenderSettings, finish: FilmFinish?, ctx: PluginRenderContext) throws -> (CIImage, [String]) { (image, []) }
     func afterFinish(_ image: CIImage, settings: RenderSettings, finish: FilmFinish?, ctx: PluginRenderContext) throws -> (CIImage, [String]) { (image, []) }
     func look(stock: FilmStock, settings: RenderSettings, ctx: PluginRenderContext) throws -> (CIImage, [String])? { nil }
+    var runsAfterCrop: Bool { false }
 }
 
 public struct PluginRenderContext {
@@ -148,10 +152,13 @@ public struct HeadroomPlugin: DevelopPlugin {
     public init() {}
 
     public func decide(context: SceneContext, defaults: DecodeParameters, settings: inout RenderSettings) -> [String] {
+        // v2 exposure model: the scene normalizer (Developer) owns the decode cut and the restore; nothing here.
+        guard settings.resolvedExposureModel == .legacy else { return [] }
         let d = settings.decodeHeadroomEV ?? 0
         guard d > 0 else { return [] }
         let bias = settings.exposure ?? 0
-        let decode = min(bias, 0) - d, restore = d + max(bias, 0)
+        let (decode, r) = HeadroomSplit.split(bias: bias, headroomEV: d)
+        let restore = r ?? 0
         settings.exposure = decode
         settings.headroomRestoreEV = restore
         return [String(format: "decode exposure -%.2f EV, display restore +%.2f EV (exposure bias %+.2f: decode exposure %.2f -> %.2f)",
@@ -197,6 +204,10 @@ public struct CameraMatchPlugin: DevelopPlugin {
         // The reference: histograms stored by the analysis (HEIC may be gone), else the HEIC file itself.
         let stored = context.cameraReferenceHistogram.flatMap { $0.count == context.lumaHistogram?.count ? $0 : nil }
         guard stored != nil || settings.cameraReference != nil else { return [] }
+        // v2 exposure model: the Apple HEIC is a diagnostic only (contract stage 1): no exposure, shadow or tone change.
+        guard settings.resolvedExposureModel == .legacy else {
+            return ["v2 exposure model: camera HEIC not matched (exposure, shadow boost, tone curve off); its ΔEV is recorded in exposureNormalizer as a diagnostic"]
+        }
         guard let ours = context.lumaHistogram,
               let theirs = stored ?? settings.cameraReference.flatMap({ Self.referenceHistogram($0, renderer: Renderer(), bins: ours.count) }) else {
             return ["camera reference \(settings.cameraReference.map { ($0 as NSString).lastPathComponent } ?? "") unreadable or no histogram: skipped"]
@@ -227,6 +238,7 @@ public struct CameraMatchPlugin: DevelopPlugin {
     }
 
     public func afterDecode(_ image: CIImage, settings st: RenderSettings, ctx: PluginRenderContext) throws -> (CIImage, [String]) {
+        guard st.resolvedExposureModel == .legacy else { return (image, []) }
         let stored = ctx.scene?.cameraReferenceHistogramFine
         guard stored != nil || st.cameraReference != nil else { return (image, []) }
         let bins = Self.fineBins
@@ -324,6 +336,8 @@ public struct VignettePlugin: DevelopPlugin {
 public struct QualityGuardPlugin: DevelopPlugin {
     public let id = "qualityGuard"
     public let summary = "recheck after the finish: blend back toward the base if it clips or drifts too much"
+    /// Judges the output frame: with an output crop it measures the cropped, grained frame against the cropped base.
+    public var runsAfterCrop: Bool { true }
     public init() {}
 
     public static let maxClipIncrease = 0.005

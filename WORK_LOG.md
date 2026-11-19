@@ -2,6 +2,164 @@
 
 Newest first. Each entry: what changed, why, evidence, what is NOT verified yet.
 
+## 2026-11-19 — 0.4.0 pre-release cleanup (branch `feature/pipeline-v2`; not tagged)
+- **Removed `softHighlightRule`** (User 2026-11-19, PIPELINE_V2_CONTRACT round 8; the prototype ended darker than the
+  hard cap): `SceneNormalizer.Parameters.SoftHighlightRule` + `softHighlightRule`, its validate checks,
+  `Developer.softPenaltyMeasure`, the soft branch of the stage-1 clip measure, recipe fields `stage1HighlightRule` and
+  `stage1HardClippedFraction` (under the hard cap it equalled `stage1ClippedFraction`, so folded back), test
+  `testSoftHighlightRuleWeightAndRecipe`. The highlight note now reads "highlight rule on the restored image: ...
+  (induced clip ...)". Film-lab harness option `--soft-highlight-knee` removed (MoodRoll `tools/regression`).
+- **Fix (tech-lead re-review 2026-11-19 item 4):** `sceneNormalizer` JSON without `clipTopCode8bit` now decodes to the
+  default 254 (`Parameters.defaultClipTopCode8bit`), was 255; nil also means 254 (`effectiveClipTopCode8bit`). Custom
+  `Parameters.init(from:)`; every other key is still required, as before. Test
+  `testParametersDecodeWithoutClipTopCodeGivesDefault254`.
+- **Evidence:** `swift build` green; `swift test` (debug) 177/177, 0 failures (one test removed, one added).
+  `swift test -c release`: 177 run, 2 failures in `LookV2Tests.testFingerprintsAndPixels` (goldenDay2 / softPortrait2
+  LUT fingerprints are exact-checked against debug-built fixtures; not touched here). Legacy: raw-bench release from
+  `git archive 0.3.1` vs this tree, `render --mode auto --stock S --roll-id R1 --frame 3 --frames 24 --format png16
+  --scale 0.25`, 5 originals x 5 stocks: 25/25 decoded IDAT identical. Harness: MoodRoll `golden/runs/v2-254-recheck`
+  (`run.py --exposure-model v2Normalizer --rsp <this tree>`) 464/464 sha256 identical to `v2-254`.
+- **Open (tech-lead re-review, non-blocking, not changed here):** fallback path keeps 1.5 EV without the stage-1 cap;
+  stage-0 / stage-1 size mismatch throws instead of degrading; internal constants not in `Parameters`; `Base.stage1Image`
+  memory; the 0.98 clip literal of the probes.
+
+### Release notes 0.4.0 (draft for the tag)
+- **Pipeline v2 is opt-in.** `RenderSettings.exposureModel` nil / `.legacy` (default) = the 0.3.1 path; legacy renders are
+  pixel-identical to 0.3.1 (raw-bench, 5 originals x 5 stocks, empty calibration table, no crop). `.v2Normalizer` turns
+  on the stage-1 scene normalizer (`SceneNormalizer`, record `DecodeRecipe.exposureNormalizer`); highlightRecovery is
+  forced off under v2.
+- **Every `SceneNormalizer.Parameters` number is provisional** (not approved; `SceneNormalizer.parametersStatus`), incl.
+  `clipTopCode8bit` 254 (interim). They are set when the golden set is frozen.
+- **Legacy changes that are not pixels:** `recipe.calibration` is no longer written (always nil; `colorSource` replaces
+  it, the field stays so old recipes decode); `develop` ignores model-only calibration entries (lookup needs model + lens
+  + RAW format). With the shipped empty table pixels do not change; a host with a model-only table must add the full key.
+- **Stage 4 `RenderSettings.outputCrop`** (nil = 0.3.1 path): finish order light leak -> halation -> vignette
+  (afterFinish plugins with `runsAfterCrop == false`) -> crop -> grain on the cropped frame -> qualityGuard. Cropped
+  frames differ from crop-after-develop by design; a host that passes `outputCrop` must stop cropping itself.
+- **New public API (additive):** `OutputCrop`, `ExposureModel`, `RenderSettings.outputCrop / exposureModel /
+  sceneNormalizer / resolvedExposureModel`, `CalibrationKey`, `CalibrationLookup`, `ColorSourceRecord`,
+  `CalibrationTable.lookup`, `ModelCalibration.lens / rawFormat`, `DecodeRecipe.colorSource / exposureNormalizer`,
+  `DevelopPlugin.runsAfterCrop`, `SceneNormalizer`, `ExposureNormalizerRecord`, `HeadroomSplit`,
+  `HeadroomRestore.curveV2 / lutV2`, `FilmFinisher.applyHalation / applyGrain / pixelRect / crop`.
+
+## 2026-11-18 — Pipeline v2 item B: clip top code 254 (interim) + soft highlight rule prototype (default off)
+- **User decisions (contract round 7):** `clipTopCode8bit` default 255 -> **254** (interim). New provisional
+  `SceneNormalizer.Parameters.softHighlightRule: SoftHighlightRule?` (nil = off = hard cap). On: the gain cap counts the
+  mean weight w = smoothstep(t), t = clamp((e − kneeEncoded) / (eTop − kneeEncoded), 0, 1), e = encoded max channel of
+  the restored stage-1 pixel, eTop = (topCode8bit − 0.5)/255, over master-recoverable pixels; same allowance and limit
+  rule (max(allowance, at gain 0)). Defaults knee 0.90 / top 255 (film-lab advice example, not fitted). Recipe:
+  `stage1HighlightRule` ("hardCap" | "softPenalty"), `stage1HardClippedFraction` (soft only), measure string states the curve.
+- **Clamp check (why not hand >1.0 to stage 2):** the stage-1 restore maps 1 -> 1 (`curveV2`, Look.swift) and its cube
+  pulls m > 1 back to gamut; every LUT, the restore and the stock look, goes through `CIColorCubeWithColorSpace`, whose
+  domain is 0...1 (Renderer.swift `applyLook`). Values above 1.0 would need an extended-domain (shaper) stock LUT for
+  every stock = a stage-2 change. So the soft penalty was prototyped.
+- **Evidence:** `swift build` green; `swift test` 177/177, 0 failures (new `testSoftHighlightRuleWeightAndRecipe`). Legacy: raw-bench release 0.3.1 vs this tree, auto png16 scale 0.25, 5 originals x
+  5 stocks: 25/25 identical. Harness (MoodRoll golden/runs): `v2-254` = `v2-m2-254` 464/464; `v2-254-soft` binds on 15/16
+  frames, gain +0.01 EV, shortfall A01/A02/A03 +2.32/+1.90/+1.59 EV (hard 254: +1.84/+1.17/+0.86).
+- **Finding:** with a knee at 0.90 the penalty at gain 0 already exceeds the allowance (A03 4.76 %), the limit equals it,
+  and any positive gain pushes more pixels up the ramp, so the cap falls to the first grid step. Darker, not brighter.
+  Open (User / film-lab): penalise only each pixel's weight increase over gain 0, a knee nearer the top, or a separate
+  soft allowance. Not tuned here.
+
+## 2026-11-18 — Pipeline v2 item B: clip top code as a provisional parameter (open User decision)
+- `SceneNormalizer.Parameters.clipTopCode8bit: Int? = 255` (nil in older JSON = 255; validate 1...255): the stage-1 cap
+  counts a restored pixel as hard-clipped at 8-bit code >= this (255 = top code only, 254 = near-white too). The value is
+  written into `exposureNormalizer.stage1ClipMeasure`. Default 255 = previous behaviour. Test `testClipTopCodeParameter`.
+- Film-lab harness: `run.py --clip-top-code N` (job field `clipTopCode8bit`), runs `v2-m2-255` and `v2-m2-254`.
+
+## 2026-11-18 — Pipeline v2 item B: M2 on the contract clip measure; highlightRecovery off under v2 (User decisions)
+- **M2 measure:** the gain cap now counts pipeline-induced clip only: pixels recoverable in the stage-0 master (scene-linear
+  decode with the stage-1 colour / WB / NR / lens, max channel < `SceneContext.clipLevel` 0.98, the sensor-clip level)
+  but hard-clipped in the restored stage-1 image (any channel at the 8-bit top code, >= 254.5/255 encoded). Limit =
+  max(allowance 0.2 %, induced clip at gain 0). No specular / sun / window exclusion (no mask): recorded in
+  `stage1ClipMeasure`. New recipe field `masterClippedFraction`. Probes (decode cut) still use the >= 0.98 share.
+- **highlightRecovery:** removed from the active plugins when `exposureModel == .v2Normalizer`;
+  `exposureNormalizer.highlightRecoveryForcedOff` = true when the caller's list had it. Legacy unchanged.
+- **Test:** `testV2StageOneIsStockIndependentAndHighlightRecoveryIsForcedOff` (HR in list vs not = same pixels; two
+  stocks = same plan, gain, stage-1 pixels; induced clip <= limit).
+
+## 2026-11-17 — Pipeline v2 item B: tech-lead must-fixes M1-M3 (branch `feature/pipeline-v2`; not tagged)
+Review: MoodRoll `.orchestration/film-lab/V2_TECHLEAD_REVIEW_2026-11-17.md`. Parameter values unchanged (provisional).
+- **M1 stage 1 is stock-independent:** the display gain is solved on a separate stage-1 decode (DecisionEngine settings +
+  colour source + decode exposure; no plugin decide, no highlightRecovery EDR fields, no filmDevelop) at 1024 px, not on
+  the delivered decode after highlightRecovery. The gain is then applied to the delivered decode at the same place.
+  Highlight probes use the same stage-1 settings (were plain explicit decodes). `Base.stage1Image` (internal) = stage-1
+  output. Recipe `stage1Decode` records decoder version, anchor local tone map (file default), stage-1 local tone map,
+  probe / measure sizes and `differsFromDelivered` (decode fields the stage-1 measurement does not see).
+- **M2 highlight rule on the stage-1 output:** after the median solve and skin lift, the gain is capped (bisection on the
+  0.01 EV grid) so clip (any ch >= 0.98) of the restored stage-1 image <= max(sensor + allowance, clip before restore).
+  Recipe: `stage1ClippedBeforeRestore`, `stage1ClipLimit`, `stage1ClippedFraction`, `medianRestoreEV` (gain before the
+  cap, nil = rule did not bind), `shortfallEV`.
+- **M3:** `autoreleasepool` around each probe decode + `linearImage`, the stage-1 decode and each clip measurement.
+- **Evidence (Mac):** golden A01/A02/A03 x 14 stocks, 1400 px (MoodRoll `golden/runs/v2-itemB-m1m2`): look-off clip254
+  median 6.68 -> 2.53 / 6.45 -> 3.92 / 6.62 -> 1.68 % (stage-0 master 3.40 / 6.49 / 2.85), clipRecoverable 3.3 -> 0.0 /
+  0.6 -> 0.0 / 3.1 -> 0.0 %. Cost: the cap binds on all three; gain +1.50 -> +0.03 / +0.33 / +0.50 EV, shortfall
+  +2.32 / +1.58 / +1.11 EV (was +0.77 / +0.41 / +0.12), look-off median L* 36.0 -> 20.9 / 48.1 -> 32.9 / 56.0 -> 41.3.
+  Stage-1 gain identical across the 14 stocks. Legacy: raw-bench release from `git archive 0.3.1` vs this tree, render
+  auto png16 scale 0.25, 5 originals x 5 stocks: 25/25 decoded pixels identical.
+- **Unverified:** device cost (one more 1024 px decode per develop; up to ~8 extra LUT + clip passes when the cap binds),
+  the large sun-frame shortfall is a design consequence for film-lab (clip measure 0.98 counts shoulder pixels).
+
+## 2026-11-17 — Pipeline v2 work item B: stage-1 continuous scene normalizer (branch `feature/pipeline-v2`; not tagged)
+Contract: MoodRoll PIPELINE_V2_CONTRACT stage 1 (continuous, same for every stock, no classifier; Apple HEIC diagnostic only).
+- **API:** `RenderSettings.exposureModel: ExposureModel?` (`.legacy` | `.v2Normalizer`; nil = legacy, default) and
+  `sceneNormalizer: SceneNormalizer.Parameters?` (nil = `.provisional`). `DecodeRecipe.exposureNormalizer:
+  ExposureNormalizerRecord?` (model, parameters + status "provisional", ignored caller exposure / decodeHeadroomEV /
+  cameraMatchStrength, inputs, plan with highlight probes, decode median, display gain, skin check, decided and delivered
+  EV, Apple HEIC ΔEV diagnostic + source). `HeadroomSplit.split` = the single headroom split (legacy plugin uses it; the
+  app's `FilmSampleStore.headroomSplit` copy should call it). `HeadroomRestore.curveV2/lutV2` (continuous in the gain,
+  rational shoulder; legacy `curve` unchanged). `raw-bench ... --exposure-model v2`.
+- **v2 model:** anchor = median of Apple's default RAW render (analysis histogram) → target L* 50 minus a night drop
+  (smoothstep on EV100) → global EV = 0.5 x log2 distance, bounded −1.5...+1.0 → smallest highlight decode cut (512 px
+  SDR probe bisection, clip − sensor clip ≤ 0.2 %) → display gain solved on the measured decode (−1.5...+1.5 EV) →
+  skin floor L* 40 (lift only, ≤ 0.5 EV x people score). Stock bias, stock headroom and cameraMatch exposure, shadow
+  boost and curve are off; HEIC read only after pixels are fixed.
+- **Why curveV2:** the legacy shoulder divides by raw(1): +0.01 EV gain lifts mid-tones ~0.3 EV, so small gains cannot be
+  delivered; an exponential shoulder at ~2 EV pinned sun-frame highlights at white (A01 17 % clipped).
+- **Golden set (16 frames, look off, 800 px, stored analyses):** median L* normal 55.7 (37.9..62.3), high-key 63.3,
+  low-key 52.5 (legacy look-off proxy 47.1 / 63.8 / 45.3). Apple ΔEV diagnostic (+ = HEIC brighter): normal −0.29
+  (−0.70..−0.07), high-key +0.20, low-key −0.23. Clip (any ch ≥ 0.991) ≤ sensor-clipped share except A01 4.1 % vs 3.2 %.
+  Restore cap binds on A01/A02/A03 (median 0.69/0.40/0.10 EV under target, recorded). Analytic class means for other
+  defaults: t50 k0.35 → 58.9/67.4/52.3; t46 k0.5 → 54.5/60.6/49.7; t50 k0.65 → 54.6/58.9/51.2.
+- **Tests:** `SceneNormalizerTests` (split = legacy formula; continuity + key order + night ramp; no HEIC field in inputs;
+  probe bisection; curveV2 continuity; legacy default == explicit legacy pixels with bias + headroom + HEIC; v2
+  deterministic; HEIC present (stored / file) or absent = same pixels; bias −0.25/0.8/0.05 + headroom + cm = same pixels;
+  two stocks = same plan and gain; non-auto skip; parameter validation).
+- **Evidence:** legacy pixel identity vs item A (scratch harness, item-A source snapshot vs this tree, rr-sao-mai-200 bias
+  0.05 hr 1 cm 0.5, rr-den-vang-800t, rr-hoai-co-200, no stock; HEIC + stored analysis): 24/24 PNG16 byte-identical,
+  recipes identical, golden frames A01 A04 A07 B01 B03 B04.
+- **Unverified:** device cost (up to 6 extra 512 px decodes per develop, preview repeats them), no night / dark-skin /
+  chart fixtures, all parameter numbers (need User approval at golden-set freeze).
+
+## 2026-11-17 — Pipeline v2 work item A: stage-0 colour source + stage-4 output crop (branch `feature/pipeline-v2`, from tag 0.3.1; not tagged)
+Contract: MoodRoll `.orchestration/film-lab/PIPELINE_V2_CONTRACT.md` (stage 0: DNG metadata is the default colour source,
+custom calibration optional, keyed by model + lens + RAW format; coordinate rule: leak / halation / vignette full-frame,
+then crop, then grain). `engineVersion` stays "0.3.1" here: the 0.4.0 bump comes with the release.
+- **Stage 0:** `DecodeRecipe.colorSource: ColorSourceRecord` (source `dngBaseline` | `customCalibration`, the file's
+  `CalibrationKey` {models, lens = EXIF LensModel, rawFormat = bayer | linearRaw from PhotometricInterpretation}, profile
+  id/version/source when custom, `skipReason` + detail on every skip: appleDefaultMode, calibrationDisabled, explicitCCM,
+  explicitLinearExposure, emptyTable, keyIncomplete, noEntry, keyMismatch). The free-text `recipe.calibration` is no longer
+  written (field kept so old recipes decode). `Developer.calibrationKey(url)`.
+- **Calibration key:** `ModelCalibration.lens / rawFormat` (optional, old tables decode); `CalibrationTable.lookup(key)`
+  needs an exact model + lens + format match, no partial fallback (model-only entries are never used by develop).
+  `exposureOffsetEV` semantics unchanged (open decision). `raw-bench chart --calibration-out` writes the full key.
+- **Stage 4:** `RenderSettings.outputCrop: OutputCrop?` (normalized, top-left, in the decoded frame; `OutputCrop.framing(zoom:cropRect:)`
+  composes MoodRoll's centre zoom + framing crop). In `finish`: light leak → halation → afterFinish plugins with
+  `runsAfterCrop == false` (vignette) → crop (whole pixels, origin 0,0; `lookBase` cropped too) → grain on the cropped
+  short edge (same seed, same size %) → `qualityGuard` (`runsAfterCrop == true`). nil = the 0.3.1 code path unchanged.
+  `FilmFinisher.applyHalation / applyGrain / pixelRect / crop`. `raw-bench ... --crop x,y,w,h`.
+- **Tests:** `PipelineV2Tests` (exact lookup and every miss reason, old JSON decodes, crop validation / framing / pixel rect,
+  grain correlation length cropped-then-grain vs grain-then-crop ratio ~0.5, split finish == one-step finish, empty table ==
+  useCalibration=false == key mismatch pixels, full-frame crop == nil crop pixels, vignette before crop / guard after);
+  `DecoderTests.testLinearExposureAndCalibrationLookup` uses the full key.
+- **Evidence (local Mac):** `swift build` green; `swift test` 165/165, 0 failures. Pixel identity vs tag 0.3.1: raw-bench
+  (release, built from `git archive 0.3.1` and from this branch) `render --mode auto --stock S --roll-id R1 --frame 3
+  --frames 24 --format png16 --scale 0.25`, 5 originals x 5 stocks (sao-mai-200, den-vang-800t, dem-mem-800, hoai-co-200,
+  chuan-400): 25/25 decoded pixels byte-identical (empty table, no crop). Not run: CI, public corpus, full resolution.
+- **Unverified:** device cost of the crop path; MoodRoll still crops after develop until the app passes `outputCrop`
+  (then it must stop cropping itself). Vignette is now under the grain on cropped renders (contract order), so cropped
+  frames differ from 0.3.1 by design.
+
 ## 2026-11-15 — 0.3.1 prep: tech-lead review fixes (branch `feature/scene-scores-quality-guard`)
 Review: MoodRoll `.orchestration/film-lab/RSP_SCENE_SCORES_TECHLEAD_REVIEW.md`. Cost rule from the app: the guard runs at
 develop, so it measures on a SMALL preview and the full-resolution final reuses the strength (never re-measures).

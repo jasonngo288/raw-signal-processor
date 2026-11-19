@@ -488,6 +488,44 @@ public enum HeadroomRestore {
         return HeadroomRestoreCache.shared.lut(String(format: "%.2f|%d", q, size)) { make(gainEV: q, size: size) }
     }
 
+    /// v2 exposure model shoulder (`SceneNormalizer`): exactly G·y below the knee (y <= kneeOut / G), then a rational
+    /// (Reinhard-type) shoulder kneeOut + (1 − kneeOut)·a·t / (1 + (a − 1)·t), t = (y − k) / (1 − k), a = (G − kneeOut) /
+    /// (1 − kneeOut) so the slope is continuous at the knee. Maps 1 -> 1 at every gain, is the identity at G = 1 and is
+    /// continuous in the gain; its end slope is 1/a, so highlights keep separation at large gains (an exponential
+    /// shoulder pinned most of a 2 EV restore's highlights at white). The legacy `curve` divides by raw(1), lifts
+    /// mid-tones by ~0.3 EV already at G = 2^0.01, and stays as it is for 0.3.1 pixels. G <= 1 = a plain linear gain
+    /// (darkening never clips).
+    public static func curveV2(_ y: Float, gain G: Float) -> Float {
+        guard G > 1 else { return G * y }
+        let k = kneeOut / G
+        if y <= k { return G * y }
+        let a = (G - kneeOut) / (1 - kneeOut)
+        let t = (y - k) / (1 - k)
+        return kneeOut + (1 - kneeOut) * a * t / (1 + (a - 1) * t)
+    }
+
+    /// The v2 restore cube for `gainEV` (quantised to 0.01 EV), cached (own keys, same LRU).
+    public static func lutV2(gainEV: Float, size: Int = cubeSize) -> CubeLUT {
+        let q = quantised(gainEV)
+        return HeadroomRestoreCache.shared.lut(String(format: "v2|%.2f|%d", q, size)) { make(gainEV: q, size: size, v2: true) }
+    }
+
+    static func make(gainEV: Float, size: Int, v2: Bool) -> CubeLUT {
+        let G = pow(2, gainEV)
+        let w = SIMD3<Float>(0.2289746, 0.6917385, 0.0792869)
+        return CubeLUT.generate(size: size, title: "headroomRestoreV2") { e in
+            let lin = SIMD3(Preset26.decode(e.x), Preset26.decode(e.y), Preset26.decode(e.z))
+            let y = max(lin.x, max(lin.y, lin.z))
+            let f = curveV2(y, gain: G)
+            let r: Float = y > 1e-5 ? f / y : G
+            var o = lin * r
+            let yo = (o * w).sum()
+            let m = max(o.x, max(o.y, o.z))
+            if m > 1 { let t = max((1 - yo) / (m - yo), 0); o = SIMD3(repeating: yo) + (o - SIMD3(repeating: yo)) * t }
+            return SIMD3(Preset26.encode(max(o.x, 0)), Preset26.encode(max(o.y, 0)), Preset26.encode(max(o.z, 0)))
+        }
+    }
+
     static func make(gainEV: Float, size: Int) -> CubeLUT {
         let G = pow(2, gainEV)
         let w = SIMD3<Float>(0.2289746, 0.6917385, 0.0792869)

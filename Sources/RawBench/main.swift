@@ -24,7 +24,8 @@ raw-bench — CIRAWFilter spike CLI
   raw-bench looks <raw|dir>... --out <dir> [--looks a,b] [--long-edge N] [--manifest corpus.json]   film-look set: base once, every look, metrics (look review tool)
   raw-bench lut <in.cube|in.mrlut> --out <out.cube|out.mrlut>   convert LUTs (MoodRoll .mrlut packed format), print round-trip error
   raw-bench storage <raw>... [--stock NAME] [--out <dir>]   base render stored as HEIC10/PNG16/TIFF16/EXR/JPEG: size and ΔE00 vs in-memory
-  common options: --roll-id ID --frame N --frames COUNT (light leak)   --plugins none|highlightRecovery,cameraMatch,vignette   --calibration models.json
+  common options: --crop x,y,w,h (normalized top-left output crop, v2 stage 4)
+                  --roll-id ID --frame N --frames COUNT (light leak)   --plugins none|highlightRecovery,cameraMatch,vignette   --calibration models.json
 
 Looks: \(BuiltInLook.allCases.map(\.rawValue).joined(separator: ", ")) or a .cube path.
 Stocks (--stock, look + grain/halation/vignette): \(FilmStock.all.map { "\($0.name) (\($0.summary))" }.joined(separator: "; "))
@@ -73,6 +74,17 @@ func variant(from a: Args) -> Variant {
     s.rollID = a.options["roll-id"]
     s.rollFrameIndex = a.options["frame"].flatMap(Int.init)
     s.rollFrameCount = a.options["frames"].flatMap(Int.init)
+    // Pipeline v2 stage 4: --crop x,y,w,h (normalized, top-left) = RenderSettings.outputCrop
+    if let c = a.options["crop"] {
+        let v = c.split(separator: ",").compactMap { Double($0) }
+        if v.count == 4 { s.outputCrop = OutputCrop(x: v[0], y: v[1], width: v[2], height: v[3]) }
+        else { log("--crop needs x,y,w,h (normalized, top-left): ignored") }
+    }
+    // Pipeline v2 stage 1: --exposure-model v2 (= RenderSettings.exposureModel .v2Normalizer; default legacy)
+    if let m = a.options["exposure-model"] {
+        if m == "v2" || m == "v2Normalizer" { s.exposureModel = .v2Normalizer }
+        else if m != "legacy" { log("--exposure-model needs legacy | v2: ignored") }
+    }
     return Variant(name: modeName, settings: s, auto: auto)
 }
 
@@ -407,7 +419,8 @@ func chartCommand(_ url: URL, corners: ColorChecker.Corners, model: String?, ref
     let corrected = try measure(fit.ccm.map(Float.init))
     let ref = refLab.map(ColorChecker.referenceLinearP3).map(ColorChecker.labD65)
     let verified = (0..<24).map { ColorChecker.deltaE(ColorChecker.labD65(corrected[$0] * fit.exposureScale), ref[$0]) }
-    let fileKey = try dev.cameraKeys(url).compactMap { $0 }.first
+    let calKey = try dev.calibrationKey(url)
+    let fileKey = calKey.models.first
     let key = model ?? fileKey ?? url.lastPathComponent
     let m = ChartMeasurement(model: key, rawKind: nil, file: url.lastPathComponent, corners: corners, measured: measured,
                              corrected: corrected, fit: fit, verifiedDeltaE: verified,
@@ -429,8 +442,10 @@ func chartCommand(_ url: URL, corners: ColorChecker.Corners, model: String?, ref
     if let calibrationOut {
         let u = URL(fileURLWithPath: calibrationOut)
         var table = (try? CalibrationTable.load(u)) ?? .empty
-        table.models.removeAll { $0.model == key }
-        table.models.append(ModelCalibration(model: key, ccm: fit.ccm.map(Float.init), exposureOffsetEV: 0, version: "chart-\(ISO8601DateFormatter().string(from: Date()).prefix(10))",
+        // v2 key: model + lens + RAW format of this file (develop needs all three to match exactly).
+        if calKey.lens == nil || calKey.rawFormat == nil { log("warning: file lens or RAW format unknown: develop will never use this entry") }
+        table.models.removeAll { $0.model == key && $0.lens == calKey.lens && $0.rawFormat == calKey.rawFormat?.rawValue }
+        table.models.append(ModelCalibration(model: key, lens: calKey.lens, rawFormat: calKey.rawFormat?.rawValue, ccm: fit.ccm.map(Float.init), exposureOffsetEV: 0, version: "chart-\(ISO8601DateFormatter().string(from: Date()).prefix(10))",
                                              source: String(format: "ColorChecker Classic, %@, reference %@, ΔE00 re-decoded %.2f", url.lastPathComponent,
                                                             referencePath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "built-in", verified.reduce(0, +) / 24)))
         try table.prettyJSON().write(to: u, atomically: true, encoding: .utf8)

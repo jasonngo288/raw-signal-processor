@@ -187,14 +187,20 @@ final class DecoderTests: XCTestCase {
     func testLinearExposureAndCalibrationLookup() throws {
         let url = try XCTUnwrap(try files().first)
         let cam = try XCTUnwrap(try RawDecoder().decode(url: url, settings: .appleDefault, scaleFactor: 0.1).recipe.camera)
+        let key = try Developer(plugins: .none).calibrationKey(url)   // v2: model + lens + RAW format must all match
         let dev = Developer(plugins: .none, calibration: CalibrationTable(models: [
-            ModelCalibration(model: cam, ccm: [1, 0, 0, 0, 1, 0, 0, 0, 1], exposureOffsetEV: 1, version: "test1", source: "unit test")]))
+            ModelCalibration(model: cam, lens: key.lens, rawFormat: key.rawFormat?.rawValue,
+                             ccm: [1, 0, 0, 0, 1, 0, 0, 0, 1], exposureOffsetEV: 1, version: "test1", source: "unit test")]))
         let scale = try dev.decoder.scaleFactor(url: url, longEdge: 256)
         let plain = try dev.develop(url: url, settings: .explicit, auto: false, scaleFactor: scale)
         var noCal = RenderSettings.explicit
         noCal.useCalibration = false
         let without = try dev.develop(url: url, settings: noCal, auto: false, scaleFactor: scale)
-        XCTAssertEqual(plain.recipe.calibration?.hasPrefix(cam), true)
+        XCTAssertEqual(plain.recipe.colorSource?.source, .customCalibration)
+        XCTAssertEqual(plain.recipe.colorSource?.profileID, cam)
+        XCTAssertEqual(plain.recipe.colorSource?.profileVersion, "test1")
+        XCTAssertNil(plain.recipe.calibration, "legacy free-text field is no longer written")
+        XCTAssertEqual(without.recipe.colorSource?.skipReason, .calibrationDisabled)
         XCTAssertEqual(plain.recipe.settings.linearExposureEV, 1)
         let a = ImageMetrics.measure(try dev.renderer.linearImage(plain.image)), b = ImageMetrics.measure(try dev.renderer.linearImage(without.image))
         XCTAssertGreaterThan(a.medianY, b.medianY, "+1 EV in linearSpaceFilter brightens the render")

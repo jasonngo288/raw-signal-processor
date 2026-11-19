@@ -18,6 +18,33 @@ public enum FilmFinisher {
         return out.cropped(to: ext)
     }
 
+    /// Halation only, sized on this image's short edge. `applyGrain(applyHalation(x))` == `apply(x)` (same extent).
+    public static func applyHalation(_ image: CIImage, _ f: FilmFinish) -> CIImage {
+        guard f.halationAmount > 0 else { return image }
+        let ext = image.extent
+        return halation(image, f, short: Double(min(ext.width, ext.height))).cropped(to: ext)
+    }
+
+    /// Grain only, cell size from this image's short edge (pipeline v2: called on the cropped frame).
+    public static func applyGrain(_ image: CIImage, _ f: FilmFinish) -> CIImage {
+        guard f.grainAmount > 0 else { return image }
+        let ext = image.extent
+        return grain(image, f, short: Double(min(ext.width, ext.height))).cropped(to: ext)
+    }
+
+    /// Whole-pixel rect of a normalized top-left `OutputCrop` inside `ext` (Core Image origin is bottom-left).
+    public static func pixelRect(_ c: OutputCrop, in ext: CGRect) -> CGRect {
+        let r = CGRect(x: ext.minX + CGFloat(c.x) * ext.width, y: ext.minY + CGFloat(1 - c.y - c.height) * ext.height,
+                       width: CGFloat(c.width) * ext.width, height: CGFloat(c.height) * ext.height).integral
+        let clipped = r.intersection(ext)
+        return clipped.isNull || clipped.isEmpty ? ext : clipped
+    }
+
+    /// Crop to `rect` and move it to origin 0,0 (integer translation: no resampling).
+    public static func crop(_ image: CIImage, to rect: CGRect) -> CIImage {
+        image.cropped(to: rect).transformed(by: CGAffineTransform(translationX: -rect.minX, y: -rect.minY))
+    }
+
     /// Every channel = gain * Y + bias, then clamped to 0...1.
     static func lumaRamp(_ img: CIImage, gain: CGFloat, bias: CGFloat, min: CGFloat = 0) -> CIImage {
         let row = CIVector(x: CGFloat(luma.r) * gain, y: CGFloat(luma.g) * gain, z: CGFloat(luma.b) * gain, w: 0)

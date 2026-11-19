@@ -11,6 +11,8 @@ import Foundation
 ///            → plugins.afterDecode                                   = the base render (no look)
 ///   stage 2, `finish`: look → skin protection (Vision mask, CIBlendWithMask) → plugins.beforeGrain (light leak)
 ///            → grain / halation → plugins.afterFinish
+///            With `RenderSettings.outputCrop` (pipeline v2 stage 4): light leak → halation → afterFinish plugins that
+///            are not `runsAfterCrop` (vignette) on the full frame → crop → grain on the cropped frame → qualityGuard.
 ///   → export (HEIC 10-bit P3 with recipe embedded).
 ///
 /// `develop` = `finish(developBase(...))`. A base can be finished again with another stock (`Base.settings.stock`)
@@ -130,6 +132,19 @@ public final class Developer: @unchecked Sendable {
         var active: [any DevelopPlugin]
         var ran: Set<String>
         var pluginContext: PluginRenderContext
+        /// v2 only: the stage-1 output at the measuring size (`CameraMatchPlugin.histogramLongEdge`): the stock-independent
+        /// decode with the display gain applied. Same for every stock; nil in legacy or when the normalizer did not run.
+        var stage1Image: CIImage? = nil
+    }
+
+    /// Long edge of the v2 highlight probe decodes.
+    static let probeLongEdge = 512
+    /// Hard clip in the restored stage-1 image: a channel that encodes (8-bit, display-encoded) to `code` or above,
+    /// i.e. >= (code - 0.5)/255 encoded. `SceneNormalizer.Parameters.clipTopCode8bit` (255 = top code only).
+    static func hardClipLinear(code: Int) -> Float { Float(ColorMath.decodeTransfer((Double(code) - 0.5) / 255)) }
+    static func inducedClipMeasure(code: Int) -> String {
+        String(format: "induced clip: master (scene-linear stage 0) max channel < %.2f and restored stage-1 any channel at 8-bit code >= %d (>= %.1f/255 encoded), 1024 px; no specular/sun/window exclusion (no mask)",
+               SceneContext.clipLevel, code, Double(code) - 0.5)
     }
 
     /// Same as `analyze`, off the caller's thread (roadmap: analysis runs in the background).
@@ -217,6 +232,18 @@ public final class Developer: @unchecked Sendable {
                                            camera: cam.isEmpty ? nil : cam)
     }
 
+    /// Stage-0 calibration key of a file: model candidates (`cameraKeys`), EXIF LensModel, RAW format from the DNG
+    /// PhotometricInterpretation. Read from the decoder's cached file facts (no extra filter).
+    public func calibrationKey(_ url: URL) throws -> CalibrationKey {
+        let props = try decoder.info(url: url).properties
+        let tiff = props[kCGImagePropertyTIFFDictionary as String] as? [String: Any]
+        let exif = props[kCGImagePropertyExifDictionary as String] as? [String: Any]
+        let aux = props[kCGImagePropertyExifAuxDictionary as String] as? [String: Any]
+        let lens = (exif?[kCGImagePropertyExifLensModel as String] as? String) ?? (aux?[kCGImagePropertyExifAuxLensModel as String] as? String)
+        let pi = (tiff?[kCGImagePropertyTIFFPhotometricInterpretation as String] as? NSNumber)?.intValue
+        return CalibrationKey(models: try cameraKeys(url), lens: lens, rawFormat: CalibrationKey.RawFormat(photometricInterpretation: pi))
+    }
+
     /// Develop with fixed settings, or with `auto` (analysis + DecisionEngine + plugin rules on top of `settings`).
     public func develop(url: URL, settings: RenderSettings, auto: Bool, scaleFactor: Float, analysis: Analysis? = nil) throws -> Output {
         try finish(developBase(url: url, settings: settings, auto: auto, scaleFactor: scaleFactor, analysis: analysis))
@@ -269,11 +296,32 @@ public final class Developer: @unchecked Sendable {
         var ctx: SceneContext?
         var personMask: CIImage?
         var skyMask: CIImage?
-        let active = try plugins.active(for: settings)
+        let v2 = settings.resolvedExposureModel == .v2Normalizer
+        var active = try plugins.active(for: settings)
+        // v2 (User 2026-11-18): highlightRecovery is off for every stock; forced here, whatever the caller's plugin list.
+        let hrForcedOff = v2 && active.contains { $0.id == "highlightRecovery" }
+        if v2 { active.removeAll { $0.id == "highlightRecovery" } }
         var developedFor: String?
         var ran = Set<String>()   // plugins that actually did something (recipe.plugins)
-        if (settings.decodeHeadroomEV ?? 0) > 0, !active.contains(where: { $0.id == "headroom" }) {
+        if !v2, (settings.decodeHeadroomEV ?? 0) > 0, !active.contains(where: { $0.id == "headroom" }) {
             reasons.append("decodeHeadroomEV set but plugin headroom is off: ignored")   // sign-off C2: no pixel changes
+        }
+        // Pipeline v2 stage 1: the caller's exposure (a stock's bias), decode headroom and cameraMatch strength never set
+        // the exposure; the scene normalizer below does (auto), or the decode stays at Apple's exposure (not auto).
+        var normalizer: ExposureNormalizerRecord?
+        // v2 stage 1: decode settings with no stock-dependent step (DecisionEngine only; no plugin decide, no HR EDR fields),
+        // used for the highlight probes and for the image the display gain is solved on (review M1, 2026-11-17).
+        var stage1Settings: RenderSettings?
+        var stage1Image: CIImage?
+        let calKey = try calibrationKey(url)
+        if v2 {
+            var r = ExposureNormalizerRecord(parameters: settings.sceneNormalizer ?? .provisional)
+            r.ignoredCallerExposureEV = settings.exposure
+            r.ignoredDecodeHeadroomEV = settings.decodeHeadroomEV
+            r.ignoredCameraMatchStrength = settings.cameraMatchStrength
+            r.highlightRecoveryForcedOff = hrForcedOff
+            normalizer = r
+            st.exposure = nil
         }
         if auto {
             var a: Analysis
@@ -293,10 +341,19 @@ public final class Developer: @unchecked Sendable {
             }
             // Everything the caller set is kept; DecisionEngine only adds/overrides bounded decode values.
             var base = settings
+            if v2 { base.exposure = nil }
             base.mode = .explicit
             let d = DecisionEngine.decide(context: a.context, defaults: a.defaults, support: a.support, base: base)
             st = d.settings
             reasons += d.reasons
+            if v2 {
+                var s1 = d.settings
+                s1.exposure = nil; s1.headroomRestoreEV = nil
+                s1.extendedDynamicRangeAmount = nil; s1.toneMapSourceHeadroom = nil; s1.highlightClarity = nil; s1.highlightRecoveryLocal = nil
+                s1.decoderVersion = try decoder.pinnedVersion(url: url, requested: settings.decoderVersion)
+                _ = resolveColorSource(&s1, key: calKey)
+                stage1Settings = s1
+            }
             for p in active {
                 let before = st
                 let why = p.decide(context: a.context, defaults: a.defaults, settings: &st)
@@ -305,27 +362,52 @@ public final class Developer: @unchecked Sendable {
                 reasons += why.map { "[\(p.id)] " + $0 }
             }
             if !reused { reasons.append(String(format: "analysis %.2fs", a.seconds)) }
+            if v2, var r = normalizer, let s1 = stage1Settings {
+                // Stage 1 decision (pure, from the analysis only): the same for every stock, no HEIC input.
+                let inputs = SceneNormalizer.Inputs(context: a.context, baselineExposureEV: Double(a.defaults.baselineExposure),
+                                                    fNumber: try? fNumber(url))
+                // Highlight probes: SDR decodes with the stage-1 settings (same colour source, WB, NR, sharpening and local tone
+                // map as the stage-1 image; no stock-dependent step) + exposure, at 512 px: the cut is the same for every stock
+                // and for preview and final. One autoreleasepool per probe (review M3).
+                let probeScale = try decoder.scaleFactor(url: url, longEdge: Self.probeLongEdge)
+                let plan = try SceneNormalizer.withHighlightCut(SceneNormalizer.decide(inputs, r.parameters), r.parameters,
+                                                                sensorClippedFraction: a.context.clippedFraction) { ev in
+                    try autoreleasepool {
+                        var ps = s1
+                        ps.exposure = Float(ev)
+                        return SceneContext.clippedFraction(try renderer.linearImage(try decoder.decode(url: url, settings: ps, scaleFactor: probeScale).image))
+                    }
+                }
+                var s1Exposed = s1
+                s1Exposed.exposure = Float(plan.decodeExposureEV)
+                stage1Settings = s1Exposed
+                r.stage1Decode = ExposureNormalizerRecord.Stage1Decode(
+                    decoderVersion: s1.decoderVersion ?? "", anchorLocalToneMapAmount: a.defaults.localToneMapAmount,
+                    localToneMapAmount: s1.localToneMapAmount ?? a.defaults.localToneMapAmount,
+                    probeLongEdge: Self.probeLongEdge, measureLongEdge: Int(CameraMatchPlugin.histogramLongEdge))
+                st.exposure = Float(plan.decodeExposureEV)
+                st.headroomRestoreEV = nil
+                r.inputs = inputs
+                r.plan = plan
+                normalizer = r
+                reasons.append(String(format: "[normalizer] v2 stage 1: anchor L* %@ (Apple default RAW median) -> target %.1f (night %.2f), global %+.2f EV (strength %.2f), highlight cut %.2f EV (%ld probes) -> decode exposure %.2f%@",
+                                      plan.anchorL.map { String(format: "%.1f", $0) } ?? "n/a", plan.targetL, plan.nightWeight, plan.globalEV,
+                                      r.parameters.strength, plan.highlightCutEV, plan.highlightProbes.count, plan.decodeExposureEV,
+                                      plan.notes.isEmpty ? "" : "; " + plan.notes.joined(separator: "; ")))
+            }
             ctx = a.context
             personMask = a.personMask
             skyMask = a.skyMask
         }
 
-        // Per-model calibration: CCM + exposure offset inside linearSpaceFilter (scene-linear).
-        var calibrationNote: String?
-        if st.mode != .appleDefault, st.useCalibration ?? true, st.ccm == nil, st.linearExposureEV == nil {
-            let keys = try cameraKeys(url)
-            if let entry = calibration.entry(forAny: keys) {
-                st.ccm = entry.ccm
-                st.linearExposureEV = entry.exposureOffsetEV
-                calibrationNote = "\(entry.model) \(entry.version) (\(entry.source))"
-            } else {
-                calibrationNote = "none for \(keys.compactMap { $0 }.joined(separator: " / ")): DNG matrices"
-            }
-        }
+        // Stage 0 colour source (pipeline v2): DNG metadata by default; an optional custom calibration (CCM + exposure
+        // offset inside linearSpaceFilter, scene-linear) only on an exact model + lens + RAW format match. Every path
+        // records its source and, when custom is skipped, why. Empty table = no change to the decode (0.3.1 pixels).
+        let colorSource = resolveColorSource(&st, key: calKey)
 
         var out = try decoder.decode(url: url, settings: st, scaleFactor: scaleFactor, decisions: reasons)
         out.recipe.pluginsEnabled = active.map(\.id)
-        out.recipe.calibration = calibrationNote
+        out.recipe.colorSource = colorSource
         let decodedSettings = st
         let dec = decoder
         let pctx = PluginRenderContext(renderer: renderer, decodeBase: {
@@ -344,14 +426,271 @@ public final class Developer: @unchecked Sendable {
         })
 
         var image = out.image
+        if v2, auto == false, var r = normalizer {
+            r.skipped = "render without auto (no analysis): decode at Apple's exposure, no normalizer"
+            normalizer = r
+        }
+        // v2: the normalizer's display restore runs right after highlightRecovery (where the legacy headroom restore ran).
+        var pending = v2 && normalizer?.plan != nil
         for p in active {
+            if pending, p.id != "highlightRecovery" {
+                image = try deliverNormalizer(image, url: url, stage1: stage1Settings!, record: &normalizer!, stage1Image: &stage1Image,
+                                              personMask: personMask, scene: ctx, settings: st, decisions: &out.recipe.decisions)
+                pending = false
+            }
             let (img, why) = try p.afterDecode(image, settings: st, ctx: pctx)
             image = img
             if !why.isEmpty { ran.insert(p.id) }
             out.recipe.decisions += why.map { "[\(p.id)] " + $0 }
         }
-        return Base(image: image, recipe: out.recipe, settings: st, context: ctx, personMask: personMask, skyMask: skyMask,
-                    developedFor: developedFor, active: active, ran: ran, pluginContext: pctx)
+        if pending {
+            image = try deliverNormalizer(image, url: url, stage1: stage1Settings!, record: &normalizer!, stage1Image: &stage1Image,
+                                          personMask: personMask, scene: ctx, settings: st, decisions: &out.recipe.decisions)
+        }
+        out.recipe.exposureNormalizer = normalizer
+        var based = Base(image: image, recipe: out.recipe, settings: st, context: ctx, personMask: personMask, skyMask: skyMask,
+                         developedFor: developedFor, active: active, ran: ran, pluginContext: pctx)
+        based.stage1Image = stage1Image
+        return based
+    }
+
+    /// Decode fields (RenderSettings JSON keys) whose value differs between the v2 stage-1 decode and the delivered decode,
+    /// `exposure` excluded (the same on both). Recorded so a recipe says what the stage-1 measurement did not see.
+    static func decodeFieldsDiffering(_ a: RenderSettings, _ b: RenderSettings) -> [String] {
+        func dict(_ s: RenderSettings) -> [String: Any] {
+            (try? JSONSerialization.jsonObject(with: Data(s.compactJSON().utf8))) as? [String: Any] ?? [:]
+        }
+        let x = dict(a), y = dict(b)
+        // exposure: the same on both; plugins: not a decode field; decoderVersion: stage 1 pins it explicitly, the delivered
+        // decode resolves the same pin from nil (recorded in `Stage1Decode.decoderVersion`).
+        let ignored: Set<String> = ["exposure", "plugins", "decoderVersion"]
+        return Set(x.keys).union(y.keys).subtracting(ignored).filter { k in
+            switch (x[k], y[k]) {
+            case (nil, nil): return false
+            case (let u?, let v?): return !(u as AnyObject).isEqual(v)
+            default: return true
+            }
+        }.sorted()
+    }
+
+    /// Stage 0 colour source for `st` (fills `ccm` / `linearExposureEV` from the table on an exact key match).
+    func resolveColorSource(_ st: inout RenderSettings, key calKey: CalibrationKey) -> ColorSourceRecord {
+        if st.mode == .appleDefault {
+            return .dngBaseline(calKey, .appleDefaultMode, "appleDefault reference decode: no calibration")
+        } else if st.useCalibration == false {
+            return .dngBaseline(calKey, .calibrationDisabled, "useCalibration = false")
+        } else if st.ccm != nil {
+            return .dngBaseline(calKey, .explicitCCM, "caller ccm on top of the DNG matrices; table not read")
+        } else if st.linearExposureEV != nil {
+            return .dngBaseline(calKey, .explicitLinearExposure, "caller linearExposureEV; table not read")
+        }
+        switch calibration.lookup(calKey) {
+        case .found(let entry):
+            st.ccm = entry.ccm
+            st.linearExposureEV = entry.exposureOffsetEV
+            return .custom(calKey, entry)
+        case .missing(let why, let detail):
+            return .dngBaseline(calKey, why, detail)
+        }
+    }
+
+    /// EXIF FNumber of the file (for EV100), nil when absent.
+    public func fNumber(_ url: URL) throws -> Double? {
+        let props = try decoder.info(url: url).properties
+        let exif = props[kCGImagePropertyExifDictionary as String] as? [String: Any]
+        return (exif?[kCGImagePropertyExifFNumber as String] as? NSNumber)?.doubleValue
+    }
+
+    /// `image` downscaled (long edge `longEdge`) and rendered once into a float bitmap, so repeated measurements do not
+    /// decode the RAW again.
+    func materialized(_ image: CIImage, longEdge: CGFloat) -> CIImage? {
+        let small = CameraMatchPlugin.small(image, longEdge: longEdge)
+        let e = small.extent.integral
+        let w = Int(e.width), h = Int(e.height)
+        guard w > 0, h > 0 else { return nil }
+        var data = Data(count: w * h * 16)
+        data.withUnsafeMutableBytes { renderer.context.render(small, toBitmap: $0.baseAddress!, rowBytes: w * 16, bounds: e, format: .RGBAf, colorSpace: Renderer.linearP3) }
+        return CIImage(bitmapData: data, bytesPerRow: w * 16, size: CGSize(width: w, height: h), format: .RGBAf, colorSpace: Renderer.linearP3)
+    }
+
+    /// Median display-linear luminance, same measure as the analysis' Apple render (`lumaHistogram`, 64 bins).
+    func medianY(_ image: CIImage) -> Double? {
+        renderer.lumaHistogram(image).map { ColorMath.decodeTransfer(ToneMatch.quantile($0, 0.5)) }
+    }
+
+    /// Median L* of skin-hue pixels inside the person mask (mask >= 0.5, hue 25-75°, C* 10-45, L* 20-90: the golden-set
+    /// skin rule), on a 384 px render. nil = fewer than 100 such pixels.
+    func skinMedianL(_ image: CIImage, mask: CIImage) throws -> (Double, Int)? {
+        let img = CameraMatchPlugin.small(image, longEdge: 384)
+        let e = img.extent, m = mask.extent
+        guard m.width > 0, m.height > 0 else { return nil }
+        let scaled = mask.transformed(by: CGAffineTransform(translationX: -m.minX, y: -m.minY))
+            .transformed(by: CGAffineTransform(scaleX: e.width / m.width, y: e.height / m.height))
+            .transformed(by: CGAffineTransform(translationX: e.minX, y: e.minY)).cropped(to: e)
+        let px = try renderer.linearImage(img), mk = try renderer.linearImage(scaled)
+        var ls: [Double] = []
+        for i in 0..<min(px.pixelCount, mk.pixelCount) where mk.pixels[i * 3] >= 0.5 {
+            let lab = ColorMath.lab(r: Double(max(px.pixels[i * 3], 0)), g: Double(max(px.pixels[i * 3 + 1], 0)), b: Double(max(px.pixels[i * 3 + 2], 0)))
+            let c = (lab.a * lab.a + lab.b * lab.b).squareRoot()
+            var hue = atan2(lab.b, lab.a) * 180 / .pi
+            if hue < 0 { hue += 360 }
+            if (25...75).contains(hue), (10...45).contains(c), (20...90).contains(lab.l) { ls.append(lab.l) }
+        }
+        guard ls.count >= 100 else { return nil }
+        ls.sort()
+        return (ls[ls.count / 2], ls.count)
+    }
+
+    /// Pipeline v2 stage 1, after the decode: solve the display restore (max-channel shoulder, `HeadroomRestore.curveV2`) so the
+    /// median lands on the plan's target (Apple's tone curve is not linear, so a fixed +Δ restore under-delivers:
+    /// ROLL_AUDIT 2026-11-17), then the skin floor, then cap the gain by the highlight rule on the restored image, then record
+    /// the Apple HEIC ΔEV as a diagnostic. Everything is measured on the stage-1 image: a separate decode with `stage1`
+    /// (no stock-dependent step, review M1) at `CameraMatchPlugin.histogramLongEdge`, independent of the render's scale.
+    /// The gain is then applied to `image` (the delivered decode, after highlightRecovery when a stock keeps it).
+    /// Deterministic: same RAW + same analysis = same gain for every stock. The HEIC is read only after the pixels are fixed.
+    func deliverNormalizer(_ image: CIImage, url: URL, stage1: RenderSettings, record r: inout ExposureNormalizerRecord,
+                           stage1Image: inout CIImage?, personMask: CIImage?, scene: SceneContext?,
+                           settings st: RenderSettings, decisions: inout [String]) throws -> CIImage {
+        r.stage1Decode?.differsFromDelivered = Self.decodeFieldsDiffering(stage1, st)
+        let sc = try decoder.scaleFactor(url: url, longEdge: Int(CameraMatchPlugin.histogramLongEdge))
+        let measured: CIImage? = try autoreleasepool {
+            materialized(try decoder.decode(url: url, settings: stage1, scaleFactor: sc).image, longEdge: CameraMatchPlugin.histogramLongEdge)
+        }
+        guard let plan = r.plan, let target = plan.targetMedianY, let probe = measured, let m0 = medianY(probe) else {
+            // Without a measurable target only the highlight cut is given back (fixed, as the legacy split would).
+            guard let cut = r.plan?.highlightCutEV, cut > 0 else {
+                r.notes.append("no target or no measurable decode: no display restore")
+                return image
+            }
+            let q = HeadroomRestore.quantised(Float(cut))
+            r.restoreEV = Double(q)
+            r.notes.append(String(format: "no target or no measurable decode: fixed restore +%.2f EV (the highlight cut only)", q))
+            return try renderer.applyLook(HeadroomRestore.lutV2(gainEV: q), to: image, intensity: 1)
+        }
+        let p = r.parameters
+        r.decodeMedianL = SceneNormalizer.lstar(m0)
+        func restored(_ g: Double) throws -> CIImage {
+            let q = HeadroomRestore.quantised(Float(g))
+            return q != 0 ? try renderer.applyLook(HeadroomRestore.lutV2(gainEV: q), to: probe, intensity: 1) : probe
+        }
+        // Fixed-point iteration on the measured median (at most 4 measurements, stop within 0.02 EV).
+        func solve(_ want: Double, from g0: Double) throws -> (Double, Double, Int) {
+            var g = g0, m = m0, n = 0
+            for _ in 0..<4 {
+                let gq = Double(HeadroomRestore.quantised(Float(g)))
+                m = try medianY(restored(gq)) ?? m
+                n += 1
+                if abs(log2(want / max(m, 1e-6))) < 0.02 { return (gq, m, n) }
+                let next = SceneNormalizer.nextRestore(gq, measured: m, target: want, maxEV: p.maxRestoreEV, minEV: p.maxCutEV)
+                if abs(next - gq) < 0.005 { return (gq, m, n) }
+                g = next
+            }
+            return (Double(HeadroomRestore.quantised(Float(g))), try medianY(restored(g)) ?? m, n + 1)
+        }
+        var (g, m, n) = try solve(target, from: SceneNormalizer.nextRestore(0, measured: m0, target: target, maxEV: p.maxRestoreEV, minEV: p.maxCutEV))
+        var want = target
+        // Skin floor: lift only, x the smooth people score, bounded.
+        let people = r.inputs?.people ?? 0
+        if people > 0, let mask = personMask, let (skinL, count) = try skinMedianL(restored(g), mask: mask) {
+            r.skinMedianL = skinL; r.skinPixels = count
+            let deficit = log2(SceneNormalizer.luminance(lstar: p.skinFloorL) / SceneNormalizer.luminance(lstar: skinL))
+            let lift = min(max(deficit, 0), p.maxSkinLiftEV) * people
+            r.skinLiftEV = lift
+            if lift >= 0.01 {
+                want = target * pow(2, lift)
+                (g, m, n) = try { let s = try solve(want, from: g + lift); return (s.0, s.1, n + s.2) }()
+                r.skinMedianLAfter = try skinMedianL(restored(g), mask: mask)?.0
+            }
+        }
+        // Highlight rule on the stage-1 OUTPUT (review M2, contract clipping definition, User 2026-11-18): pipeline-induced
+        // clip = share of pixels recoverable in the stage-0 master (scene-linear, max channel < `SceneContext.clipLevel`, the
+        // sensor-clip level) but hard-clipped in the restored stage-1 image (any channel at the 8-bit top code). No
+        // specular / sun / window exclusion (no such mask yet): those pixels count. The gain is capped so the induced clip
+        // stays <= allowance (or <= what the decode already induces at gain 0, if that is higher). The gain only goes down
+        // here; bisection on the 0.01 EV quantisation grid. What the median then misses is recorded (shortfallEV).
+        let master: LinearImage? = try autoreleasepool {
+            var b = stage1
+            b.mode = .sceneLinear
+            b.exposure = nil; b.baselineExposure = nil; b.shadowBias = nil; b.boostAmount = nil; b.boostShadowAmount = nil
+            b.localToneMapAmount = nil; b.extendedDynamicRangeAmount = nil; b.gamutMapping = nil
+            b.toneMapSourceHeadroom = nil; b.highlightClarity = nil; b.highlightRecoveryLocal = nil
+            return try materialized(try decoder.decode(url: url, settings: b, scaleFactor: sc).image,
+                                    longEdge: CameraMatchPlugin.histogramLongEdge).map { try renderer.linearImage($0) }
+        }
+        guard let master, let probeLin = try? renderer.linearImage(probe), probeLin.width == master.width, probeLin.height == master.height else {
+            throw RawCoreError.invalidSettings("v2 normalizer: stage-0 master and stage-1 image do not align (cannot measure clipping)")
+        }
+        let recoverable: [Bool] = (0..<master.pixelCount).map {
+            max(master.pixels[$0 * 3], master.pixels[$0 * 3 + 1], master.pixels[$0 * 3 + 2]) < Float(SceneContext.clipLevel)
+        }
+        let topCode = p.effectiveClipTopCode8bit
+        let hardClip = Self.hardClipLinear(code: topCode)
+        r.stage1ClipMeasure = Self.inducedClipMeasure(code: topCode)
+        r.masterClippedFraction = Double(recoverable.lazy.filter { !$0 }.count) / Double(max(master.pixelCount, 1))
+        func clip(_ g: Double) throws -> Double {
+            try autoreleasepool {
+                let img = try renderer.linearImage(restored(g))
+                var c = 0
+                for i in 0..<min(img.pixelCount, recoverable.count) where recoverable[i]
+                    && max(img.pixels[i * 3], img.pixels[i * 3 + 1], img.pixels[i * 3 + 2]) >= hardClip { c += 1 }
+                return Double(c) / Double(max(img.pixelCount, 1))
+            }
+        }
+        let c0 = try clip(0)
+        let limit = max(p.highlightClipAllowance, c0)
+        r.stage1ClipLimit = limit; r.stage1ClippedBeforeRestore = c0
+        var delivered = c0
+        if HeadroomRestore.quantised(Float(g)) > 0 {
+            delivered = try clip(g)
+            if delivered - limit > 1e-12 {
+                let wanted = g, clipWanted = delivered
+                var lo = 0.0, hi = g
+                while true {
+                    let mid = Double(HeadroomRestore.quantised(Float((lo + hi) / 2)))
+                    if mid <= lo || mid >= hi { break }
+                    n += 1
+                    if try clip(mid) <= limit { lo = mid } else { hi = mid }
+                }
+                g = lo
+                delivered = try clip(g)
+                m = try medianY(restored(g)) ?? m
+                n += 1
+                r.medianRestoreEV = wanted
+                r.notes.append(String(format: "highlight rule on the restored image: gain %+.2f -> %+.2f EV (induced clip %.2f%% at %+.2f, limit %.2f%% = max(allowance %.2f%%, at gain 0 %.2f%%))",
+                                      wanted, g, clipWanted * 100, wanted, limit * 100, p.highlightClipAllowance * 100, c0 * 100))
+                if let mask = personMask, r.skinMedianL != nil { r.skinMedianLAfter = try skinMedianL(restored(g), mask: mask)?.0 }
+            }
+        }
+        r.stage1ClippedFraction = delivered
+        let miss = log2(want / max(m, 1e-6))
+        r.shortfallEV = miss
+        if abs(miss) >= 0.05 {
+            r.notes.append(String(format: "display gain %+.2f EV (bound -%.2f...+%.2f%@) leaves the median %+.2f EV from target", g, p.maxCutEV, p.maxRestoreEV,
+                                  r.medianRestoreEV == nil ? "" : ", highlight rule", miss))
+        }
+        r.restoreEV = g; r.restoreIterations = n
+        stage1Image = try restored(g)
+        r.deliveredMedianL = SceneNormalizer.lstar(m)
+        if let y0 = r.inputs?.appleDefaultMedianY, y0 > 1e-6 { r.decidedEV = log2(want / y0); r.deliveredEV = log2(max(m, 1e-6) / y0) }
+        let out = HeadroomRestore.quantised(Float(g)) != 0 ? try renderer.applyLook(HeadroomRestore.lutV2(gainEV: Float(g)), to: image, intensity: 1) : image
+
+        // Diagnostic only, after the pixels are fixed: Apple HEIC mid-tones vs this stage-1 output.
+        let stored = scene?.cameraReferenceHistogram
+        if let ours = try renderer.lumaHistogram(restored(g)) {
+            if let theirs = stored, theirs.count == ours.count {
+                r.appleDiagnosticDeltaEV = ToneMatch.exposureOffsetEV(candidate: ours, reference: theirs, range: -8...8)
+                r.appleDiagnosticSource = "stored analysis histogram"
+            } else if let path = st.cameraReference, let theirs = CameraMatchPlugin.referenceHistogram(path, renderer: renderer, bins: ours.count) {
+                r.appleDiagnosticDeltaEV = ToneMatch.exposureOffsetEV(candidate: ours, reference: theirs, range: -8...8)
+                r.appleDiagnosticSource = "HEIC file"
+            }
+        }
+        decisions.append(String(format: "[normalizer] stage-1 median L* %.1f -> display gain %+.2f EV (%d measure%@) -> median L* %.1f (target %.1f, short %+.2f EV), induced clip %.2f%% (limit %.2f%%)%@%@",
+                                r.decodeMedianL ?? 0, g, n, n == 1 ? "" : "s", r.deliveredMedianL ?? 0, SceneNormalizer.lstar(want), miss,
+                                delivered * 100, limit * 100,
+                                r.skinMedianL.map { String(format: ", skin L* %.1f lift %+.2f EV", $0, r.skinLiftEV ?? 0) } ?? "",
+                                r.appleDiagnosticDeltaEV.map { String(format: "; Apple HEIC %+.2f EV (diagnostic only)", $0) } ?? ""))
+        return out
     }
 
     /// A look with a sky hold (`FilmStock.skyHoldAmount` > 0). With the `skyMask` plugin and a mask decision from the
@@ -477,17 +816,45 @@ public final class Developer: @unchecked Sendable {
             if !why.isEmpty { ran.insert(p.id) }
             out.recipe.decisions += why.map { "[\(p.id)] " + $0 }
         }
-        if let finish, finish.grainAmount > 0 || finish.halationAmount > 0 {
-            image = FilmFinisher.apply(image, finish)
-            out.recipe.decisions.append(String(format: "film finish%@: grain %.2f @ %.3f%% short edge (seed %u), halation %.2f (Y>%.2f, r %.2f%%)",
-                                               stock.map { " (\($0.name))" } ?? "", finish.grainAmount, finish.grainSize, finish.grainSeed,
-                                               finish.halationAmount, finish.halationThreshold, finish.halationRadius))
+        func afterFinish(_ plugins: [any DevelopPlugin]) throws {
+            for p in plugins {
+                let (img, why) = try p.afterFinish(image, settings: st, finish: finish, ctx: finishCtx)
+                image = img
+                if !why.isEmpty { ran.insert(p.id) }
+                out.recipe.decisions += why.map { "[\(p.id)] " + $0 }
+            }
         }
-        for p in base.active {
-            let (img, why) = try p.afterFinish(image, settings: st, finish: finish, ctx: finishCtx)
-            image = img
-            if !why.isEmpty { ran.insert(p.id) }
-            out.recipe.decisions += why.map { "[\(p.id)] " + $0 }
+        if let crop = st.outputCrop {
+            // Pipeline v2 stage 4: halation and full-frame afterFinish plugins (vignette) → crop → grain on the cropped
+            // short edge (same seed, same size %) → plugins that run after the crop (qualityGuard, on a cropped base).
+            let stockTag = stock.map { " (\($0.name))" } ?? ""
+            if let finish, finish.halationAmount > 0 {
+                image = FilmFinisher.applyHalation(image, finish)
+                out.recipe.decisions.append(String(format: "film finish%@: halation %.2f (Y>%.2f, r %.2f%%) on the full frame",
+                                                   stockTag, finish.halationAmount, finish.halationThreshold, finish.halationRadius))
+            }
+            try afterFinish(base.active.filter { !$0.runsAfterCrop })
+            let full = image.extent
+            let rect = FilmFinisher.pixelRect(crop, in: full)
+            image = FilmFinisher.crop(image, to: rect)
+            finishCtx.lookBase = finishCtx.lookBase.map { FilmFinisher.crop($0, to: rect) }
+            out.recipe.decisions.append(String(format: "output crop %.4f,%.4f %.4fx%.4f (top-left) of %.0fx%.0f -> %.0fx%.0f px at %.0f,%.0f",
+                                               crop.x, crop.y, crop.width, crop.height, full.width, full.height,
+                                               rect.width, rect.height, rect.minX - full.minX, full.maxY - rect.maxY))
+            if let finish, finish.grainAmount > 0 {
+                image = FilmFinisher.applyGrain(image, finish)
+                out.recipe.decisions.append(String(format: "film finish%@: grain %.2f @ %.3f%% cropped short edge (seed %u)",
+                                                   stockTag, finish.grainAmount, finish.grainSize, finish.grainSeed))
+            }
+            try afterFinish(base.active.filter { $0.runsAfterCrop })
+        } else {
+            if let finish, finish.grainAmount > 0 || finish.halationAmount > 0 {
+                image = FilmFinisher.apply(image, finish)
+                out.recipe.decisions.append(String(format: "film finish%@: grain %.2f @ %.3f%% short edge (seed %u), halation %.2f (Y>%.2f, r %.2f%%)",
+                                                   stock.map { " (\($0.name))" } ?? "", finish.grainAmount, finish.grainSize, finish.grainSeed,
+                                                   finish.halationAmount, finish.halationThreshold, finish.halationRadius))
+            }
+            try afterFinish(base.active)
         }
         out.recipe.plugins = base.active.map(\.id).filter { ran.contains($0) }
         out.recipe.qualityGuardStrength = guardReport?.strength

@@ -99,6 +99,30 @@ public struct RenderSettings: Codable, Equatable, Sendable {
     public var rollFrameIndex: Int?
     public var rollFrameCount: Int?
 
+    /// Pipeline v2 stage 4 (MoodRoll PIPELINE_V2_CONTRACT, coordinate rule): the host's framing crop, done INSIDE
+    /// `Developer.finish`. Light leak, halation and vignette run on the full frame, then this crop, then grain sized on
+    /// the CROPPED short edge (same seed, same size %), then `qualityGuard` (on the cropped frame and cropped base).
+    /// The output starts at origin 0,0. nil = no crop: the 0.3.1 finish order and pixels, unchanged.
+    public var outputCrop: OutputCrop?
+
+    /// Pipeline v2 stage 1 (MoodRoll PIPELINE_V2_CONTRACT): which exposure model sets the scene exposure.
+    /// - `legacy` (nil = legacy, the default): the 0.3.1 chain, unchanged pixels: caller `exposure` (the stock bias) →
+    ///   `headroom` split of `decodeHeadroomEV` → `cameraMatch` HEIC exposure offset, shadow boost and tone curve.
+    /// - `v2Normalizer`: `SceneNormalizer` decides one exposure from the analysis, the same for every stock. The caller's
+    ///   `exposure` (stock bias), `decodeHeadroomEV` and `cameraMatchStrength` are ignored (recorded as ignored); the
+    ///   camera HEIC is only a diagnostic ΔEV in `DecodeRecipe.exposureNormalizer`, it never changes a pixel. Needs `auto`.
+    public enum ExposureModel: String, Codable, Sendable, CaseIterable {
+        case legacy
+        case v2Normalizer
+    }
+    public var exposureModel: ExposureModel?
+    /// Parameters of the v2 normalizer (nil = `SceneNormalizer.Parameters.provisional`). Only read with `v2Normalizer`.
+    /// For lab runs; every default is provisional until the User approves the numbers.
+    public var sceneNormalizer: SceneNormalizer.Parameters?
+
+    /// The model in effect (nil = legacy).
+    public var resolvedExposureModel: ExposureModel { exposureModel ?? .legacy }
+
     public init(mode: Mode = .appleDefault, decoderVersion: String? = nil, look: String? = nil, lookIntensity: Float = 1) {
         self.mode = mode
         self.decoderVersion = decoderVersion
@@ -127,6 +151,8 @@ public struct RenderSettings: Codable, Equatable, Sendable {
             guard i >= 1, i <= (rollFrameCount ?? Int.max) else { throw RawCoreError.invalidSettings("rollFrameIndex must be 1...rollFrameCount") }
         }
         if !(0...1).contains(lookIntensity) { throw RawCoreError.invalidSettings("lookIntensity must be in 0...1") }
+        try outputCrop?.validate()
+        try sceneNormalizer?.validate()
         if mode == .appleDefault && hasOverrides {
             throw RawCoreError.invalidSettings("appleDefault mode must not carry parameter overrides; use explicit")
         }
@@ -159,6 +185,47 @@ public struct RenderSettings: Codable, Equatable, Sendable {
                                 neutralTemperature, neutralTint]
         return floats.contains { $0 != nil } || lensCorrection != nil || gamutMapping != nil || ccm != nil || linearExposureEV != nil || toneMapSourceHeadroom != nil || highlightClarity != nil || highlightRecoveryLocal != nil
             || decodeHeadroomEV != nil
+    }
+}
+
+/// Normalized crop rectangle, origin TOP-LEFT (x right, y down), in the frame `develop` renders (upright, as decoded).
+/// `Developer.finish` turns it into whole pixels (`.integral`, clipped to the frame). Pure value type.
+public struct OutputCrop: Codable, Equatable, Sendable {
+    public var x: Double
+    public var y: Double
+    public var width: Double
+    public var height: Double
+
+    public init(x: Double, y: Double, width: Double, height: Double) {
+        self.x = x; self.y = y; self.width = width; self.height = height
+    }
+
+    /// The whole frame (a no-op crop; still runs the v2 finish order).
+    public static let full = OutputCrop(x: 0, y: 0, width: 1, height: 1)
+
+    /// A capture zoom (centre crop of 1/zoom, applied when zoom > 1.01, as MoodRoll's `framed`) followed by a framing
+    /// `cropRect` [x, y, w, h] measured from the top-left INSIDE the zoomed frame, composed into one rect of the full
+    /// frame. nil when neither applies.
+    public static func framing(zoom: Double?, cropRect: [Double]?) -> OutputCrop? {
+        var c = OutputCrop.full
+        var any = false
+        if let z = zoom, z > 1.01 {
+            c = OutputCrop(x: (1 - 1 / z) / 2, y: (1 - 1 / z) / 2, width: 1 / z, height: 1 / z)
+            any = true
+        }
+        if let r = cropRect, r.count == 4 {
+            c = OutputCrop(x: c.x + r[0] * c.width, y: c.y + r[1] * c.height, width: r[2] * c.width, height: r[3] * c.height)
+            any = true
+        }
+        return any ? c : nil
+    }
+
+    public func validate() throws {
+        let eps = 1e-9
+        guard [x, y, width, height].allSatisfy({ $0.isFinite }), x >= -eps, y >= -eps, width > 0, height > 0,
+              x + width <= 1 + eps, y + height <= 1 + eps else {
+            throw RawCoreError.invalidSettings("outputCrop must be a normalized rect inside 0...1 with positive size, got \(x),\(y),\(width),\(height)")
+        }
     }
 }
 
@@ -242,13 +309,20 @@ public struct DecodeRecipe: Codable, Equatable, Sendable {
     public var plugins: [String] = []
     /// Plugins that were enabled for this render (whether or not they had anything to do).
     public var pluginsEnabled: [String] = []
-    /// Calibration entry used ("iPhone14,3 v1"), or why none was used.
+    /// LEGACY (<= 0.3.1): free-text calibration note. No longer written (nil, so absent from new JSON); kept so
+    /// old recipes still decode. Read `colorSource` instead.
     public var calibration: String? = nil
+    /// Stage-0 colour source (pipeline v2): DNG baseline or custom calibration, the file's key, and why custom was
+    /// skipped. Old recipes lack it (nil).
+    public var colorSource: ColorSourceRecord? = nil
     /// How the decoder version was chosen ("policy", "requested", "Apple default").
     public var decoderVersionSource: String? = nil
     /// Output of the `qualityGuard` plugin: 1 = the finish passed untouched (or 1 was given), 0.5...< 1 = blended back,
     /// nil = the guard was off. Feed it to the final render as `RenderSettings.qualityGuardStrength`. Old recipes lack it (nil).
     public var qualityGuardStrength: Float? = nil
+    /// Pipeline v2 stage 1: what the scene normalizer read, decided and delivered, plus the Apple HEIC diagnostic ΔEV.
+    /// nil with the legacy exposure model (absent from the JSON, as in 0.3.1).
+    public var exposureNormalizer: ExposureNormalizerRecord? = nil
 
     public init(file: String, settings: RenderSettings, decoderVersion: String, supportedDecoderVersions: [String],
                 defaults: DecodeParameters, effective: DecodeParameters, support: DecoderSupport, nativeSize: [Int],
