@@ -204,11 +204,17 @@ public struct LookArguments: Codable, Equatable, Sendable {
     public var lightLeak: String?
     /// Decode character (needs `iso`); nil with an ISO = `auto`.
     public var develop: DevelopCharacter?
+    /// Per-frame grain seed (RSP 0.6.1): sets `FilmFinish.grainSeed`, so frames of one roll do not share one grain field.
+    /// nil = the look's seed (1), pixel-identical to 0.6.0. Not part of the stock: a host passes it per frame (for example
+    /// derived from the frame id). The seed used is in the recipe (`args=` and the `film finish ... (seed N)` decision).
+    public var grainSeed: UInt32?
 
     public init(stockId: String? = nil, intensity: Float? = nil, iso: Int? = nil, tungsten: Bool? = nil, grain: Grain? = nil,
-                halation: Halation? = nil, vignette: Float? = nil, lightLeak: String? = nil, develop: DevelopCharacter? = nil) {
+                halation: Halation? = nil, vignette: Float? = nil, lightLeak: String? = nil, develop: DevelopCharacter? = nil,
+                grainSeed: UInt32? = nil) {
         self.stockId = stockId; self.intensity = intensity; self.iso = iso; self.tungsten = tungsten; self.grain = grain
         self.halation = halation; self.vignette = vignette; self.lightLeak = lightLeak; self.develop = develop
+        self.grainSeed = grainSeed
     }
 
     /// Named light leaks RSP ships.
@@ -256,6 +262,7 @@ extension FilmStock {
             finish.halationAmount = h.amount; finish.halationThreshold = h.threshold; finish.halationRadius = h.radius
         }
         if let v = a.vignette { finish.vignette = v }
+        if let seed = a.grainSeed { finish.grainSeed = seed }
         if let leak = a.lightLeak {
             guard let spec = LookArguments.lightLeaks[leak] else {
                 throw bad("unknown light leak \(leak) (known: \(LookArguments.lightLeaks.keys.sorted().joined(separator: ", ")))")

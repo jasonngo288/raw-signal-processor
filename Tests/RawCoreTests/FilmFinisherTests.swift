@@ -119,6 +119,24 @@ final class FilmFinisherTests: XCTestCase {
         XCTAssertEqual(s.finish.resolvedGrain?.chroma, 0.2, "explicit profile, not derived")
     }
 
+    /// RSP 0.6.1: a per-frame seed through `LookArguments.grainSeed`. nil keeps the look's seed 1 (pixels as 0.6.0).
+    func testPerFrameGrainSeedThroughLookArguments() throws {
+        let look = try XCTUnwrap(FilmStock.named("goldenDay"))
+        let p = LookArguments(grain: .profile(cellPx: 2.75, sigma50: 1.1, chroma: 0.2))
+        let none = try FilmStock.resolve(look: "goldenDay", arguments: p)
+        XCTAssertEqual(none.finish.grainSeed, look.finish.grainSeed)
+        XCTAssertEqual(none.finish.grainSeed, 1, "nil = today's seed")
+        var one = p; one.grainSeed = 1
+        var other = p; other.grainSeed = 37
+        let base = flat(320, 240, 0.18)
+        let a = try renderer.linearImage(FilmFinisher.applyGrain(base, none.finish))
+        let b = try renderer.linearImage(FilmFinisher.applyGrain(base, try FilmStock.resolve(look: "goldenDay", arguments: one).finish))
+        XCTAssertEqual(a.pixels, b.pixels, "nil and seed 1 are pixel-identical")
+        let c = try renderer.linearImage(FilmFinisher.applyGrain(base, try FilmStock.resolve(look: "goldenDay", arguments: other).finish))
+        XCTAssertNotEqual(a.pixels, c.pixels, "another frame seed, another grain field")
+        XCTAssertEqual(lumaStats(c).std, lumaStats(a).std, accuracy: lumaStats(a).std * 0.05, "same grain strength")
+    }
+
     func testGrainFadesTowardWhite() throws {
         let p = GrainProfile(cellPx: 2.75, sigma50: 2)
         let mid = rms(encodedCodes(try renderer.linearImage(FilmFinisher.applyGrain(flat(300, 300, 0.2140), profile: p, seed: 5))))

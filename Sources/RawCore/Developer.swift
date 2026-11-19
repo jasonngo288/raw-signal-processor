@@ -290,7 +290,10 @@ public final class Developer: @unchecked Sendable {
                                      analysis: Analysis? = nil) throws -> Float {
         var s = guardEnabled(settings)
         s.qualityGuardStrength = nil
-        return try develop(url: url, settings: s, auto: auto, scaleFactor: previewScaleFactor, analysis: analysis).recipe.qualityGuardStrength ?? 1
+        // Measured only, never shown: no grain (RSP 0.6.1). On the crop path the guard measures before grain, so the strength
+        // is the same as with grain; without a crop grain sits before the guard and is kept, so the strength does not move.
+        let base = try developBase(url: url, settings: s, auto: auto, scaleFactor: previewScaleFactor, analysis: analysis)
+        return try finish(base, grain: false).recipe.qualityGuardStrength ?? 1
     }
 
     /// Stage 1: decisions, decode, plugins.afterDecode. With `auto`, a given `analysis` is used when it still fits
@@ -789,6 +792,11 @@ public final class Developer: @unchecked Sendable {
     /// Stage 2: look (stock supplies look, intensity and finish unless set explicitly) → skin protection → finish
     /// → plugins.afterFinish. Reads the look fields of `base.settings`.
     public func finish(_ base: Base) throws -> Output {
+        try finish(base, grain: true)
+    }
+
+    /// `grain: false` skips the crop-path grain (guard preview only, `previewGuardStrength`); the no-crop path keeps it.
+    func finish(_ base: Base, grain: Bool) throws -> Output {
         let st = base.settings
         var out = base
         out.recipe.settings = st
@@ -920,7 +928,9 @@ public final class Developer: @unchecked Sendable {
                                                crop.x, crop.y, crop.width, crop.height, full.width, full.height,
                                                rect.width, rect.height, rect.minX - full.minX, full.maxY - rect.maxY))
             try afterFinish(base.active.filter { $0.runsAfterCrop })   // qualityGuard measures the ungrained cropped frame
-            if let finish, let g = finish.resolvedGrain {
+            if !grain, let finish, finish.resolvedGrain != nil {
+                out.recipe.decisions.append("film finish\(stockTag): grain skipped (guard preview, measured only; seed \(finish.grainSeed))")
+            } else if let finish, let g = finish.resolvedGrain {
                 image = FilmFinisher.applyGrain(image, finish)
                 out.recipe.decisions.append(String(format: "film finish%@: grain once on the cropped master, after the guard, cell %.2f px, sigma50 %.2f, chroma %.2f (seed %u)",
                                                    stockTag, g.cellPx, g.sigma50, g.chroma, finish.grainSeed))

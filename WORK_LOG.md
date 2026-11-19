@@ -2,6 +2,27 @@
 
 Newest first. Each entry: what changed, why, evidence, what is NOT verified yet.
 
+## 2026-11-19 — 0.6.1: per-frame grain seed, guard preview without grain (User decisions 2026-11-19; not committed)
+- **What:** `LookArguments.grainSeed: UInt32?` (RollStocks.swift:210, merged at :265 into `FilmFinish.grainSeed`). nil = the
+  look's seed 1, pixel-identical to 0.6.0; absent from the arguments JSON when nil. The seed used is in the recipe: `args=`
+  JSON and the `film finish ... (seed N)` decision. `previewGuardStrength` (Developer.swift:296) finishes with
+  `finish(_:grain: false)` (:799): crop path skips grain (decision `grain skipped (guard preview ...)`), the guard measures
+  before grain there, so the strength is unchanged (test). No-crop path keeps grain, because grain sits before the guard there
+  and skipping it would move the strength. `engineVersion` 0.6.1 (+ test).
+- **Seed range (measured, macOS Core Image, temporary probe test removed):** `CIRandomGenerator` tiles every 256 px (x and y),
+  so `(seed % 4096) x 613` only matters mod 256: 256 effective fields (613 mod 256 = 101, odd, so seeds 0...255 are all
+  distinct). Grain correlation seed 1 vs 2 / 3 / 36 / 4095: 0.024 / 0.016 / 0.034 / -0.016; vs 257 / 513 / 1025: 0.9999. And
+  every seed is the same tile shifted (A, B and chroma offsets are fixed relative to each other). Inside one frame grain repeats
+  every 256 x cellPx output px (704 px at cellPx 2.75, sum |diff| 0). Not widened: a wider modulus changes nothing while the
+  generator tiles. Pre-existing, needs a tech-lead / User decision (any fix changes nil pixels).
+- **Tests:** +3 (`FilmFinisherTests.testPerFrameGrainSeedThroughLookArguments`, `LookArgumentsTests.testGrainSeedJSONAndFinish`,
+  `.testGuardPreviewSkipsGrainWithTheSameStrength`). `swift build` green; `swift test --filter
+  'FilmFinisherTests|GrainV2Tests|LookArgumentsTests|StockRenderTests'`: 31 tests, 30 pass, 1 fails with 19 asserts:
+  `testRollStocksMatchTheBaselineAndLookArguments` pixels vs `rollstocks-0.3.0-baseline.json`. Fails the same way at HEAD
+  0.6.0 with this change stashed (19/19; the 7 hashes shown in both runs are identical), so it is pre-existing and not caused by 0.6.1.
+  rr id vs look + arguments stays pixel-identical. Not run (User constraint): full swift test, raw-bench, harness. iOS
+  generator tiling assumed the same as macOS, not checked on a device.
+
 ## 2026-11-19 — Option C review follow-ups (tech-lead V2_STAGE2_SUNC_REVIEW PASS; User decisions; same branch, not committed)
 - **N1 clamp:** with `brightSceneBlend` on, the delivered gain is never below g254. If the blended pass delivers less
   (`BrightSceneBlend.keepsToday`), today's pass is kept (record, gain and pixels = blend off); the record has

@@ -188,7 +188,7 @@ final class LookArgumentsTests: XCTestCase {
 
     /// SupportedLooks = the listed looks; engine version published.
     func testSupportedLooksAndEngineVersion() {
-        XCTAssertEqual(RawCore.engineVersion, "0.6.0")
+        XCTAssertEqual(RawCore.engineVersion, "0.6.1")
         XCTAssertEqual(SupportedLooks.all.map(\.id), FilmLooks2026.names)
         XCTAssertEqual(SupportedLooks.all.count, 21)
         XCTAssertEqual(SupportedLooks.named("monoSoft")?.isMonochrome, true)
@@ -198,6 +198,42 @@ final class LookArgumentsTests: XCTestCase {
             XCTAssertEqual(r.arguments.iso, r.iso, r.id); XCTAssertEqual(r.arguments.intensity, r.intensity, r.id)
             XCTAssertEqual(r.arguments.tungsten ?? false, r.tungsten, r.id)
         }
+    }
+
+    /// RSP 0.6.1: `grainSeed` is optional JSON (absent when nil, so 0.6.0 argument JSON is unchanged) and reaches the finish.
+    func testGrainSeedJSONAndFinish() throws {
+        let r = try XCTUnwrap(RollStocks.named("rr-chuan-400")).arguments
+        XCTAssertNil(r.grainSeed)
+        XCTAssertFalse(r.compactJSON().contains("grainSeed"), r.compactJSON())
+        var a = r; a.grainSeed = 4_000_000_007
+        XCTAssertTrue(a.compactJSON().contains("\"grainSeed\":4000000007"), a.compactJSON())
+        XCTAssertEqual(try JSONDecoder().decode(LookArguments.self, from: JSONEncoder().encode(a)), a)
+        let look = try XCTUnwrap(RollStocks.named("rr-chuan-400")).look
+        XCTAssertEqual(try FilmStock.resolve(look: look, arguments: a).finish.grainSeed, 4_000_000_007)
+        var b = a; b.grainSeed = nil
+        XCTAssertEqual(try FilmStock.resolve(look: look, arguments: b).finish, try FilmStock.resolve(look: look, arguments: r).finish)
+    }
+
+    /// RSP 0.6.1: the guard preview skips grain on the crop path (guard measures before grain there), the strength is
+    /// the one a grained preview gives, and the recipe records the seed of a grained render.
+    func testGuardPreviewSkipsGrainWithTheSameStrength() throws {
+        let url = try fixture()
+        let dev = Developer()
+        let scale = try dev.decoder.scaleFactor(url: url, longEdge: 256)
+        var st = RenderSettings(mode: .explicit); st.stock = "cleanLab"
+        st.lookArguments = RollStocks.named("rr-chuan-400")!.arguments
+        st.lookArguments?.grainSeed = 23
+        st.outputCrop = OutputCrop(x: 0.1, y: 0.1, width: 0.8, height: 0.8)
+        var g = dev.guardEnabled(st); g.qualityGuardStrength = nil
+        let base = try dev.developBase(url: url, settings: g, auto: false, scaleFactor: scale)
+        let grained = try dev.finish(base)
+        let skipped = try dev.finish(base, grain: false)
+        XCTAssertEqual(skipped.recipe.qualityGuardStrength, grained.recipe.qualityGuardStrength)
+        XCTAssertEqual(try dev.previewGuardStrength(url: url, settings: st, auto: false, previewScaleFactor: scale),
+                       grained.recipe.qualityGuardStrength ?? 1)
+        XCTAssertTrue(skipped.recipe.decisions.contains { $0.contains("grain skipped (guard preview") }, "\(skipped.recipe.decisions)")
+        XCTAssertTrue(grained.recipe.decisions.contains { $0.contains("grain once on the cropped master") && $0.contains("(seed 23)") },
+                      "\(grained.recipe.decisions)")
     }
 
     /// The recipe records `look=<id> args=<json>`.
