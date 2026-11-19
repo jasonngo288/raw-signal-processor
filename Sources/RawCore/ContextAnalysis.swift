@@ -16,8 +16,20 @@ public struct SceneContext: Codable, Equatable, Sendable {
     /// Top Vision classification labels with confidence >= 0.3.
     public var labels: [String: Double]?
     public var logP999: Double? = nil
-    /// Fraction of pixels with any channel >= 0.98 in Apple's default render (what the user sees).
+    /// What the user sees clipped: share of the same-press camera HEIC (stored `cameraReferenceHistogramFine`, 1024 px)
+    /// with encoded Display P3 luma >= encodeTransfer(`clipLevel` 0.98) (threshold bin counted proportionally). nil = no camera reference at analysis time (or analysis schema < 5).
+    /// Luma, not any-channel: a lower bound of the any-channel measure. Schema 5; before it this field held
+    /// the CIRAWFilter appleDefault measure, now `appleDecodeClippedFraction`.
     public var displayClippedFraction: Double? = nil
+    /// Fraction of pixels with any channel >= 0.98 in CIRAWFilter's appleDefault decode (1024 px). Reads 10-100x the HEIC
+    /// (not what the camera shows). The old `displayClippedFraction`; still what `HighlightRecoveryRule` gates on by default.
+    public var appleDecodeClippedFraction: Double? = nil
+    /// EV100 = log2(N^2/t) - log2(ISO/100) from the DNG's ISO, exposure time and FNumber; nil if any is missing.
+    /// Measurement only, no consumer yet. `ev100Version` = formula version (1), nil when `ev100` was not made.
+    public var ev100: Double? = nil
+    public var ev100Version: Int? = nil
+    /// Lens aperture (EXIF FNumber of the DNG), nil when absent.
+    public var fNumber: Double? = nil
     /// p99.9 of max(R,G,B) in an EDR decode (extendedDynamicRangeAmount 1). > 1 means highlight data
     /// above SDR white exists and can be tone-mapped back instead of clipping.
     public var edrHeadroom: Double? = nil
@@ -45,9 +57,26 @@ public struct SceneContext: Codable, Equatable, Sendable {
     /// Why the mask is what it is: the label that opened the gate and the heuristic coverage, or why it stayed empty.
     public var skyGate: String? = nil
 
-    /// Clipped by Apple's tone curve but present in the RAW.
+    /// Clipped by Apple's tone curve but present in the RAW (from the appleDefault decode measure; unchanged meaning).
     public var recoverableClippedFraction: Double? {
+        appleDecodeClippedFraction.map { max(0, $0 - clippedFraction) }
+    }
+
+    /// Same, from the camera-HEIC measure (`displayClippedFraction`).
+    public var recoverableClippedFractionCamera: Double? {
         displayClippedFraction.map { max(0, $0 - clippedFraction) }
+    }
+
+    public static let ev100FormulaVersion = 1
+
+    /// Share of a display-encoded luminance histogram at or above `linear` (decoded level); the bin holding the
+    /// threshold counts proportionally.
+    public static func histogramFraction(_ hist: [Double], atOrAboveLinear linear: Double) -> Double? {
+        guard !hist.isEmpty else { return nil }
+        let pos = ColorMath.encodeTransfer(linear) * Double(hist.count)
+        let b = min(hist.count - 1, max(0, Int(pos)))
+        let part = hist[b] * (1 - (pos - Double(b)))
+        return max(0, min(1, part + hist[(b + 1)...].reduce(0, +)))
     }
 
     public static func measure(sceneLinear img: LinearImage, iso: Double?) -> SceneContext {
@@ -224,8 +253,10 @@ public enum HighlightRecoveryRule {
     public static let headroomFraction = 1.0
     public static let clarity: Float = 0.4
 
-    public static func decide(context c: SceneContext, settings: inout RenderSettings) -> [String] {
-        guard let disp = c.displayClippedFraction, let rec = c.recoverableClippedFraction else { return [] }
+    /// `useCameraClip` (default off: pixels unchanged) gates on the camera-HEIC measure instead of the appleDefault decode.
+    public static func decide(context c: SceneContext, settings: inout RenderSettings, useCameraClip: Bool = false) -> [String] {
+        guard let disp = useCameraClip ? c.displayClippedFraction : c.appleDecodeClippedFraction,
+              let rec = useCameraClip ? c.recoverableClippedFractionCamera : c.recoverableClippedFraction else { return [] }
         let head = c.edrHeadroom ?? 1
         if disp > displayClipped, rec > recoverable, head >= minHeadroom {
             settings.extendedDynamicRangeAmount = 1

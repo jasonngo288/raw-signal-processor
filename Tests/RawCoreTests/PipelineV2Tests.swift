@@ -115,9 +115,9 @@ final class PipelineV2Tests: XCTestCase {
         return Double(min(w / 4, 64))
     }
 
-    /// Grain after the crop is sized on the cropped short edge (same seed, same size %): a centre half crop gets cells
-    /// half as many pixels wide as grain applied to the full frame and then cropped (the 0.3.1 order).
-    func testCropThenGrainSizesCellsOnTheCroppedShortEdge() throws {
+    /// Order B: the grain cell is fixed in output px, so a centre crop keeps the same cell width as the full frame; grain
+    /// after the crop equals grain on a standalone frame of the cropped size (origin 0,0).
+    func testCropThenGrainKeepsTheCellFixedInOutputPixels() throws {
         let v: CGFloat = 0.18
         let full = flat(1200, 800, v)
         let f = FilmFinish(grainAmount: 0.8, grainSize: 1.5, grainSeed: 5)
@@ -127,8 +127,8 @@ final class PipelineV2Tests: XCTestCase {
         let old = try renderer.linearImage(FilmFinisher.crop(FilmFinisher.applyGrain(full, f), to: rect))
         XCTAssertEqual(v2.width, 600); XCTAssertEqual(old.width, 600)
         let lv2 = correlationLength(v2, mean: Float(v)), lold = correlationLength(old, mean: Float(v))
-        print(String(format: "[v2-crop] grain correlation length: cropped-then-grain %.2f px, grain-then-crop %.2f px, ratio %.2f (expected 0.5)", lv2, lold, lv2 / lold))
-        XCTAssertEqual(lv2 / lold, 0.5, accuracy: 0.12, "cell size follows the cropped short edge (400 vs 800 px)")
+        print(String(format: "[v2-crop] grain correlation length: cropped-then-grain %.2f px, grain-then-crop %.2f px, ratio %.2f (expected 1.0)", lv2, lold, lv2 / lold))
+        XCTAssertEqual(lv2 / lold, 1, accuracy: 0.12, "cell size is fixed in output px, not a % of the short edge")
         // Same seed, same size %: identical to grain on a standalone frame of the cropped size.
         let standalone = try renderer.linearImage(FilmFinisher.applyGrain(flat(600, 400, v), f))
         XCTAssertEqual(v2.pixels, standalone.pixels)
@@ -191,7 +191,7 @@ final class PipelineV2Tests: XCTestCase {
 
     /// nil crop keeps the 0.3.1 order. A full-frame crop with no vignette and no guard runs the v2 order and must give
     /// the same pixels (proves the split halation | crop | grain equals the one-step finish). A real crop gives the
-    /// cropped size at origin 0,0 and differs from cropping the 0.3.1 output (grain re-sized).
+    /// cropped size at origin 0,0 and differs from cropping the 0.3.1 output (grain re-anchored).
     func testOutputCropOrderOnADNG() throws {
         let url = try appleDNG()
         let dev = Developer(plugins: .none)
@@ -214,8 +214,8 @@ final class PipelineV2Tests: XCTestCase {
         let rect = FilmFinisher.pixelRect(crop, in: none.image.extent)
         XCTAssertEqual(cropped.image.extent, CGRect(origin: .zero, size: rect.size))
         let oldThenCrop = try renderer.linearImage(FilmFinisher.crop(none.image, to: rect))
-        XCTAssertNotEqual(try pixels(cropped), oldThenCrop.pixels, "grain is re-sized on the cropped short edge")
-        XCTAssertTrue(cropped.recipe.decisions.contains { $0.contains("cropped short edge") })
+        XCTAssertNotEqual(try pixels(cropped), oldThenCrop.pixels, "grain is generated on the cropped master (lattice anchored at its origin)")
+        XCTAssertTrue(cropped.recipe.decisions.contains { $0.contains("grain once on the cropped master") })
         XCTAssertEqual(cropped.recipe.settings.outputCrop, crop)
     }
 

@@ -12,7 +12,7 @@ import Foundation
 ///   stage 2, `finish`: look → skin protection (Vision mask, CIBlendWithMask) → plugins.beforeGrain (light leak)
 ///            → grain / halation → plugins.afterFinish
 ///            With `RenderSettings.outputCrop` (pipeline v2 stage 4): light leak → halation → afterFinish plugins that
-///            are not `runsAfterCrop` (vignette) on the full frame → crop → grain on the cropped frame → qualityGuard.
+///            are not `runsAfterCrop` (vignette) on the full frame → crop → qualityGuard (ungrained) → grain once on the cropped master (cell fixed in output px).
 ///   → export (HEIC 10-bit P3 with recipe embedded).
 ///
 /// `develop` = `finish(developBase(...))`. A base can be finished again with another stock (`Base.settings.stock`)
@@ -37,7 +37,7 @@ public final class Developer: @unchecked Sendable {
     /// unless `staleReason` says it no longer fits the render.
     public struct Analysis: Codable, @unchecked Sendable {
         /// Bumped when what an analysis measures changes; an older stored analysis is re-made.
-        public static let currentSchema = 4   // 4: sky mask (SkyMask.version, sky-mask.png)
+        public static let currentSchema = 5   // 5: displayClippedFraction on the camera HEIC (old value -> appleDecodeClippedFraction), ev100 + fNumber; 4: sky mask
         public static let fileName = "analysis.json"
         public static let maskFileName = "person-mask.png"
         public static let skyMaskFileName = "sky-mask.png"
@@ -177,7 +177,10 @@ public final class Developer: @unchecked Sendable {
         // display clipping, the luma histogram and Vision all read it (was a separate 512 px decode, 2026-11-09).
         let sDisp = try decoder.scaleFactor(url: url, longEdge: Int(CameraMatchPlugin.histogramLongEdge))
         let disp = try decoder.decode(url: url, settings: RenderSettings(mode: .appleDefault, decoderVersion: decoderVersion), scaleFactor: sDisp)
-        c.displayClippedFraction = SceneContext.clippedFraction(try renderer.linearImage(disp.image))
+        c.appleDecodeClippedFraction = SceneContext.clippedFraction(try renderer.linearImage(disp.image))
+        c.fNumber = try? fNumber(url)
+        c.ev100 = SceneNormalizer.ev100(fNumber: c.fNumber, exposureTime: c.exposureTime, iso: c.iso)
+        c.ev100Version = c.ev100 == nil ? nil : SceneContext.ev100FormulaVersion
         c.lumaHistogram = renderer.lumaHistogram(disp.image)
 
         var mask: CIImage?
@@ -218,6 +221,7 @@ public final class Developer: @unchecked Sendable {
         if let ref = cameraReference {
             c.cameraReferenceHistogram = CameraMatchPlugin.referenceHistogram(ref, renderer: renderer, bins: c.lumaHistogram?.count ?? 64)
             c.cameraReferenceHistogramFine = CameraMatchPlugin.referenceHistogram(ref, renderer: renderer, bins: CameraMatchPlugin.fineBins)
+            c.displayClippedFraction = c.cameraReferenceHistogramFine.flatMap { SceneContext.histogramFraction($0, atOrAboveLinear: SceneContext.clipLevel) }
         }
         let bytes = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value
         return Analysis(context: c, defaults: lin.recipe.defaults, support: lin.recipe.support,
@@ -899,8 +903,8 @@ public final class Developer: @unchecked Sendable {
             }
         }
         if let crop = st.outputCrop {
-            // Pipeline v2 stage 4: halation and full-frame afterFinish plugins (vignette) → crop → grain on the cropped
-            // short edge (same seed, same size %) → plugins that run after the crop (qualityGuard, on a cropped base).
+            // Pipeline v2 stage 4: halation and full-frame afterFinish plugins (vignette) → crop → plugins that run after
+            // the crop (qualityGuard, on a cropped, ungrained base) → grain once on the cropped master (cell fixed in output px).
             let stockTag = stock.map { " (\($0.name))" } ?? ""
             if let finish, finish.halationAmount > 0 {
                 image = FilmFinisher.applyHalation(image, finish)
@@ -915,17 +919,18 @@ public final class Developer: @unchecked Sendable {
             out.recipe.decisions.append(String(format: "output crop %.4f,%.4f %.4fx%.4f (top-left) of %.0fx%.0f -> %.0fx%.0f px at %.0f,%.0f",
                                                crop.x, crop.y, crop.width, crop.height, full.width, full.height,
                                                rect.width, rect.height, rect.minX - full.minX, full.maxY - rect.maxY))
-            if let finish, finish.grainAmount > 0 {
+            try afterFinish(base.active.filter { $0.runsAfterCrop })   // qualityGuard measures the ungrained cropped frame
+            if let finish, let g = finish.resolvedGrain {
                 image = FilmFinisher.applyGrain(image, finish)
-                out.recipe.decisions.append(String(format: "film finish%@: grain %.2f @ %.3f%% cropped short edge (seed %u)",
-                                                   stockTag, finish.grainAmount, finish.grainSize, finish.grainSeed))
+                out.recipe.decisions.append(String(format: "film finish%@: grain once on the cropped master, after the guard, cell %.2f px, sigma50 %.2f, chroma %.2f (seed %u)",
+                                                   stockTag, g.cellPx, g.sigma50, g.chroma, finish.grainSeed))
             }
-            try afterFinish(base.active.filter { $0.runsAfterCrop })
         } else {
-            if let finish, finish.grainAmount > 0 || finish.halationAmount > 0 {
+            if let finish, finish.resolvedGrain != nil || finish.halationAmount > 0 {
                 image = FilmFinisher.apply(image, finish)
-                out.recipe.decisions.append(String(format: "film finish%@: grain %.2f @ %.3f%% short edge (seed %u), halation %.2f (Y>%.2f, r %.2f%%)",
-                                                   stock.map { " (\($0.name))" } ?? "", finish.grainAmount, finish.grainSize, finish.grainSeed,
+                let g = finish.resolvedGrain
+                out.recipe.decisions.append(String(format: "film finish%@: grain cell %.2f px, sigma50 %.2f, chroma %.2f (seed %u), halation %.2f (Y>%.2f, r %.2f%%)",
+                                                   stock.map { " (\($0.name))" } ?? "", g?.cellPx ?? 0, g?.sigma50 ?? 0, g?.chroma ?? 0, finish.grainSeed,
                                                    finish.halationAmount, finish.halationThreshold, finish.halationRadius))
             }
             try afterFinish(base.active)

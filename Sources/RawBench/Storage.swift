@@ -51,7 +51,7 @@ private let candidates: [Candidate] = [
 /// The look stage as the product would run it on a stored base: stock LUT at its intensity, then halation.
 private func finalPicture(_ base: CIImage, stock: FilmStock) throws -> LinearImage {
     var finish = stock.finish
-    finish.grainAmount = 0
+    finish.grainAmount = 0; finish.grain = nil
     let looked = FilmFinisher.apply(try renderer.applyLook(stock.lut(), to: base, intensity: stock.lookIntensity), finish)
     let jpeg = try renderer.export(looked, format: .jpeg, quality: 0.92)
     guard let back = CIImage(data: jpeg) else { throw RawCoreError.renderFailed("final JPEG unreadable") }

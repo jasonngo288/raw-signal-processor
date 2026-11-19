@@ -7,14 +7,16 @@ import Foundation
 public enum FilmFinisher {
     static let luma = ColorMath.p3LuminanceWeights
 
+    /// Halation, then grain (the only grain site of the legacy, no-crop path). Grain cell is fixed in output px.
     public static func apply(_ image: CIImage, _ f: FilmFinish) -> CIImage {
-        guard f.grainAmount > 0 || f.halationAmount > 0 else { return image }
+        let profile = f.resolvedGrain
+        guard profile != nil || f.halationAmount > 0 else { return image }
         let ext = image.extent
         let short = Double(min(ext.width, ext.height))
         var out = image
         if f.halationAmount > 0 { out = halation(out, f, short: short) }
         // Vignette is the `vignette` plugin (Plugins.swift), not part of the core finish.
-        if f.grainAmount > 0 { out = grain(out, f, short: short) }
+        if let profile { out = grain(out, profile: profile, seed: f.grainSeed) }
         return out.cropped(to: ext)
     }
 
@@ -25,11 +27,17 @@ public enum FilmFinisher {
         return halation(image, f, short: Double(min(ext.width, ext.height))).cropped(to: ext)
     }
 
-    /// Grain only, cell size from this image's short edge (pipeline v2: called on the cropped frame).
+    /// Grain only, from the finish's profile (pipeline v2 stage 4: called once on the cropped master).
     public static func applyGrain(_ image: CIImage, _ f: FilmFinish) -> CIImage {
-        guard f.grainAmount > 0 else { return image }
-        let ext = image.extent
-        return grain(image, f, short: Double(min(ext.width, ext.height))).cropped(to: ext)
+        guard let profile = f.resolvedGrain else { return image }
+        return applyGrain(image, profile: profile, seed: f.grainSeed)
+    }
+
+    /// THE grain implementation (stage 4, order B). Everything that grains (v2, legacy finish, film samples, legacy engine
+    /// once wired) calls this; nothing else adds grain. Call it once per output, on the full-resolution master.
+    public static func applyGrain(_ image: CIImage, profile: GrainProfile, seed: UInt32) -> CIImage {
+        guard profile.sigma50 > 0 else { return image }
+        return grain(image, profile: profile, seed: seed).cropped(to: image.extent)
     }
 
     /// Whole-pixel rect of a normalized top-left `OutputCrop` inside `ext` (Core Image origin is bottom-left).
@@ -150,46 +158,96 @@ public enum FilmFinisher {
         ]).cropped(to: ext)
     }
 
-    /// Multiplicative luminance grain: out = img * (1 + a * w * k * (n1 - n2)).
-    /// n1, n2 = two independent smoothed noise fields (different offsets of CIRandomGenerator); their difference
-    /// has zero mean whatever the generator's value distribution, so grain never shifts exposure.
-    /// w = 1 - 0.8 Y (clamped to 0.2...1): grain fades toward white. Cell size and smoothing are tied to the
-    /// short edge, so grain statistics do not depend on resolution.
-    static func grain(_ img: CIImage, _ f: FilmFinish, short: Double) -> CIImage {
+    /// Effective std of the unit noise field `A - B` (alpha forced to 1, Gaussian blur 0.5 cell), calibrated on the real
+    /// renderer so that RMS at L = 0.5 on a flat wedge equals `sigma50`: the measured field std is 0.170 at cellPx 2.0 and
+    /// 0.182 at 4.5 (0.178 is the middle), which leaves the result within +-4 % over cellPx 2...4.5 (all 14 stocks).
+    /// Not valid below 1.75 px. Re-check with `raw-bench grain-proof` whenever the noise recipe changes.
+    static let grainUnitSD = 0.178
+
+    /// Density grain in the display-encoded domain (order B). enc = encode(img); out = decode(enc + n), with
+    /// n = sigma50/255 * s(L)/s(0.5) * (D0 + chroma-part) and L the encoded luma of the pixel (not of the noise).
+    /// D0 = A - B: two independent smoothed fields; their difference has zero mean whatever the generator's distribution,
+    /// so grain never shifts exposure. The cell (`cellPx`) and the blur are in output px, so the grain does not depend on
+    /// the image size. Chroma: three independent channel fields made zero-sum (R+G+B = 0), amplitude per channel
+    /// `chroma` x the luma amplitude, same cell and curve.
+    static func grain(_ img: CIImage, profile p: GrainProfile, seed: UInt32) -> CIImage {
         let ext = img.extent
-        let cell = max(0.35, short * Double(f.grainSize) / 100)
+        let cell = max(0.35, p.cellPx)
+        // CIRandomGenerator gives four independent uniform channels, alpha included. Core Image's colour filters divide the
+        // colour by that random alpha: rare extreme values (black dots, a 10^3 x std) and R, G, B that share one divisor
+        // (correlated, so the chroma part came out 15 % low). Fix: force alpha to 1 before any colour filter touches it.
         guard let random = CIFilter(name: "CIRandomGenerator")?.outputImage else { return img }
-        func field(_ offset: CGFloat, sign: CGFloat) -> CIImage {
-            random
+        let pad = ext.insetBy(dx: -8 * cell - 8, dy: -8 * cell - 8)   // blur margin: blur is applied before the crop to `ext`
+        /// `chroma` routes random channel i to output channel i; luma routes random R to all channels.
+        func field(_ offset: CGFloat, sign: CGFloat, chroma: Bool) -> CIImage {
+            let rv = CIVector(x: sign, y: 0, z: 0, w: 0)
+            let gv = chroma ? CIVector(x: 0, y: sign, z: 0, w: 0) : rv
+            let bv = chroma ? CIVector(x: 0, y: 0, z: sign, w: 0) : rv
+            return random
                 .transformed(by: CGAffineTransform(translationX: offset, y: -offset))
                 .transformed(by: CGAffineTransform(scaleX: cell, y: cell))
                 .transformed(by: CGAffineTransform(translationX: ext.minX, y: ext.minY))
-                .applyingFilter("CIColorMatrix", parameters: [   // monochrome: red channel everywhere
-                    "inputRVector": CIVector(x: sign, y: 0, z: 0, w: 0),
-                    "inputGVector": CIVector(x: sign, y: 0, z: 0, w: 0),
-                    "inputBVector": CIVector(x: sign, y: 0, z: 0, w: 0),
+                .settingAlphaOne(in: pad)
+                .applyingFilter("CIColorMatrix", parameters: [
+                    "inputRVector": rv, "inputGVector": gv, "inputBVector": bv,
                     "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0), "inputBiasVector": CIVector(x: 0, y: 0, z: 0, w: 1),
                 ])
+                .clampedToExtent()
                 .applyingGaussianBlur(sigma: 0.5 * cell)
                 .cropped(to: ext)
         }
-        let seed = CGFloat(f.grainSeed % 4096) * 613
-        let d = field(seed, sign: 1).applyingFilter("CIAdditionCompositing", parameters: [
-            kCIInputBackgroundImageKey: field(seed + 100_003, sign: -1),
-        ]).settingAlphaOne(in: ext)  // addition sums alpha too (see halation)
-        let w = lumaRamp(img, gain: -0.8, bias: 1, min: 0.2)
-        let wd = d.applyingFilter("CIMultiplyCompositing", parameters: [kCIInputBackgroundImageKey: w])
-        let gainScale = CGFloat(f.grainAmount) * 0.25 * 1.5
-        let g = wd.applyingFilter("CIColorMatrix", parameters: [
-            "inputRVector": CIVector(x: gainScale, y: 0, z: 0, w: 0), "inputGVector": CIVector(x: 0, y: gainScale, z: 0, w: 0),
-            "inputBVector": CIVector(x: 0, y: 0, z: gainScale, w: 0), "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
-            "inputBiasVector": CIVector(x: 1, y: 1, z: 1, w: 0),
-        ]).applyingFilter("CIColorClamp", parameters: [
-            // Hard bound on the grain multiplier: without it rare extreme cells became black dots (run 42388087057).
-            "inputMinComponents": CIVector(x: 1 - gainScale, y: 1 - gainScale, z: 1 - gainScale, w: 1),
-            "inputMaxComponents": CIVector(x: 1 + gainScale, y: 1 + gainScale, z: 1 + gainScale, w: 1),
+        func difference(_ offset: CGFloat, chroma: Bool) -> CIImage {
+            field(offset, sign: 1, chroma: chroma).applyingFilter("CIAdditionCompositing", parameters: [
+                kCIInputBackgroundImageKey: field(offset + 100_003, sign: -1, chroma: chroma),
+            ]).settingAlphaOne(in: ext)  // addition sums alpha too (see halation)
+        }
+        func matrix(_ img: CIImage, _ r: [CGFloat], _ g: [CGFloat], _ b: [CGFloat]) -> CIImage {
+            img.applyingFilter("CIColorMatrix", parameters: [
+                "inputRVector": CIVector(x: r[0], y: r[1], z: r[2], w: 0), "inputGVector": CIVector(x: g[0], y: g[1], z: g[2], w: 0),
+                "inputBVector": CIVector(x: b[0], y: b[1], z: b[2], w: 0), "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+                "inputBiasVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+            ])
+        }
+        let base = CGFloat(p.sigma50 / 255 / grainUnitSD)   // encoded-domain amplitude per unit noise
+        let seedOffset = CGFloat(seed % 4096) * 613
+
+        // Encoded working copy (negative light is cut; values above 1 stay).
+        let enc = img.applyingFilter("CIColorClamp", parameters: [
+            "inputMinComponents": CIVector(x: 0, y: 0, z: 0, w: 0), "inputMaxComponents": CIVector(x: 64, y: 64, z: 64, w: 1),
+        ]).applyingFilter("CILinearToSRGBToneCurve")
+
+        // Noise: luma part on all channels, plus the zero-sum chroma part.
+        var noise = matrix(difference(seedOffset, chroma: false), [base, 0, 0], [base, 0, 0], [base, 0, 0])
+        if p.chroma > 0 {
+            let c = base * CGFloat(p.chroma) * 1.5.squareRoot()   // zero-sum of 3 equal fields has std sqrt(2/3) of one
+            let x = difference(seedOffset + 200_003, chroma: true)
+            let cm = matrix(x, [c * 2 / 3, -c / 3, -c / 3], [-c / 3, c * 2 / 3, -c / 3], [-c / 3, -c / 3, c * 2 / 3])
+            noise = noise.applyingFilter("CIAdditionCompositing", parameters: [kCIInputBackgroundImageKey: cm]).settingAlphaOne(in: ext)
+        }
+        // Weight map: s(L)/s(0.5) of the encoded luma, through a 1-D curve laid on the diagonal of a colour cube.
+        let luma = lumaRamp(enc, gain: 1, bias: 0)
+        let weight = luma.applyingFilter("CIColorCube", parameters: [
+            "inputCubeDimension": Self.weightCubeSize, "inputCubeData": weightCube(p),
         ])
-        return g.applyingFilter("CIMultiplyCompositing", parameters: [kCIInputBackgroundImageKey: img]).cropped(to: ext)
+        let grained = noise.applyingFilter("CIMultiplyCompositing", parameters: [kCIInputBackgroundImageKey: weight]).settingAlphaOne(in: ext)
+        let sum = grained.applyingFilter("CIAdditionCompositing", parameters: [kCIInputBackgroundImageKey: enc]).settingAlphaOne(in: ext)
+        return sum.applyingFilter("CIColorClamp", parameters: [
+            "inputMinComponents": CIVector(x: 0, y: 0, z: 0, w: 0), "inputMaxComponents": CIVector(x: 64, y: 64, z: 64, w: 1),
+        ]).applyingFilter("CISRGBToneCurveToLinear").cropped(to: ext)
+    }
+
+    static let weightCubeSize = 65
+
+    /// RGBAf cube whose output is s(r)/s(0.5) in every channel (r = the encoded luma sits on the grey diagonal).
+    static func weightCube(_ p: GrainProfile) -> Data {
+        let n = weightCubeSize
+        var px = [Float](repeating: 0, count: n * n * n * 4)
+        for b in 0..<n { for g in 0..<n { for r in 0..<n {
+            let w = Float(p.weight(at: Double(r) / Double(n - 1)))
+            let o = ((b * n + g) * n + r) * 4
+            px[o] = w; px[o + 1] = w; px[o + 2] = w; px[o + 3] = 1
+        } } }
+        return px.withUnsafeBufferPointer { Data(buffer: $0) }
     }
 }
 #endif

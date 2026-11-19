@@ -101,17 +101,20 @@ public struct PluginRegistry: Sendable {
 public struct HighlightRecoveryPlugin: DevelopPlugin {
     public let id = "highlightRecovery"
     public let summary = "recover highlights Apple's tone curve clips (EDR + CIToneMapHeadroom, local blend)"
-    public init() {}
+    /// Gate on the camera-HEIC clip measure (`SceneContext.displayClippedFraction`) instead of the appleDefault decode
+    /// (`appleDecodeClippedFraction`). Default off: decisions and pixels identical to schema 4.
+    public var useCameraClip: Bool
+    public init(useCameraClip: Bool = false) { self.useCameraClip = useCameraClip }
 
     public func decide(context: SceneContext, settings: inout RenderSettings) -> [String] {
         // Without CIToneMapHeadroom (iOS 17) an EDR decode would only clip harder: do not ask for it at all,
         // so the recipe stays truthful and no extra decodes are spent.
         guard CIFilter(name: "CIToneMapHeadroom") != nil else {
             var probe = settings
-            let would = HighlightRecoveryRule.decide(context: context, settings: &probe)
+            let would = HighlightRecoveryRule.decide(context: context, settings: &probe, useCameraClip: useCameraClip)
             return probe.toneMapSourceHeadroom == nil ? would : ["would recover highlights but CIToneMapHeadroom is unavailable on this OS: skipped"]
         }
-        return HighlightRecoveryRule.decide(context: context, settings: &settings)
+        return HighlightRecoveryRule.decide(context: context, settings: &settings, useCameraClip: useCameraClip)
     }
 
     public func afterDecode(_ image: CIImage, settings st: RenderSettings, ctx: PluginRenderContext) throws -> (CIImage, [String]) {

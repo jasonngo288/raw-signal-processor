@@ -37,7 +37,7 @@ func nativeVariants(stockName: String? = "warm400") -> [Variant] {
     if let stockName, let stock = FilmStock.named(stockName) {
         var noGrain = RenderSettings(mode: .explicit)
         noGrain.stock = stock.name
-        var f = stock.finish; f.grainAmount = 0
+        var f = stock.finish; f.grainAmount = 0; f.grain = nil
         noGrain.finish = f
         v.append(Variant(name: "auto+\(stock.name) before grain", settings: noGrain, auto: true))
         var st = RenderSettings(mode: .explicit)

@@ -24,6 +24,7 @@ raw-bench — CIRAWFilter spike CLI
   raw-bench looks <raw|dir>... --out <dir> [--looks a,b] [--long-edge N] [--manifest corpus.json]   film-look set: base once, every look, metrics (look review tool)
   raw-bench lut <in.cube|in.mrlut> --out <out.cube|out.mrlut>   convert LUTs (MoodRoll .mrlut packed format), print round-trip error
   raw-bench storage <raw>... [--stock NAME] [--out <dir>]   base render stored as HEIC10/PNG16/TIFF16/EXR/JPEG: size and ΔE00 vs in-memory
+  raw-bench grain-proof --out <dir>               order-B grain: RMS at L = 0.5 vs sigma50 for the 14 stocks, curve, size independence
   common options: --crop x,y,w,h (normalized top-left output crop, v2 stage 4)
                   --roll-id ID --frame N --frames COUNT (light leak)   --plugins none|highlightRecovery,cameraMatch,vignette   --calibration models.json
 
@@ -318,9 +319,9 @@ func markdown(_ files: [FileResult]) -> String {
             md += skin.map { String(format: "%@ skin %.2f / rest %.2f", $0.name, $0.skinDeltaE!, $0.nonSkinDeltaE ?? 0) }.joined(separator: "; ") + "\n"
         }
         if let c = f.variants.first(where: { $0.name == "auto" })?.context {
-            md += String(format: "\ncontext: DR %.1f stops (p1 %.2f, p50 %.2f, p99.9 %@), sensor clipped %.2f%%, display clipped %@%%, EDR headroom %@x, faces %@",
+            md += String(format: "\ncontext: DR %.1f stops (p1 %.2f, p50 %.2f, p99.9 %@), sensor clipped %.2f%%, Apple-decode clipped %@%%, camera-HEIC clipped %@%%, EDR headroom %@x, faces %@",
                          c.dynamicRangeStops, c.logP1, c.logP50, f2(c.logP999), c.clippedFraction * 100,
-                         f2(c.displayClippedFraction.map { $0 * 100 }), f2(c.edrHeadroom), c.faceCount.map(String.init) ?? "n/a")
+                         f2(c.appleDecodeClippedFraction.map { $0 * 100 }), f2(c.displayClippedFraction.map { $0 * 100 }), f2(c.edrHeadroom), c.faceCount.map(String.init) ?? "n/a")
             md += String(format: ", people %@%%, saliency %@, CCT %@ K", f2(c.personFraction.map { $0 * 100 }),
                          c.saliencyBox.map { $0.map { String(format: "%.2f", $0) }.joined(separator: ",") } ?? "–", f2(c.cct))
             if let l = c.labels, !l.isEmpty {
@@ -694,6 +695,9 @@ func run() throws -> Int32 {
     case "storage":
         guard !rest.isEmpty else { print(usage); return 2 }
         print(try storageCommand(rest, stockName: a.options["stock"] ?? "slide100", out: a.options["out"]))
+    case "grain-proof":
+        guard let out = a.options["out"] else { print(usage); return 2 }
+        print(try grainProofCommand(out: out))
     case "pairs":
         guard !rest.isEmpty, let out = a.options["out"] else { print(usage); return 2 }
         let outDir = URL(fileURLWithPath: out)

@@ -96,7 +96,7 @@ final class HeadroomTests: XCTestCase {
     /// A scene where DecisionEngine and the highlightRecovery rule both fire.
     static func busyContext() -> SceneContext {
         var c = SceneContext(logP1: -12, logP50: -6.5, logP99: 1, dynamicRangeStops: 15, clippedFraction: 0.05, iso: 3200, faceCount: 1, labels: nil)
-        c.displayClippedFraction = 0.4; c.edrHeadroom = 40; c.largestFaceArea = 0.05; c.personFraction = 0.2
+        c.appleDecodeClippedFraction = 0.4; c.edrHeadroom = 40; c.largestFaceArea = 0.05; c.personFraction = 0.2
         return c
     }
 

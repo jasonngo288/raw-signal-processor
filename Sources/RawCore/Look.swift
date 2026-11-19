@@ -180,14 +180,18 @@ public enum BuiltInLook: String, CaseIterable, Sendable {
     }
 }
 
-/// Film finishing applied after the look: grain, halation, vignette. Every size is a percentage of the
-/// image's SHORT edge, so a 12 MP export, a 48 MP export and a 1024 px preview look the same at the same
-/// viewing size (grain does not get finer on bigger files).
+/// Film finishing applied after the look: grain, halation, vignette. Halation and vignette sizes are a percentage of the
+/// image's SHORT edge. Grain is the exception (order B): its cell is fixed in OUTPUT px (`GrainProfile.cellPx`) and it is
+/// generated once, on the master; smaller outputs are downscaled from the grained master.
 public struct FilmFinish: Codable, Equatable, Sendable {
-    /// 0...1. Multiplicative luminance grain; strongest in shadows/mid-tones, fades toward white.
+    /// Legacy grain pair, only used when `grain` is nil: `GrainProfile.derived(amount:size:)` turns it into a profile
+    /// (`sigma50 = 3.26 x amount`, `cellPx = size% x 3024`). 0 = no grain.
     public var grainAmount: Float
-    /// Grain cell size, % of the short edge (0.07 ≈ 2 px on a 3024 px edge).
+    /// Legacy grain cell size, % of a 3024 px short edge (0.07 = 2.1 px). The cell is NOT scaled to the image: it is fixed
+    /// in output px (grain order B).
     public var grainSize: Float
+    /// Explicit stage-2 grain profile (cell in output px, sigma50, curve, chroma). Overrides `grainAmount` / `grainSize`.
+    public var grain: GrainProfile? = nil
     /// Same seed, same grain: renders are reproducible from the recipe.
     public var grainSeed: UInt32
     /// 0...1. Red-orange glow around bright areas (light scattered back through the film base).
@@ -203,14 +207,20 @@ public struct FilmFinish: Codable, Equatable, Sendable {
     public var lightLeak: LightLeakSpec? = nil
 
     public init(grainAmount: Float = 0, grainSize: Float = 0.07, grainSeed: UInt32 = 1, halationAmount: Float = 0,
-                halationThreshold: Float = 0.75, halationRadius: Float = 0.5, vignette: Float = 0, lightLeak: LightLeakSpec? = nil) {
+                halationThreshold: Float = 0.75, halationRadius: Float = 0.5, vignette: Float = 0, lightLeak: LightLeakSpec? = nil, grain: GrainProfile? = nil) {
+        self.grain = grain
         self.grainAmount = grainAmount; self.grainSize = grainSize; self.grainSeed = grainSeed
         self.halationAmount = halationAmount; self.halationThreshold = halationThreshold
         self.halationRadius = halationRadius; self.vignette = vignette; self.lightLeak = lightLeak
     }
 
     public static let none = FilmFinish()
-    public var isNone: Bool { grainAmount == 0 && halationAmount == 0 && vignette == 0 && lightLeak == nil }
+    /// The grain profile this finish renders (explicit, else derived from the legacy pair); nil = no grain.
+    public var resolvedGrain: GrainProfile? {
+        if let g = grain { return g.sigma50 > 0 ? g : nil }
+        return grainAmount > 0 ? GrainProfile.derived(amount: grainAmount, size: grainSize) : nil
+    }
+    public var isNone: Bool { resolvedGrain == nil && halationAmount == 0 && vignette == 0 && lightLeak == nil }
 
     public func validate() throws {
         for (name, v) in [("grainAmount", grainAmount), ("halationAmount", halationAmount), ("vignette", vignette)] where !(0...1).contains(v) {
@@ -219,6 +229,7 @@ public struct FilmFinish: Codable, Equatable, Sendable {
         guard (0.01...1).contains(grainSize) else { throw RawCoreError.invalidSettings("grainSize must be 0.01...1 % of the short edge") }
         guard (0.05...5).contains(halationRadius) else { throw RawCoreError.invalidSettings("halationRadius must be 0.05...5 % of the short edge") }
         guard (0.1...0.99).contains(halationThreshold) else { throw RawCoreError.invalidSettings("halationThreshold must be 0.1...0.99") }
+        try grain?.validate()
         try lightLeak?.validate()
     }
 }

@@ -320,6 +320,7 @@ public enum SceneNormalizer {
         public var sceneLogP99: Double
         public var sceneLogP999: Double
         public var sensorClippedFraction: Double
+        /// Apple-decode measure (`SceneContext.appleDecodeClippedFraction`), never the camera-HEIC one (no Apple HEIC input, by contract).
         public var displayClippedFraction: Double?
         public var edrHeadroom: Double?
         /// Apple's per-file default `baselineExposure` (the DNG BaselineExposure the decoder applies).
@@ -336,7 +337,7 @@ public enum SceneNormalizer {
         public init(context c: SceneContext, baselineExposureEV: Double, fNumber: Double?) {
             appleDefaultMedianY = c.lumaHistogram.map { ColorMath.decodeTransfer(ToneMatch.quantile($0, 0.5)) }
             sceneLogP50 = c.logP50; sceneLogP99 = c.logP99; sceneLogP999 = c.logP999 ?? c.logP99
-            sensorClippedFraction = c.clippedFraction; displayClippedFraction = c.displayClippedFraction; edrHeadroom = c.edrHeadroom
+            sensorClippedFraction = c.clippedFraction; displayClippedFraction = c.appleDecodeClippedFraction; edrHeadroom = c.edrHeadroom
             self.baselineExposureEV = baselineExposureEV
             iso = c.iso; exposureTime = c.exposureTime; self.fNumber = fNumber
             ev100 = SceneNormalizer.ev100(fNumber: fNumber, exposureTime: c.exposureTime, iso: c.iso)

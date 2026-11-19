@@ -31,35 +31,99 @@ final class FilmFinisherTests: XCTestCase {
         XCTAssertEqual(a.pixels[0], a.pixels[1], accuracy: 1e-6, "monochrome grain: r == g")
     }
 
-    /// Regression: grain showed up as sparse black dots. The multiplier must stay within 1 ± 0.375 * amount.
-    func testGrainHasNoOutlierDots() throws {
-        for amount: Float in [0.45, 0.7, 1.0] {
-            let out = try renderer.linearImage(FilmFinisher.apply(flat(800, 600, 0.5), FilmFinish(grainAmount: amount, grainSize: 0.3, grainSeed: 11)))
-            let y = out.displayLuminance()
-            let lo = Double(y.min()!) / 0.5, hi = Double(y.max()!) / 0.5
-            print("[grain-range] amount \(amount): multiplier \(lo) ... \(hi)")
-            let bound = 0.375 * Double(amount) * (1 - 0.8 * 0.5) + 1e-3   // w at Y 0.5 is 0.6
-            XCTAssertGreaterThanOrEqual(lo, 1 - 0.375 * Double(amount) - 1e-3, "no black dots")
-            XCTAssertLessThanOrEqual(hi, 1 + 0.375 * Double(amount) + 1e-3)
-            _ = bound
+    func encodedCodes(_ img: LinearImage) -> [Double] {
+        let w = ColorMath.p3LuminanceWeights
+        return (0..<img.pixelCount).map { i in
+            (0..<3).reduce(0.0) { acc, k in
+                acc + Double([w.r, w.g, w.b][k]) * ColorMath.encodeTransfer(Double(img.pixels[i * 3 + k])) * 255
+            }
         }
     }
 
-    /// The point of sizing grain by the short edge: a 2x larger render, viewed at the same size, has the same grain.
-    func testGrainLooksTheSameAtAnyResolution() throws {
-        let f = FilmFinish(grainAmount: 0.6, grainSize: 0.4, grainSeed: 3)
-        let small = try renderer.linearImage(FilmFinisher.apply(flat(600, 400, 0.18), f))
-        let large = try renderer.linearImage(FilmFinisher.apply(flat(1200, 800, 0.18), f)).downsampled(by: 2)
-        let s = lumaStats(small).std, l = lumaStats(large).std
-        print("[grain] std at 600x400: \(s), at 1200x800 viewed at 600x400: \(l)")
-        XCTAssertEqual(l / s, 1, accuracy: 0.3)
+    func rms(_ v: [Double]) -> Double {
+        let m = v.reduce(0, +) / Double(v.count)
+        return (v.map { ($0 - m) * ($0 - m) }.reduce(0, +) / Double(v.count)).squareRoot()
+    }
+
+    /// Regression: grain showed up as sparse black dots (CIRandomGenerator outliers). The deviation in code stays bounded.
+    func testGrainHasNoOutlierDots() throws {
+        for sigma in [1.0, 2.0, 4.0] {
+            let p = GrainProfile(cellPx: 2.5, sigma50: sigma, chroma: 0.3)
+            let out = try renderer.linearImage(FilmFinisher.applyGrain(flat(800, 600, 0.2140), profile: p, seed: 11))
+            let y = encodedCodes(out)
+            let dev = y.map { abs($0 - 127.5) }.max()!
+            print("[grain-range] sigma50 \(sigma): max |deviation| \(dev) codes")
+            XCTAssertLessThan(dev, 6.5 * sigma, "no outlier dots")
+        }
+    }
+
+    /// Order B: the cell is fixed in OUTPUT px, so a 2x larger frame has the same grain statistics (no %-of-short-edge).
+    func testGrainStatisticsDoNotDependOnFrameSize() throws {
+        let p = GrainProfile(cellPx: 2.75, sigma50: 1.1)
+        let small = encodedCodes(try renderer.linearImage(FilmFinisher.applyGrain(flat(600, 400, 0.2140), profile: p, seed: 3)))
+        let large = encodedCodes(try renderer.linearImage(FilmFinisher.applyGrain(flat(1200, 800, 0.2140), profile: p, seed: 3)))
+        XCTAssertEqual(rms(large) / rms(small), 1, accuracy: 0.05)
+    }
+
+    /// Back-compat: a finish with only `{amount, size}` derives cellPx = size% x 3024 and sigma50 = 3.26 x amount.
+    func testLegacyPairDerivesTheProfile() {
+        let g = FilmFinish(grainAmount: 0.30, grainSize: 0.085).resolvedGrain
+        XCTAssertEqual(g?.cellPx ?? 0, 2.5704, accuracy: 1e-3)
+        XCTAssertEqual(g?.sigma50 ?? 0, 0.978, accuracy: 1e-3)
+        XCTAssertEqual(g?.chroma, 0)
+        XCTAssertNil(FilmFinish(grainAmount: 0).resolvedGrain)
+        let explicit = GrainProfile(cellPx: 3, sigma50: 2, chroma: 0.25)
+        XCTAssertEqual(FilmFinish(grainAmount: 0.3, grain: explicit).resolvedGrain, explicit, "explicit profile wins")
+        XCTAssertNoThrow(try FilmFinish(grain: explicit).validate())
+        XCTAssertThrowsError(try FilmFinish(grain: GrainProfile(cellPx: 0.1, sigma50: 1)).validate())
+    }
+
+    /// RMS at L = 0.5 on a flat wedge is within 5 % of sigma50 for the stock table range (see `raw-bench grain-proof`).
+    func testSigma50IsTheRMSAtMidGray() throws {
+        for (cell, sigma) in [(2.0, 0.7), (2.75, 1.1), (4.5, 2.0)] {
+            let p = GrainProfile(cellPx: cell, sigma50: sigma)
+            let r = rms(encodedCodes(try renderer.linearImage(FilmFinisher.applyGrain(flat(1024, 1024, 0.2140), profile: p, seed: 7)))) / sigma
+            XCTAssertEqual(r, 1, accuracy: 0.05, "cell \(cell)")
+        }
+    }
+
+    func testChromaIsZeroSumAndScalesWithTheLumaAmplitude() throws {
+        let p = GrainProfile(cellPx: 2.75, sigma50: 4, chroma: 0.3)
+        let img = try renderer.linearImage(FilmFinisher.applyGrain(flat(1024, 1024, 0.2140), profile: p, seed: 7))
+        var c2 = 0.0
+        for i in 0..<img.pixelCount {
+            let ch = (0..<3).map { ColorMath.encodeTransfer(Double(img.pixels[i * 3 + $0])) * 255 }
+            let m = ch.reduce(0, +) / 3
+            c2 += ch.map { ($0 - m) * ($0 - m) }.reduce(0, +) / 3
+        }
+        let chromaRMS = (c2 / Double(img.pixelCount)).squareRoot()
+        XCTAssertEqual(chromaRMS / (0.3 * 4), 1, accuracy: 0.08)
+    }
+
+    /// Values above 1 (EDR headroom) must survive the encode / grain / decode round trip: a patch at 1.2 stays at or above ~1.2.
+    func testValuesAboveOneSurviveTheGrainRoundTrip() throws {
+        let p = GrainProfile(cellPx: 2.75, sigma50: 1.1)
+        let out = try renderer.linearImage(FilmFinisher.applyGrain(flat(300, 300, 1.2), profile: p, seed: 4))
+        let mean = out.pixels.reduce(0, +) / Float(out.pixels.count)
+        XCTAssertEqual(mean, 1.2, accuracy: 0.05, "headroom is not clipped to 1 by the encode/decode")
+    }
+
+    func testProfileArgumentsAndJSONReachTheFinish() throws {
+        let d = try JSONDecoder().decode(GrainProfile.self, from: Data(#"{"cellPx":2.75,"sigma50":1.1,"chroma":0.2}"#.utf8))
+        XCTAssertEqual(d.curve, GrainProfile.defaultCurve)
+        XCTAssertEqual(d, GrainProfile(cellPx: 2.75, sigma50: 1.1, chroma: 0.2))
+        let a = try JSONDecoder().decode(LookArguments.self, from: Data(#"{"grain":{"profile":{"cellPx":2.75,"sigma50":1.1,"chroma":0.2}}}"#.utf8))
+        XCTAssertEqual(a.grain, .profile(cellPx: 2.75, sigma50: 1.1, chroma: 0.2))
+        let s = try FilmStock.resolve(look: "goldenDay", arguments: a)
+        XCTAssertEqual(s.finish.grain, GrainProfile(cellPx: 2.75, sigma50: 1.1, chroma: 0.2))
+        XCTAssertEqual(s.finish.resolvedGrain?.chroma, 0.2, "explicit profile, not derived")
     }
 
     func testGrainFadesTowardWhite() throws {
-        let f = FilmFinish(grainAmount: 0.6, grainSize: 0.5, grainSeed: 5)
-        let dark = lumaStats(try renderer.linearImage(FilmFinisher.apply(flat(300, 300, 0.10), f)))
-        let bright = lumaStats(try renderer.linearImage(FilmFinisher.apply(flat(300, 300, 0.85), f)))
-        XCTAssertLessThan(bright.std / bright.mean, dark.std / dark.mean, "relative grain is weaker in highlights")
+        let p = GrainProfile(cellPx: 2.75, sigma50: 2)
+        let mid = rms(encodedCodes(try renderer.linearImage(FilmFinisher.applyGrain(flat(300, 300, 0.2140), profile: p, seed: 5))))
+        let bright = rms(encodedCodes(try renderer.linearImage(FilmFinisher.applyGrain(flat(300, 300, 0.85), profile: p, seed: 5))))
+        XCTAssertLessThan(bright, mid * 0.6, "highlights carry about half the grain of the mids (s(0.93) ~ 0.3 vs 1)")
     }
 
     func testHalationGlowsRedAroundBrightAreas() throws {

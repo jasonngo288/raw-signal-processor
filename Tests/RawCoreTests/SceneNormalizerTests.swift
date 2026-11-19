@@ -72,7 +72,9 @@ final class SceneNormalizerTests: XCTestCase {
     func testInputsHaveNoAppleHEICField() throws {
         var c = SceneContext(logP1: -6, logP50: -2.5, logP99: -0.5, dynamicRangeStops: 6, clippedFraction: 0, iso: 100, faceCount: 0, labels: nil)
         c.lumaHistogram = Array(repeating: 1.0 / 64, count: 64)
+        c.appleDecodeClippedFraction = 0.3
         let plain = SceneNormalizer.Inputs(context: c, baselineExposureEV: 0.2, fNumber: 1.8)
+        c.displayClippedFraction = 0.9   // camera-HEIC measure: must not reach the normalizer
         c.cameraReferenceHistogram = Array(repeating: 0, count: 63) + [1]
         c.cameraReferenceHistogramFine = Array(repeating: 0, count: 255) + [1]
         let withHEIC = SceneNormalizer.Inputs(context: c, baselineExposureEV: 0.2, fNumber: 1.8)

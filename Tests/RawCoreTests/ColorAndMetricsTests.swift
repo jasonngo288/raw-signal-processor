@@ -245,7 +245,7 @@ final class LookAndSettingsTests: XCTestCase {
         let s = DecoderSupport(localToneMap: true, sharpness: true, contrast: true, detail: true, luminanceNoiseReduction: true,
                                colorNoiseReduction: true, moireReduction: true, lensCorrection: true, maxExtendedDynamicRange: 2)
         var c = SceneContext(logP1: -12, logP50: -3, logP99: 1, dynamicRangeStops: 15, clippedFraction: 0.05, iso: 3200, faceCount: 1, labels: nil)
-        c.displayClippedFraction = 0.40; c.edrHeadroom = 40; c.largestFaceArea = 0.05; c.personFraction = 0.2
+        c.appleDecodeClippedFraction = 0.40; c.edrHeadroom = 40; c.largestFaceArea = 0.05; c.personFraction = 0.2
         let dec = DecisionEngine.decide(context: c, defaults: d, support: s)
         XCTAssertNil(dec.settings.toneMapSourceHeadroom, "highlight recovery is a plugin, not core")
         XCTAssertEqual(dec.settings.localToneMapAmount, 1)
@@ -289,7 +289,7 @@ final class LookAndSettingsTests: XCTestCase {
 
     func testHighlightRecoveryRule() {
         var c = SceneContext(logP1: -6, logP50: -2, logP99: 1, dynamicRangeStops: 7, clippedFraction: 0.05, iso: 50, faceCount: 0, labels: nil)
-        c.displayClippedFraction = 0.40; c.edrHeadroom = 40
+        c.appleDecodeClippedFraction = 0.40; c.edrHeadroom = 40
         var st = RenderSettings.explicit
         let why = HighlightRecoveryRule.decide(context: c, settings: &st)
         XCTAssertEqual(st.extendedDynamicRangeAmount, 1)
@@ -341,7 +341,7 @@ final class LookAndSettingsTests: XCTestCase {
         XCTAssertEqual(SceneContext.headroom(img), 4, accuracy: 1e-6)
         XCTAssertEqual(SceneContext.headroom(LinearImage(width: 4, height: 4, fill: (0.1, 0.1, 0.1))), 1)
         var c = SceneContext.measure(sceneLinear: img, iso: 100)
-        c.displayClippedFraction = 0.3
+        c.appleDecodeClippedFraction = 0.3
         XCTAssertEqual(try XCTUnwrap(c.recoverableClippedFraction), 0.2, accuracy: 1e-9)
     }
 

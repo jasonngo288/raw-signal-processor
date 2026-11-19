@@ -168,6 +168,9 @@ public struct LookArguments: Codable, Equatable, Sendable {
         case iso(scale: Float)
         case explicit(amount: Float, size: Float)
         case isoV2(scale: Float)
+        /// Stage-2 grain profile (grain order B, approved 2026-11-19): cell in output px, luma RMS at L = 0.5 in 8-bit code,
+        /// chroma fraction. Uses the approved density curve. JSON `{"profile":{"cellPx":2.75,"sigma50":1.1,"chroma":0.2}}`.
+        case profile(cellPx: Double, sigma50: Double, chroma: Double)
     }
     /// Halation replacing the look's (`FilmFinish` units).
     public struct Halation: Codable, Equatable, Sendable {
@@ -238,14 +241,16 @@ extension FilmStock {
             guard let iso = a.iso else { throw bad("grain .iso needs iso") }
             guard LookArguments.grainScaleRange.contains(scale) else { throw bad("grain scale must be in 0...2") }
             let g = RollStock.grain(iso: iso, tungsten: a.tungsten ?? false)
-            finish.grainAmount = g.amount * scale; finish.grainSize = g.size
+            finish.grainAmount = g.amount * scale; finish.grainSize = g.size; finish.grain = nil
         case .explicit(let amount, let size)?:
-            finish.grainAmount = amount; finish.grainSize = size
+            finish.grainAmount = amount; finish.grainSize = size; finish.grain = nil
+        case .profile(let cellPx, let sigma50, let chroma)?:
+            finish.grain = GrainProfile(cellPx: cellPx, sigma50: sigma50, chroma: chroma)
         case .isoV2(let scale)?:
             guard let iso = a.iso else { throw bad("grain .isoV2 needs iso") }
             guard LookArguments.grainScaleRange.contains(scale) else { throw bad("grain scale must be in 0...2") }
             let g = RollStock.grainV2(iso: iso)
-            finish.grainAmount = g.amount * scale; finish.grainSize = g.size
+            finish.grainAmount = g.amount * scale; finish.grainSize = g.size; finish.grain = nil
         }
         if let h = a.halation {
             finish.halationAmount = h.amount; finish.halationThreshold = h.threshold; finish.halationRadius = h.radius
