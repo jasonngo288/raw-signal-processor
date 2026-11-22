@@ -17,7 +17,7 @@ final class FilmLooksTests: XCTestCase {
     }
 
     func testGeneratedLooksGenericNames() throws {
-        XCTAssertEqual(FilmLooks2026.names.count, 21)   // 10 + the 8 trial looks promoted by T2 (2026-11-12) + 3 v2 looks (0.3.0); cinemaNegative retired 2026-11-10
+        XCTAssertEqual(FilmLooks2026.names.count, 26)   // +3 refine4 looks (0.6.2: pastelCool2, mapleRed2, sunFade2) +2 (citrus2, daybreak2); 10 + the 8 trial looks promoted by T2 (2026-11-12) + 3 v2 looks (0.3.0); cinemaNegative retired 2026-11-10
         for n in FilmLooks2026.names { XCTAssertNotNil(FilmStock.named(n), n) }
         for l in allLooks {
             let words = (l.name + " " + l.summary).lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)

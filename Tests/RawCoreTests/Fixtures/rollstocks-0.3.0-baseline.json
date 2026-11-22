@@ -14,10 +14,10 @@
       "pixels" : "a5d1689faccf2461"
     },
     {
-      "fields" : "source=spec(pastelCool) | intensity=1061997773 | finish={\"grainAmount\":0.27,\"grainSeed\":1,\"grainSize\":0.06,\"halationAmount\":0,\"halationRadius\":0.5,\"halationThreshold\":0.75,\"vignette\":0} | skin=true | minSkin=nil | input=display | space=displayP3 | prim=rec2020 | develop={\"cameraMatchCurveStrength\":0.5,\"clarityScale\":0.4,\"faceSharpDelta\":0.05,\"proRAWDetail\":0.2,\"profile\":\"iso<400\",\"sharpFloor\":0.3,\"sharpScale\":0.55}",
+      "fields" : "source=spec(pastelCool2) | intensity=1061997773 | finish={\"grainAmount\":0.27,\"grainSeed\":1,\"grainSize\":0.06,\"halationAmount\":0,\"halationRadius\":0.5,\"halationThreshold\":0.75,\"vignette\":0} | skin=true | minSkin=nil | input=display | space=displayP3 | prim=rec2020 | develop={\"cameraMatchCurveStrength\":0.5,\"clarityScale\":0.4,\"faceSharpDelta\":0.05,\"proRAWDetail\":0.2,\"profile\":\"iso<400\",\"sharpFloor\":0.3,\"sharpScale\":0.55}",
       "id" : "rr-mat-200",
-      "lut" : "65:4bd5329e43dbf173",
-      "pixels" : "055d71e7bdbf6825"
+      "lut" : "65:13d1800b7c118ee6",
+      "pixels" : "55599c1aad3557f1"
     },
     {
       "fields" : "source=spec(trialCoolFade) | intensity=1062836634 | finish={\"grainAmount\":0.35,\"grainSeed\":1,\"grainSize\":0.07,\"halationAmount\":0,\"halationRadius\":0.5,\"halationThreshold\":0.75,\"vignette\":0.08} | skin=true | minSkin=nil | input=display | space=displayP3 | prim=rec2020 | develop={\"cameraMatchCurveStrength\":0.5,\"clarityScale\":0.4,\"faceSharpDelta\":0.05,\"lumaNRMaxDelta\":0,\"proRAWDetail\":0.2,\"profile\":\"iso400-1599\",\"sharpFloor\":0.3,\"sharpScale\":0.5}",
@@ -50,10 +50,10 @@
       "pixels" : "2ce20adc319692b8"
     },
     {
-      "fields" : "source=spec(sunFade) | intensity=1060320051 | finish={\"grainAmount\":0.27,\"grainSeed\":1,\"grainSize\":0.06,\"halationAmount\":0,\"halationRadius\":0.5,\"halationThreshold\":0.75,\"vignette\":0.12} | skin=true | minSkin=nil | input=display | space=displayP3 | prim=rec2020 | develop={\"cameraMatchCurveStrength\":0.5,\"clarityScale\":0.4,\"faceSharpDelta\":0.05,\"proRAWDetail\":0.2,\"profile\":\"iso<400\",\"sharpFloor\":0.3,\"sharpScale\":0.55}",
+      "fields" : "source=spec(sunFade2) | intensity=1060320051 | finish={\"grainAmount\":0.27,\"grainSeed\":1,\"grainSize\":0.06,\"halationAmount\":0,\"halationRadius\":0.5,\"halationThreshold\":0.75,\"vignette\":0.12} | skin=true | minSkin=nil | input=display | space=displayP3 | prim=rec2020 | develop={\"cameraMatchCurveStrength\":0.5,\"clarityScale\":0.4,\"faceSharpDelta\":0.05,\"proRAWDetail\":0.2,\"profile\":\"iso<400\",\"sharpFloor\":0.3,\"sharpScale\":0.55}",
       "id" : "rr-hoai-co-200",
-      "lut" : "65:601469744f97a4fe",
-      "pixels" : "80f500de02645cc6"
+      "lut" : "65:f30d704b4410a8b7",
+      "pixels" : "b65845b33ac73593"
     },
     {
       "fields" : "source=spec(warmEvening) | intensity=1060320051 | finish={\"grainAmount\":0.27,\"grainSeed\":1,\"grainSize\":0.06,\"halationAmount\":0.06,\"halationRadius\":0.5,\"halationThreshold\":0.85,\"vignette\":0.15} | skin=true | minSkin=nil | input=display | space=displayP3 | prim=rec2020 | develop={\"cameraMatchCurveStrength\":0.5,\"clarityScale\":0.4,\"faceSharpDelta\":0.05,\"proRAWDetail\":0.2,\"profile\":\"iso<400\",\"sharpFloor\":0.3,\"sharpScale\":0.55}",
@@ -68,10 +68,10 @@
       "pixels" : "fc320b9f1afa0f8f"
     },
     {
-      "fields" : "source=spec(mapleRed) | intensity=1062836634 | finish={\"grainAmount\":0.18,\"grainSeed\":1,\"grainSize\":0.05,\"halationAmount\":0.05,\"halationRadius\":0.4,\"halationThreshold\":0.9,\"lightLeak\":{\"amount\":0.35,\"aspect\":1.5,\"coreColor\":[1,0.3,0.06],\"coreOutside\":[0,0.1],\"encodedCap\":0.99,\"hueJitter\":8,\"last\":{\"chance\":0.6,\"strength\":[0.35,0.6]},\"middle\":{\"chance\":0.12,\"strength\":[0.15,0.35]},\"outerHue\":70,\"peakAdd\":0.25,\"personFactor\":0.4,\"reach\":0.3,\"reachSigmas\":2.45,\"sizeJitter\":0.3,\"start\":{\"chance\":1,\"strength\":[0.6,0.9]},\"streakChance\":0.5,\"streakStrength\":0.25,\"streakWidth\":[0.05,0.12],\"third\":{\"chance\":0.5,\"strength\":[0.3,0.5]}},\"vignette\":0.06} | skin=true | minSkin=nil | input=display | space=displayP3 | prim=rec2020 | develop={\"cameraMatchCurveStrength\":0.5,\"clarityScale\":0.4,\"faceSharpDelta\":0.05,\"proRAWDetail\":0.2,\"profile\":\"iso<400\",\"sharpFloor\":0.3,\"sharpScale\":0.55}",
+      "fields" : "source=spec(mapleRed2) | intensity=1062836634 | finish={\"grainAmount\":0.18,\"grainSeed\":1,\"grainSize\":0.05,\"halationAmount\":0.05,\"halationRadius\":0.4,\"halationThreshold\":0.9,\"lightLeak\":{\"amount\":0.35,\"aspect\":1.5,\"coreColor\":[1,0.3,0.06],\"coreOutside\":[0,0.1],\"encodedCap\":0.99,\"hueJitter\":8,\"last\":{\"chance\":0.6,\"strength\":[0.35,0.6]},\"middle\":{\"chance\":0.12,\"strength\":[0.15,0.35]},\"outerHue\":70,\"peakAdd\":0.25,\"personFactor\":0.4,\"reach\":0.3,\"reachSigmas\":2.45,\"sizeJitter\":0.3,\"start\":{\"chance\":1,\"strength\":[0.6,0.9]},\"streakChance\":0.5,\"streakStrength\":0.25,\"streakWidth\":[0.05,0.12],\"third\":{\"chance\":0.5,\"strength\":[0.3,0.5]}},\"vignette\":0.06} | skin=true | minSkin=nil | input=display | space=displayP3 | prim=rec2020 | develop={\"cameraMatchCurveStrength\":0.5,\"clarityScale\":0.4,\"faceSharpDelta\":0.05,\"proRAWDetail\":0.2,\"profile\":\"iso<400\",\"sharpFloor\":0.3,\"sharpScale\":0.55}",
       "id" : "rr-la-phong-100",
-      "lut" : "65:5b3b3d7371777e5a",
-      "pixels" : "e8024837a4aa61c8"
+      "lut" : "65:aecb7fdc4ac87e35",
+      "pixels" : "fd7658b4d9ba0894"
     },
     {
       "fields" : "source=spec(brightTravel) | intensity=1062836634 | finish={\"grainAmount\":0.18,\"grainSeed\":1,\"grainSize\":0.05,\"halationAmount\":0,\"halationRadius\":0.5,\"halationThreshold\":0.75,\"vignette\":0} | skin=true | minSkin=nil | input=display | space=displayP3 | prim=rec2020 | develop={\"cameraMatchCurveStrength\":0.5,\"clarityScale\":0.4,\"faceSharpDelta\":0.05,\"proRAWDetail\":0.2,\"profile\":\"iso<400\",\"sharpFloor\":0.3,\"sharpScale\":0.55}",

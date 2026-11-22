@@ -102,23 +102,23 @@ public enum RollStocks {
     /// The roll stocks, in the brief's order (§3). 19 of the brief's 21: RR Chuẩn 160 and 800 were cut on 2026-11-11
     /// (same colour as RR Chuẩn 400, grain only; .orchestration/looks/RR_LOOKS_2026-11-11.md).
     public static let all: [RollStock] = [
-        s("rr-sao-mai-200", "RR Sao Mai 200", 200, "everydayGreen", 0.70, "everyday warm, medium saturation and contrast",
+        s("rr-sao-mai-200", "RR Sao Mai 200", 200, "daybreak2", 0.70, "everyday warm, medium saturation and contrast",
           develop: .auto, open: ["R3a: if legal wants it safer, rename to RR Ngày 200"]),
         s("rr-sao-hom-400", "RR Sao Hôm 400", 400, "everydayGreen", 0.85, "everyday warm 400, more grain, better in low light",
           develop: .auto, open: ["R3a: if legal wants it safer, rename to RR Chiều 400"]),
-        s("rr-mat-200", "RR Mát 200", 200, "pastelCool", 0.80, "cool, light green cast, medium saturation", develop: .auto),
+        s("rr-mat-200", "RR Mát 200", 200, "pastelCool2", 0.80, "cool, light green cast, medium saturation", develop: .auto),
         s("rr-gio-400", "RR Gió 400", 400, "trialCoolFade", 0.85, "cool 400, medium-high saturation, visible grain",
           develop: .auto, open: ["trialCoolFade is still a low-confidence trial look"]),
         s("rr-vang-200", "RR Vàng 200", 200, "goldenDay", 0.85, "honey warm, rich colour, fine grain", develop: .auto),
         s("rr-am-200", "RR Ấm 200", 200, "warmMuted", 0.85, "soft amber-red warm, moderate colour, muted greens and skies", develop: .auto),
         s("rr-ruc-400", "RR Rực 400", 400, "vividFine", 0.75, "warm and saturated all-rounder 400, visible grain", develop: .vivid),
         s("rr-hoai-co-100", "RR Hoài Cổ 100", 100, "sunFade", 0.60, "nostalgic warm, low-medium saturation and contrast, fine grain", develop: .auto),
-        s("rr-hoai-co-200", "RR Hoài Cổ 200", 200, "sunFade", 0.70, "nostalgic warm, medium grain", develop: .auto),
+        s("rr-hoai-co-200", "RR Hoài Cổ 200", 200, "sunFade2", 0.70, "nostalgic warm, medium grain", develop: .auto),
         s("rr-lang-kinh-200", "RR Lăng Kính 200", 200, "warmEvening", 0.70, "warm vintage, medium saturation and contrast", develop: .auto),
         s("rr-lang-kinh-400", "RR Lăng Kính 400", 400, "warmEvening", 0.80, "warm vintage 400, more grain", develop: .auto),
-        s("rr-la-phong-100", "RR Lá Phong 100", 100, "mapleRed", 0.85, "warm, deep crimson reds with cyan-teal blues and shadows, low-medium contrast, fine grain",
-          develop: .auto, lightLeak: "laPhong", open: ["light leak built as plugin lightLeak (needs rollID / rollFrameIndex / rollFrameCount); open numbers listed in WORK_LOG 2026-11-11"]),
-        s("rr-nang-100", "RR Nắng 100", 100, "brightTravel", 0.85, "bright sunny daylight, high saturation, clean whites, fine grain", develop: .auto),
+        s("rr-la-phong-100", "RR Lá Phong 100", 100, "mapleRed2", 0.85, "warm, deep crimson reds with cyan-teal blues and shadows, low-medium contrast, fine grain",
+          develop: .auto, lightLeak: "laPhong2", open: ["light leak built as plugin lightLeak (needs rollID / rollFrameIndex / rollFrameCount); open numbers listed in WORK_LOG 2026-11-11"]),
+        s("rr-nang-100", "RR Nắng 100", 100, "citrus2", 0.85, "bright sunny daylight, high saturation, clean whites, fine grain", develop: .auto),
         s("rr-ruc-ro-100", "RR Rực Rỡ 100", 100, "vividFine", 0.95, "very saturated, high contrast, strong reds, finest grain", develop: .vivid),
         s("rr-da-mem-160", "RR Da Mềm 160", 160, "softPortrait", 0.85, "pastel warm, low contrast, best skin, fine grain", develop: .portrait),
         s("rr-chan-dung-400", "RR Chân Dung 400", 400, "naturalPortrait", 0.85, "natural warm, medium saturation and contrast, good skin", develop: .portrait),
@@ -218,7 +218,8 @@ public struct LookArguments: Codable, Equatable, Sendable {
     }
 
     /// Named light leaks RSP ships.
-    public static let lightLeaks: [String: LightLeakSpec] = ["laPhong": .laPhong]
+    public static let lightLeaks: [String: LightLeakSpec] = ["laPhong": .laPhong,
+        "laPhong2": { var s = LightLeakSpec(); s.amount = 1.0; s.peakAdd = 0.6; return s }()]   // Strong level (User 2026-11-22); laPhong stays frozen
     /// ISO range RSP accepts (an app catalog may be stricter).
     public static let isoRange: ClosedRange<Int> = 25...6400
     /// Range of the `.iso` grain multiplier RSP accepts (an app catalog may be stricter).

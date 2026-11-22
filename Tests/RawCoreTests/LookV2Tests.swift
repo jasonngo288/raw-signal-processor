@@ -34,7 +34,9 @@ final class LookV2Tests: XCTestCase {
     }
 
     func testV2LooksAreListedAndSupported() {
-        XCTAssertEqual(Array(FilmLooks2026.names.suffix(3)), Self.v2)
+        let i = FilmLooks2026.names.firstIndex(of: "goldenDay2")
+        XCTAssertNotNil(i)
+        XCTAssertEqual(i.map { Array(FilmLooks2026.names[$0..<($0 + 3)]) }, Self.v2, "the v2 looks stay contiguous (0.6.2 appends the refine4 looks after them)")
         for n in Self.v2 {
             XCTAssertNotNil(SupportedLooks.named(n), n)
             XCTAssertEqual(SupportedLooks.named(n)?.isMonochrome, false)

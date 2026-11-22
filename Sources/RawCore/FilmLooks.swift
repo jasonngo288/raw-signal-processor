@@ -350,6 +350,49 @@ public enum FilmLooks2026 {
                          .init(100, width: 35, shift: -4, chroma: 0.95), .init(140, width: 40, shift: -8, chroma: 0.9, lightness: -0.02),
                          .init(205, width: 35, shift: 0, chroma: 0.9), .init(245, width: 40, shift: -8, chroma: 1.1, lightness: -0.02)] },
          0.85, FilmFinish(grainAmount: 0.25, grainSize: 0.06, vignette: 0.05), nil),
+        ("pastelCool2", "pastel airy colour with depth: soft contrast, lifted slate shadows, held skies, muted mint greens, rose skin",
+         spec { $0.temperatureK = 5400; $0.tint = 3; $0.black = 0.022; $0.contrast = 0.95; $0.pivot = 0.5; $0.shoulder = 0.82; $0.white = 0.975
+             $0.saturation = 0.86; $0.highlightDesat = 0.2; $0.shadowDesat = 0.05; $0.density = 0.03; $0.skyHold = 0.4
+             $0.shadowTint = SIMD2(-0.005, -0.009); $0.highlightTint = SIMD2(0.001, 0.002); $0.vibrance = 0; $0.neutralDrift = 0.03
+             $0.bands = [.init(42, width: 22, shift: 3, chroma: 1.0), .init(55, width: 35, shift: -4, chroma: 1.22, lightness: 0.03),
+                         .init(100, width: 35, shift: 5, chroma: 0.85), .init(140, width: 40, shift: 6, chroma: 0.82, lightness: 0.02),
+                         .init(205, width: 35, shift: 0, chroma: 1.1), .init(255, width: 40, shift: -12, chroma: 1.0, lightness: -0.02)] },
+         0.85, FilmFinish(grainAmount: 0.2, grainSize: 0.06), nil),
+        ("mapleRed2", "slow warm daylight film with a clear red and yellow split: deep crimson reds, luminous gold, cyan-teal blues and shadows, fine grain",
+         spec { $0.temperatureK = 5900; $0.tint = 1; $0.black = 0.018; $0.contrast = 1.04; $0.pivot = 0.55; $0.shoulder = 0.88; $0.white = 0.99
+             $0.saturation = 1.06; $0.highlightDesat = 0.35; $0.density = 0.08
+             $0.shadowTint = SIMD2(-0.018, -0.010); $0.highlightTint = SIMD2(0.005, 0.012); $0.vibrance = 0; $0.neutralDrift = 0.035
+             $0.bands = [.init(22, width: 24, shift: -6, chroma: 1.5, lightness: -0.08), .init(48, width: 26, shift: -3, chroma: 1.0),
+                         .init(78, width: 18, shift: 0, chroma: 0.9), .init(98, width: 32, shift: -2, chroma: 1.25, lightness: 0.03),
+                         .init(140, width: 40, shift: 8, chroma: 0.8, lightness: -0.01), .init(205, width: 35, shift: -4, chroma: 1.4),
+                         .init(255, width: 40, shift: -20, chroma: 1.1, lightness: -0.02)] },
+         0.85, FilmFinish(grainAmount: 0.18, grainSize: 0.05, halationAmount: 0.05, halationThreshold: 0.9, halationRadius: 0.4, vignette: 0.06), nil),
+        ("sunFade2", "aged print: faded matte blacks, rose-brown shadows, cream-yellow highlights, muted greens and skies, heavy grain",
+         spec { $0.temperatureK = 6000; $0.tint = 1; $0.black = 0.07; $0.contrast = 0.82; $0.pivot = 0.5; $0.shoulder = 0.78; $0.white = 0.94
+             $0.saturation = 0.62; $0.highlightDesat = 0.2; $0.shadowDesat = 0.05; $0.density = 0
+             $0.shadowTint = SIMD2(0.008, 0.003); $0.highlightTint = SIMD2(0.002, 0.016); $0.vibrance = 0; $0.neutralDrift = 0.05
+             $0.bands = [.init(25, width: 30, shift: 6, chroma: 0.85), .init(48, width: 24, shift: -4, chroma: 1.45),
+                         .init(100, width: 35, shift: -6, chroma: 0.9), .init(140, width: 45, shift: -22, chroma: 0.55),
+                         .init(200, width: 35, shift: 0, chroma: 0.6), .init(255, width: 40, shift: -20, chroma: 0.7)] },
+         0.85, FilmFinish(grainAmount: 0.5, grainSize: 0.08, vignette: 0.12), nil),
+        // B looks (User 2026-11-19, W1; vibrance 0 per User 2026-11-22 so LookV2 L21 holds): new ids, base looks above stay frozen (D6). The catalog's explicit grain/halation/vignette
+        // arguments override the finish below, so the finish only matters for a stock that sets none.
+        ("citrus2", "clean saturated daylight: firm contrast, deep clean blacks, neutral whites with a light gold cast, golden sand, lime and yellow-green foliage, true blues, almost no grain",
+         spec { $0.temperatureK = 5600; $0.tint = 0; $0.black = 0.0; $0.contrast = 1.26; $0.pivot = 0.45; $0.shoulder = 0.9; $0.white = 0.99
+             $0.saturation = 1.12; $0.highlightDesat = 0.2; $0.density = 0.07; $0.skyHold = 1.0; $0.vibrance = 0; $0.neutralDrift = 0.02
+             $0.highlightTint = SIMD2(0.0, 0.003)
+             $0.bands = [.init(28, width: 30, chroma: 0.95), .init(55, width: 25, chroma: 0.95), .init(82, width: 25, chroma: 1.3),
+                         .init(110, width: 30, shift: 3, chroma: 1.4), .init(145, width: 40, shift: -8, chroma: 1.2, lightness: -0.02),
+                         .init(215, width: 35, chroma: 1.12, lightness: -0.02), .init(255, width: 40, shift: -3, chroma: 1.15, lightness: -0.04)] },
+         1.0, FilmFinish(grainAmount: 0.05, grainSize: 0.04), nil),
+        ("daybreak2", "easy everyday 200 colour: softly lifted blacks, honey-gold warmth, green-leaning shadows, emerald greens, held skies, medium grain",
+         spec { $0.temperatureK = 5750; $0.tint = -3; $0.black = 0.04; $0.contrast = 1.0; $0.pivot = 0.52; $0.shoulder = 0.88; $0.white = 0.99
+             $0.saturation = 1.03; $0.highlightDesat = 0.3; $0.density = 0.04; $0.skyHold = 1.0; $0.vibrance = 0; $0.neutralDrift = 0.03
+             $0.shadowTint = SIMD2(-0.016, 0.004); $0.highlightTint = SIMD2(0.002, 0.006)
+             $0.bands = [.init(28, shift: -6, chroma: 1.0), .init(48, width: 22, shift: -6, chroma: 0.97), .init(75, width: 28, chroma: 1.12),
+                         .init(108, width: 35, shift: 1, chroma: 1.12), .init(145, width: 45, shift: 10, chroma: 1.22, lightness: -0.03),
+                         .init(255, width: 40, shift: -4, chroma: 1.0)] },
+         1.0, FilmFinish(grainAmount: 0.45, grainSize: 0.075, vignette: 0.04), nil),
     ]
 
     public static var names: [String] { looks.map(\.name) }
@@ -392,7 +435,7 @@ public enum FilmLooks2026 {
 
 /// Engine identity the host app checks its stock catalog against (`minEngine` <= `engineVersion`).
 public enum RawCore {
-    public static let engineVersion = "0.7.0"
+    public static let engineVersion = "0.7.1"
 }
 
 /// A look a host app may name in a stock (`RenderSettings.stock` + `lookArguments`), with its defaults.

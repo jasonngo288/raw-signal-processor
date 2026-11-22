@@ -68,13 +68,16 @@
 | goldenDay | warm faded everyday: golden light, honey yellows, rich reds | 0.85 | grain 0.40 / 0.07, halation 0.10, vignette 0.04 | Vàng 200 |
 | warmMuted | soft warm everyday 200: amber-red warmth, moderate colour | 0.85 | grain 0.30 / 0.06, vignette 0.06 | Ấm 200 |
 | everydayGreen | warm-muted analog, emerald greens, magenta-leaning reds | 0.85 | grain 0.45 / 0.075, vignette 0.04 | Sao Mai 200, Sao Hôm 400 |
-| pastelCool | pastel airy: soft contrast, slate shadows, mint greens, rose skin | 0.85 | grain 0.20 / 0.06 | Mát 200 |
+| pastelCool | pastel airy: soft contrast, slate shadows, mint greens, rose skin | 0.85 | grain 0.20 / 0.06 | — (Mát 200 moved to pastelCool2 in 0.6.2) |
 | trialCoolFade | cool faded 400: grey lifted blacks, cool green-cyan shadows, muted | 0.85 | grain 0.42 / 0.07, vignette 0.08 | Gió 400 |
 | vividFine | vivid memory colour: deep crimson, rich yellows, deep blacks | 0.85 | grain 0.22 / 0.055, vignette 0.05 | Rực 400, Rực Rỡ 100 |
 | brightTravel | clean vivid daylight: punchy, clean blues, emerald greens, true reds | 0.90 | grain 0.05 / 0.04 | Nắng 100 |
-| sunFade | expired warm film: strongly faded, grey-brown blacks, cream cast | 0.85 | grain 0.50 / 0.08, vignette 0.12 | Hoài Cổ 100, Hoài Cổ 200 |
+| sunFade | expired warm film: strongly faded, grey-brown blacks, cream cast | 0.85 | grain 0.50 / 0.08, vignette 0.12 | Hoài Cổ 100 |
 | warmEvening | pushed warm moody: deeper mids, brown blacks, muted warm palette | 0.85 | grain 0.50 / 0.085, halation 0.06, vignette 0.15 | Lăng Kính 200, Lăng Kính 400 |
-| mapleRed | slow warm daylight: deep crimson, cyan-teal blues and shadows | 0.85 | grain 0.18 / 0.05, halation 0.05, vignette 0.06 | Lá Phong 100 |
+| mapleRed | slow warm daylight: deep crimson, cyan-teal blues and shadows | 0.85 | grain 0.18 / 0.05, halation 0.05, vignette 0.06 | — (Lá Phong 100 moved to mapleRed2 in 0.6.2) |
+| pastelCool2 (0.6.2) | pastel airy with depth: held skies, deeper blacks than pastelCool | 0.85 | grain 0.20 / 0.06 | Mát 200 |
+| mapleRed2 (0.6.2) | clear red / yellow split: deeper crimson, luminous gold | 0.85 | grain 0.18 / 0.05, halation 0.05, vignette 0.06 | Lá Phong 100 |
+| sunFade2 (0.6.2) | aged print: matte blacks, rose-brown shadows, cream highlights, muted sky | 0.85 | grain 0.50 / 0.08, vignette 0.12 | Hoài Cổ 200 |
 | cleanLab | clean lab scan: neutral colour, accurate skin, clean soft whites | 0.85 | grain 0.22 / 0.055, vignette 0.03 | Chuẩn 400 |
 | tungstenGlow | tungsten night: cool teal daylight, neutral lamps, strong halation | 0.90 | grain 0.60 / 0.085, halation 0.45, vignette 0.10 | Đèn Vàng 800T |
 | mutedChrome | muted colour: low saturation, brick reds, olive greens, calm blues | 0.90 | grain 0.15 / 0.05 | — (free to use) |
