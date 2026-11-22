@@ -72,9 +72,10 @@ Sources/RawCore/   ColorMath, LinearImage, ImageMetrics, RenderSettings, Look, C
                    FilmFinisher, Plugins (highlightRecovery, cameraMatch, vignette, logLook), LogLook (log curves, composite cube)
                    RollStocks (19 rr-* stocks = look + LookArguments; FilmStock.resolve(look:arguments:); SupportedLooks,
                    RawCore.engineVersion; no bundled LUT library since 0.2.0)
+                   FilmBorder (border model: templates, layout, seeded geometry; pure) + FilmBorderRenderer (Core Image / Core Text)
                    FilmLooks (2026 film-look set: `LookSpec` in OKLab → 33³ cube, `FilmLooks2026`), LUTBinaryFormat (.mrlut)
 Sources/CaptureKit AVFoundation Bayer RAW / ProRAW + HEIC capture (iOS; runs on device via App/)
-Sources/RawBench/  raw-bench CLI: info | render | compare | bench | pairs | chart | gate3 | storage | lut | looks
+Sources/RawBench/  raw-bench CLI: info | render | border | compare | bench | pairs | chart | gate3 | storage | lut | looks
 tools/look-review/ review.py: render the look set with raw-bench, local review page, feedback.json (bench-out/, never committed)
 corpus/            corpus.json (public RAWs, fetched by CI, never committed) + README
 Tests/RawCoreTests unit tests (Sharma CIEDE2000, metrics, LUT, settings, decisions) + decoder tests on originals/

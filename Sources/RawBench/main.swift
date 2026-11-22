@@ -9,6 +9,10 @@ raw-bench — CIRAWFilter spike CLI
 
   raw-bench info <raw>...                         decoder versions, per-file defaults, support flags
   raw-bench analyze <raw>...                      scene context (light stats, headroom, Vision) + auto decisions
+  raw-bench border <raw|jpg|heic>... [--template classic_scan|aged_paper|film_negative|instant_print|all] [--stock ID]
+                   [--seed N] [--size M] [--paper #RRGGBB] [--texture 0..1] [--frame-number N] [--roll ID --frames N] [--long-edge N] [--out DIR]
+                   [--share 4x5,1x1,9x16] [--share-bg light|dark|white|#hex] [--share-width N]   Instagram share canvases
+                   film border after development (RAW: auto develop, optional stock; image: used as developed)
   raw-bench render <raw> [--mode appleDefault|explicit|sceneLinear|auto] [--look NAME|path.cube]
                    [--intensity 0..1] [--format heic10|png16|jpeg] [--scale 0..1] [--out FILE]
   raw-bench compare <raw> [--mode ...] [--look ...] [--long-edge N] [--native]   metrics + ΔE00 vs appleDefault; --native adds
@@ -601,6 +605,8 @@ func run() throws -> Int32 {
             let d = DecisionEngine.decide(context: an.context, defaults: an.defaults, support: an.support)
             print(an.prettyJSON()); print(d.reasons.joined(separator: "\n"))
         }
+    case "border":
+        try borderCommand(rest, a)
     case "render":
         guard let p = rest.first else { print(usage); return 2 }
         let url = URL(fileURLWithPath: p)

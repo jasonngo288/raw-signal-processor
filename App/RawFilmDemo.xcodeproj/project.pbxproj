@@ -15,10 +15,12 @@
 		3A6CDCBD614859F79E764500 /* FilmLooks.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF5625118DCDEA13BB4BE46C /* FilmLooks.swift */; };
 		4559F3AC457D564E7C267464 /* RawCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 1FE946699F10CFB2DB53F39F /* RawCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		481D26A08F470F3ACC097811 /* ImageMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B9FCCF144502B6CE31EEE65 /* ImageMetrics.swift */; };
+		543929F1671F282465B2B592 /* FilmBorderRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9ABF3A0194FF5B2BE28A6E2 /* FilmBorderRenderer.swift */; };
 		6AE109991A1AC267DFE42A79 /* Look.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20D982FA8DFEE3CDDDB8A6C /* Look.swift */; };
 		7DE4A9ECF172149648CDA57E /* RenderSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 836F5F5A5A29E762D3633A6E /* RenderSettings.swift */; };
 		7DEB3063E3EE5960A2513E44 /* Presets2026.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E665446EEFCA624C9EB7D82 /* Presets2026.swift */; };
 		80DAF44AED1677A89420E66D /* CaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E76F9A995FEE177791EC26C3 /* CaptureService.swift */; };
+		844D9CE173D85AD2CC9C132D /* StockRender.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C3B7061D6F09A2035A291A7 /* StockRender.swift */; };
 		875C60419A94846F4106D7D2 /* ContextAnalysis.swift in Sources */ = {isa = PBXBuildFile; fileRef = 532A340E102CD794F657DD29 /* ContextAnalysis.swift */; };
 		95955DAA3B35454516EE186A /* ColorChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8204A61DE5C29AAF96573C8B /* ColorChecker.swift */; };
 		A58EA31DCA3CEC8968D6C11F /* LUTBinaryFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7181652596619CAED237507C /* LUTBinaryFormat.swift */; };
@@ -28,6 +30,7 @@
 		CE485D536DF659B2F8843B67 /* CaptureKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 87AB576835F738501C46ABEF /* CaptureKit.framework */; };
 		CF7140CC73C299BC294CD7A5 /* CaptureKit.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 87AB576835F738501C46ABEF /* CaptureKit.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		D65C00398EF07EBF38DBCD29 /* RawCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FE946699F10CFB2DB53F39F /* RawCore.framework */; };
+		DA6087613521CDD68828159B /* FilmBorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDCD07A5D251FF99CA92BFD0 /* FilmBorder.swift */; };
 		E91216BE2B48238B46815F83 /* RawDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B469E3A41A484B6791CEF286 /* RawDecoder.swift */; };
 		EF9183DB2B3DF3526837F434 /* Plugins.swift in Sources */ = {isa = PBXBuildFile; fileRef = 199798B49C3F9C744946C8C0 /* Plugins.swift */; };
 		F40984D818182383ECA1A969 /* FilmFinisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25E0ACA87DE487320CF89405 /* FilmFinisher.swift */; };
@@ -79,6 +82,7 @@
 		532A340E102CD794F657DD29 /* ContextAnalysis.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextAnalysis.swift; sourceTree = "<group>"; };
 		55DDCA8137C9D24EBA3BC89E /* Calibration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Calibration.swift; sourceTree = "<group>"; };
 		5B1587A486053CA8A22D60E1 /* RollStocks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RollStocks.swift; sourceTree = "<group>"; };
+		6C3B7061D6F09A2035A291A7 /* StockRender.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StockRender.swift; sourceTree = "<group>"; };
 		6E665446EEFCA624C9EB7D82 /* Presets2026.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Presets2026.swift; sourceTree = "<group>"; };
 		7181652596619CAED237507C /* LUTBinaryFormat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LUTBinaryFormat.swift; sourceTree = "<group>"; };
 		7B9FCCF144502B6CE31EEE65 /* ImageMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageMetrics.swift; sourceTree = "<group>"; };
@@ -88,7 +92,9 @@
 		87AB576835F738501C46ABEF /* CaptureKit.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = CaptureKit.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		974CEF52E20F75DE7E945970 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		A20D982FA8DFEE3CDDDB8A6C /* Look.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Look.swift; sourceTree = "<group>"; };
+		A9ABF3A0194FF5B2BE28A6E2 /* FilmBorderRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmBorderRenderer.swift; sourceTree = "<group>"; };
 		B469E3A41A484B6791CEF286 /* RawDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RawDecoder.swift; sourceTree = "<group>"; };
+		CDCD07A5D251FF99CA92BFD0 /* FilmBorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmBorder.swift; sourceTree = "<group>"; };
 		E66900A823BAE6D7454F8C63 /* LogLook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogLook.swift; sourceTree = "<group>"; };
 		E76F9A995FEE177791EC26C3 /* CaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureService.swift; sourceTree = "<group>"; };
 		EF5625118DCDEA13BB4BE46C /* FilmLooks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmLooks.swift; sourceTree = "<group>"; };
@@ -143,6 +149,8 @@
 				413EA6473A1476FB86D562C5 /* ColorMath.swift */,
 				532A340E102CD794F657DD29 /* ContextAnalysis.swift */,
 				4CB4D2FFC28E45F108A39B3B /* Developer.swift */,
+				CDCD07A5D251FF99CA92BFD0 /* FilmBorder.swift */,
+				A9ABF3A0194FF5B2BE28A6E2 /* FilmBorderRenderer.swift */,
 				25E0ACA87DE487320CF89405 /* FilmFinisher.swift */,
 				EF5625118DCDEA13BB4BE46C /* FilmLooks.swift */,
 				7B9FCCF144502B6CE31EEE65 /* ImageMetrics.swift */,
@@ -156,6 +164,7 @@
 				05F2D975851B757B4BC6EE6E /* Renderer.swift */,
 				836F5F5A5A29E762D3633A6E /* RenderSettings.swift */,
 				5B1587A486053CA8A22D60E1 /* RollStocks.swift */,
+				6C3B7061D6F09A2035A291A7 /* StockRender.swift */,
 				4A6124EF90824DD6CAF22606 /* ToneMatch.swift */,
 			);
 			name = RawCore;
@@ -297,6 +306,8 @@
 				25F82EE03B64B49D259DDD2E /* ColorMath.swift in Sources */,
 				875C60419A94846F4106D7D2 /* ContextAnalysis.swift in Sources */,
 				AE219C93C9B487EB62457EB2 /* Developer.swift in Sources */,
+				DA6087613521CDD68828159B /* FilmBorder.swift in Sources */,
+				543929F1671F282465B2B592 /* FilmBorderRenderer.swift in Sources */,
 				F40984D818182383ECA1A969 /* FilmFinisher.swift in Sources */,
 				3A6CDCBD614859F79E764500 /* FilmLooks.swift in Sources */,
 				481D26A08F470F3ACC097811 /* ImageMetrics.swift in Sources */,
@@ -310,6 +321,7 @@
 				7DE4A9ECF172149648CDA57E /* RenderSettings.swift in Sources */,
 				317CBFF39A0022F28BFC8892 /* Renderer.swift in Sources */,
 				28EC09A8B7A0710A77FE7F1E /* RollStocks.swift in Sources */,
+				844D9CE173D85AD2CC9C132D /* StockRender.swift in Sources */,
 				34555159314B5556FA3EB6B9 /* ToneMatch.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

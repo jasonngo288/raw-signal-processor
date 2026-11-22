@@ -1264,3 +1264,163 @@ Defaults differ per model (sharpness, contrast, NR, shadowBias) → must be stor
   green before merge, and CI has not run on this branch (not pushed).
 - **Note:** regenerating the project while the local LUTs are in `Looks/` puts them back in. Move them aside first,
   or keep them outside `Sources/`.
+
+## 2026-11-21 — Film Border Renderer (new feature, branch feature/film-border from main)
+- **What:** spec `FILM_BORDER_RENDERER_SPEC.md` v1.0 (user, 2026-11-21) and the user's references: 3 hand-developed
+  film scans, plus 5 component references (deckle aged print, paper texture, edge burn, 35 mm strip, instant print).
+  - `Sources/RawCore/FilmBorder.swift` (pure Swift), the model:
+    - `FilmBorderConfiguration` (schema v1, Codable, `#RRGGBB` colours), split into the 5 independent components
+      `shape`, `paper`, `edge`, `filmEdge` and `layout`, plus `render.randomSeed`;
+    - validation (version, negative widths, top + bottom < 1, opening ≥ 50 %, paper inset) and clamping;
+    - `seeded(key)`, a stable per-photo seed;
+    - templates `classic_scan`, `aged_paper`, `film_negative`, `instant_print`;
+    - `FilmBorderLayout`: normalized layout, aspect-fit (the photo keeps its pixels) or aspect-fill with an
+      explicit crop fraction, preview long edge; for film, the strip follows the frame (holes left / right on
+      portrait);
+    - seeded outlines (irregular opening, deckle scallops), 35 mm sprocket geometry (4.75 mm pitch), frame number,
+      burn sides;
+    - `FilmBorderRecord`.
+  - `Sources/RawCore/FilmBorderRenderer.swift` (Core Image + Core Graphics / Core Text), back to front:
+    - backdrop → paper (colour × fibre × mottle, aging edge + stains, drawn specks) inside the paper outline;
+    - film base, holes and generic edge print ("n", "▶ nA", bars; no maker text);
+    - the photo inside the irregular opening (photo clamped so the wiggle never shows a gap);
+    - gate-shadow ring and wear nicks → edge burn (warm then amber lift, dark ragged edge) → drawn scan dust.
+  - Noise: CIRandomGenerator R − G (zero mean), sampled on a reference grid tied to the canvas short edge and
+    scaled, so texture keeps its print size at any resolution.
+  - `DecodeRecipe.border` (optional; old recipes decode).
+  - `raw-bench border <raw|image>... --template … --stock … --seed … --size … --paper … --texture … --frame-number …
+    --long-edge … --out …`.
+  - docs/ROADMAP.md: new "Post-develop stage" table. AGENTS layout updated. xcodeproj regenerated (2 new RawCore
+    files).
+- **Why not a DevelopPlugin (AGENTS rule 10):**
+  - it changes the canvas, and the spec requires it to stay independent of the film stock (§3, §14);
+  - "plugins = [] leaves the core untouched" holds trivially: Developer never calls it; the no-border export is
+    the plain develop output;
+  - listed in ROADMAP beside the CaptureKit option, which is the same kind of exception.
+- **Bugs found while building:**
+  - CIRandomGenerator's alpha is random; it broke the premultiplied multiply (grey blotches). Fields are made
+    opaque now.
+  - CIAdditionCompositing adds alpha (alpha 2 → paper clipped to white). The second term now gets alpha 0.
+  - The noise had a non-zero mean (fixed with R − G) and a std ≈ 2.65 × the analytic estimate (calibrated; test
+    `testNoiseFieldsAreZeroMeanUnitScale`).
+- **Evidence:**
+  - `swift test --filter FilmBorderTests` 10/10 pass.
+  - `swift build -c release` green.
+  - `xcodebuild … RawFilmDemo … generic/platform=iOS CODE_SIGNING_ALLOWED=NO` green.
+  - Renders of BVQX5524 / IMG_1901 / USER_mooncake, all templates at 2000 px long edge, judged by eye against the
+    references: 0.1–0.35 s each.
+- **Unverified:**
+  - Device (memory and time at 12 MP / 48 MP, oldest iPhone).
+  - Pixel identity across GPU / device: same-process identical in tests only.
+  - Tuning against real scans is by eye only, no metric.
+  - The user's review of the 4 templates.
+  - Edge burn colour on very warm scenes.
+  - The full `swift test` suite and CI were not run.
+
+## 2026-11-21 — Film border: round 2 (user: "mép còn bị cắt vuông quá"; art-director + product-designer review)
+- **Inputs:** user feedback (photo edge too square; Instant Print too empty). Two read-only reviews: an art director
+  who measured the reference scans with ffmpeg pixel profiles, and a product designer. Their notes are summarised
+  here; caption and share canvas are left as proposals.
+- **Edge (all templates, new `edge` fields):**
+  - `roughness` (fine serrations of a few px), `softness` (feather), `fringe` (warm line on parts of the edge);
+  - `rotation` (seeded scan tilt up to ±0.3°, reduced until 0.2 % of paper stays);
+  - `gateLine` (thin, jagged, broken dark line on ONE side, the same side for the roll);
+  - `lift` (light band inside the edge);
+  - wear is now paper-coloured (flaking), not grey; dust sits inside the photo only, except on film.
+- **classic_scan, from the reference measurements:**
+  - paper #FAF8F3, texture 0.015, mottle 0.02;
+  - borders top 0.006, bottom 0.011, left 0.005, right 0.007, with `layout.jitter` ±25 % per photo;
+  - tilt 0.3°, gate line 0.7, lift 0.1, darkening 0, softness 0.9, roughness 0.5, fringe 0.25.
+- **aged_paper:**
+  - #EFE8D6, texture 0.05, mottle 0.12, speckles 0.2, new drawn `fibres` 0.5, wear 0.05;
+  - deckle 54 lobes, depth 0.0045, lobe count made an integer (fixes the seam spike at the top-left);
+  - more jitter;
+  - contact shadow under any card with `paperInset`.
+- **film_negative:**
+  - base #D5D4D6, texture 0.015, frame gap 0.045;
+  - edge print in AvenirNextCondensed-Bold 2.4 mm, code blocks on the strip edge, only rotations so it never reads
+    mirrored (portrait print was mirrored), the same edge for the whole roll (`render.rollSeed`);
+  - frame number = `render.frameIndex`;
+  - burn only on the frame end, the same end for the roll; 3 % deep, smooth amber → orange → dark band with a slow
+    swell;
+  - burn strength by roll position: frames 1–2 ×2.4, last ×1.2, mid-roll 8 % at ×0.5 (`render.frameIndex` /
+    `rollLength`).
+- **instant_print:** `layout.instantFormats` picks the card by orientation, with aspect-fill only outside each
+  card's range:
+
+  | Photo | Card | Opening aspect | Top / bottom / side |
+  |---|---|---|---|
+  | landscape | wide | 1.25–1.8 | 0.08 / 0.17 / 0.042 |
+  | portrait | mini | 0.62–0.80 | 0.07 / 0.17 / 0.074 |
+  | square | square | 1:1 | 0.05 / 0.17 / 0.051 |
+
+  - A 4:3 or 3:4 phone photo is no longer cropped.
+  - Smooth #F4F3EF card, corner radius 0.008.
+- **CLI:** `raw-bench border --roll ID --frames N` numbers the frames in argument order.
+- **Evidence:**
+  - `swift test --filter FilmBorderTests` 11/11 pass (new: instant card by orientation; roll consistency: frame
+    numbers, burn rare mid-roll, one burn end per roll).
+  - Release build green.
+  - Renders judged by eye; corner zooms match the reference's serrated soft edge.
+- **Not done (proposals from the reviews):**
+  - share canvas for Instagram 4:5 / 1:1 / 9:16 (pad, never crop the border);
+  - handwritten instant caption (the spec lists captions as a non-goal for the MVP);
+  - neighbour-frame hint on the strip;
+  - hole rim;
+  - creases and cracks on aged paper.
+- **Unverified:** device performance, the user's visual approval, full `swift test`, CI.
+
+## 2026-11-22 — Film border: share canvas for Instagram (user: "Canvas chia sẻ cho Instagram")
+- **What:**
+  - `ShareCanvas` + `ShareCanvasLayout` (pure, FilmBorder.swift): aspects 4:5, 1:1, 9:16; margin 0.05 (the print fills
+    ≈ 90 % of the constraining side); backgrounds light #E4E1DA, dark #1C1B19, white; soft shadow; output width.
+    `instagram(_:)` presets are 1080 × 1350 / 1080 × 1080 / 1080 × 1920.
+  - Stories keep the print out of Instagram's UI zones (top 14 %, bottom 20 %).
+  - The print is scaled uniformly and centred, never cropped or stretched, so Instagram's own crop cannot cut the
+    border.
+  - `FilmBorderRenderer.share(_:canvas:)` pads a print. `renderForShare(_:configuration:canvas:)` renders border +
+    canvas in one call: the print's own backdrop (rounded corners, deckle margin, sprocket holes) takes the share
+    background, so no second box shows, and a card that already has a contact shadow gets no box shadow.
+  - `FilmBorderRecord.share` / `shareCanvasSize` added.
+  - CLI: `raw-bench border … --share 4x5,1x1,9x16 [--share-bg light|dark|white|#hex] [--share-width N]`; shared files
+    carry the recipe too (rule 1).
+- **Why:** product-designer review. A 3:4 portrait print uploaded as-is loses its top and bottom border to
+  Instagram's 4:5 crop. Padding onto a fixed-aspect canvas keeps the whole print.
+- **Evidence:**
+  - `swift test --filter FilmBorderTests` 13/13 pass (new `testShareCanvasNeverCropsThePrint` for 3 aspects × 4 print
+    shapes, and `testRenderForShare`).
+  - Release build green.
+  - 4 templates × 3 aspects rendered for BVQX5524 (landscape) and USER_mooncake (portrait), judged by eye.
+- **Unverified:** an actual Instagram upload; the user's choice of default background; device; full `swift test`;
+  CI.
+- **Decision (user, 2026-11-22):** the default share background is light (#E4E1DA), which is already the default of
+  `ShareCanvas` and `ShareCanvas.instagram(_:)`. Dark and white stay as options.
+
+## 2026-11-22 — App integration guide + `forFrame` helper
+- **What:**
+  - `FilmBorderConfiguration.forFrame(rollID:frameID:index:count:)` sets the per-frame seed from `rollID/frameID`, the
+    roll seed from `rollID`, and the frame position. Tested in `testOutlinesAreSeededAndStayInside`.
+  - `docs/FILM_BORDER_APP_INTEGRATION.md` is the guide for the agent that integrates the border into the host app:
+    Gate 0, rules, API, steps, UI ranges / swatches, share, tests, stop conditions.
+- **Evidence:** `swift test --filter FilmBorderTests` 13/13 pass.
+
+## 2026-11-22 — RSP 0.7.0: Film Border Renderer on top of 0.6.1 (main brought up to 0.6.1)
+- **What:**
+  - `main` fast-forwarded to tag 0.6.1. Tags 0.4.0–0.6.1 lived only on `feature/pipeline-v2-stage2`; uncommitted work
+    on that branch was not touched.
+  - `feature/film-border` merged; one conflict in `DecodeRecipe` (kept `exposureNormalizer`, `stockRender` and
+    `border`).
+  - `RawCore.engineVersion` 0.6.1 → 0.7.0 (+ LookArgumentsTests).
+  - xcodeproj regenerated: it also adds `StockRender.swift`, which the 0.6.1 project was missing.
+- **Why:** user decision 2026-11-22 ("đưa 0.6.1 vào main, rồi Film Border → 0.7.0"), so the app that pins 0.6.x can
+  move to a release with the border without losing pipeline v2.
+- **Evidence:**
+  - `swift build -c release` and `swift build --build-tests` green.
+  - `swift test --filter FilmBorderTests` 13/13 pass.
+- **Known failures, not from this merge:** `LookArgumentsTests.testRollStocksMatchTheBaselineAndLookArguments` has
+  19 fingerprint mismatches on this Mac. The untouched 0.6.1 tag gives the same 19 failures (checked in a detached
+  worktree), so they exist before this merge (baseline vs this machine / OS).
+- **Unverified:**
+  - The full `swift test` suite and CI on the merged tree.
+  - Device.
+  - The host app's integration (`docs/FILM_BORDER_APP_INTEGRATION.md`).
