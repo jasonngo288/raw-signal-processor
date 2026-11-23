@@ -107,7 +107,7 @@ final class FilmBorderTests: XCTestCase {
             if FilmBorderLayout.burnAmount(c) > 0 { ends.insert(l.burnSides(c)) }
             XCTAssertEqual(FilmBorderLayout.frameNumber(c), k, "edge print shows the real frame number")
         }
-        XCTAssertGreaterThan(amounts[0], 0.5); XCTAssertGreaterThan(amounts[1], 0.5)
+        XCTAssertGreaterThan(amounts[0], 2 * film.edge.burn); XCTAssertGreaterThan(amounts[1], 2 * film.edge.burn)   // frames 1–2 strong
         XCTAssertLessThanOrEqual(amounts[2..<35].filter { $0 > 0 }.count, 8, "mid-roll burns are rare")
         XCTAssertEqual(ends.count, 1, "same frame end burns for the whole roll")
         XCTAssertTrue(ends.first!.allSatisfy { $0 == 1 || $0 == 3 }, "landscape strip: burn on the frame ends only")

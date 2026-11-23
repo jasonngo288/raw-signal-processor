@@ -276,20 +276,20 @@ public enum FilmBorderTemplates {
     }()
 
     /// P1. Film strip, light (user 2026-11-23: "viền phim quá nặng"): the strip is shown as a scanner carrier does,
-    /// with a narrower rebate (0.13 of the canvas instead of the full 0.157 of a 35 mm strip), smaller and fainter
-    /// edge print, a lighter base, holes close to the base tone; the photo has the scanned film-frame edge. Edge burn on the
+    /// with a narrower rebate (0.10 of the canvas instead of the full 0.157 of a 35 mm strip; "nhẹ hơn nữa"
+    /// 2026-11-23), small faint edge print (0.3), a light base #E6E5E6 with holes barely lighter, softer burn (0.18); the photo has the scanned film-frame edge. Edge burn on the
     /// frame's leading edge, following the roll position (strong on frames 1–2).
     public static let filmNegative: FilmBorderConfiguration = {
         var c = FilmBorderConfiguration(id: "film_negative", displayName: "Film Negative")
-        c.filmEdge.enabled = true; c.filmEdge.markings = 0.45
-        c.filmEdge.baseColor = BorderColor(hex: "#DDDCDD")!
+        c.filmEdge.enabled = true; c.filmEdge.markings = 0.3
+        c.filmEdge.baseColor = BorderColor(hex: "#E6E5E6")!
         c.filmEdge.markingColor = BorderColor(hex: "#C9764A")!
         c.paper.textureStrength = 0.015; c.paper.mottleStrength = 0.05
         scanFrameEdge(&c)
-        c.edge.darkening = 0.12; c.edge.wear = 0.05; c.edge.dust = 0.08
-        c.edge.burn = 0.25; c.edge.burnEdges = 1
-        c.layout.top = 0.13; c.layout.bottom = 0.13; c.layout.left = 0.03; c.layout.right = 0.03
-        c.layout.backdrop = BorderColor(hex: "#EEEEEC")!
+        c.edge.darkening = 0.08; c.edge.wear = 0.05; c.edge.dust = 0.05
+        c.edge.burn = 0.18; c.edge.burnEdges = 1
+        c.layout.top = 0.10; c.layout.bottom = 0.10; c.layout.left = 0.025; c.layout.right = 0.025
+        c.layout.backdrop = BorderColor(hex: "#F1F1EF")!
         return c
     }()
 

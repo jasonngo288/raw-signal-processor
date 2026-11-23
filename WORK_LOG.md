@@ -1450,3 +1450,8 @@ Defaults differ per model (sharpness, contrast, NR, shadowBias) → must be stor
   - Builds green.
   - Renders of USER_mooncake (portrait) and BVQX5524 (landscape), all 4 templates, judged by eye.
 - **Unverified:** the user's approval on device / in the app; full `swift test`; CI.
+- **Follow-up, same day (user: "film negative nhẹ hơn nữa"):**
+  - rebate 0.13 → 0.10, frame gap 0.03 → 0.025;
+  - base #DDDCDD → #E6E5E6, backdrop / holes #F1F1EF;
+  - edge print 0.45 → 0.3, darkening 0.12 → 0.08, burn 0.25 → 0.18, dust 0.08 → 0.05.
+  - `FilmBorderTests` 13/13 pass.
