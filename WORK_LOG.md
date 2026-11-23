@@ -1455,3 +1455,16 @@ Defaults differ per model (sharpness, contrast, NR, shadowBias) → must be stor
   - base #DDDCDD → #E6E5E6, backdrop / holes #F1F1EF;
   - edge print 0.45 → 0.3, darkening 0.12 → 0.08, burn 0.25 → 0.18, dust 0.08 → 0.05.
   - `FilmBorderTests` 13/13 pass.
+
+## 2026-11-23 — RSP 0.7.1: film border tune
+- **What:**
+  - `feature/film-border-tune` merged into `main` (fast-forward on top of 0.7.0).
+  - `engineVersion` 0.7.0 → 0.7.1 (+ LookArgumentsTests).
+  - Contents: the scanned-film-frame photo edge on every template, aged paper edge to edge with less paper, and a
+    much lighter film strip (see the 2026-11-23 entries above).
+- **Evidence:**
+  - `swift build -c release` and `--build-tests` green.
+  - `swift test --filter FilmBorderTests` 13/13 pass.
+  - xcodeproj unchanged (no files added).
+- **Unverified:** full `swift test` (LookArgumentsTests' 19 fingerprint failures also occur on the untouched 0.6.1
+  tag); CI; the host app.
