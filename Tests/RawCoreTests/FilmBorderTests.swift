@@ -125,7 +125,9 @@ final class FilmBorderTests: XCTestCase {
         let holesP = port.sprocketHoles(t).holes
         XCTAssertTrue(holesP.allSatisfy { $0.maxX < port.opening.x || $0.x > port.opening.maxX }, "portrait: holes left / right")
         // 35 mm: 4.75 mm perforation pitch on each side.
-        XCTAssertEqual(Double(holesL.count / 2), Double(land.canvasWidth) / (Double(land.canvasHeight) / 35 * 4.75), accuracy: 1.5)
+        XCTAssertEqual(Double(holesL.count / 2), Double(land.canvasWidth) / (land.filmMillimetre * 4.75), accuracy: 1.5)
+        // Perforations stay inside the rebate, clear of the photo (user 2026-11-23: narrower, lighter strip).
+        XCTAssertTrue(holesL.allSatisfy { $0.y > 0 && $0.maxY < Double(land.canvasHeight) })
         XCTAssertTrue(land.sprocketHoles(FilmBorderTemplates.classicScan).holes.isEmpty, "no film edge, no holes")
     }
 
@@ -241,7 +243,10 @@ extension FilmBorderTests {
         XCTAssertEqual(r.image.extent.size, CGSize(width: 1080, height: 1350))
         XCTAssertEqual(r.record.shareCanvasSize, [1080, 1350])
         XCTAssertEqual(r.record.configuration.layout.backdrop, ShareCanvas.dark)
-        XCTAssertEqual(r.record.share?.shadow, 0, "aged card already has its own contact shadow")
+        XCTAssertEqual(r.record.share?.shadow, 0.4, "aged paper is edge to edge now (no own shadow): the share canvas adds one")
+        var inset = FilmBorderTemplates.agedPaper; inset.layout.paperInset = 0.02
+        let r2 = try FilmBorderRenderer.renderForShare(photo(1200, 800), configuration: inset, canvas: sc)
+        XCTAssertEqual(r2.record.share?.shadow, 0, "a card with its own contact shadow gets no extra box shadow")
         XCTAssertTrue(r.record.notes.last!.hasPrefix("share canvas 4x5 1080x1350"))
         // Corner pixel = the share background (dark).
         let px = try Renderer().linearImage(r.image.cropped(to: CGRect(x: 0, y: 0, width: 1, height: 1)))

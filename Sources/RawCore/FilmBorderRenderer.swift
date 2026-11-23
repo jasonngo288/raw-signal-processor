@@ -392,8 +392,8 @@ public enum FilmBorderRenderer {
     static func drawMarkings(_ ctx: CGContext, _ L: FilmBorderLayout, _ cfg: FilmBorderConfiguration, frame n: Int) {
         let W = CGFloat(L.canvasWidth), H = CGFloat(L.canvasHeight)
         let horizontal = L.filmHorizontal
-        let length = horizontal ? W : H, strip = horizontal ? H : W
-        let mm = strip / 35
+        let length = horizontal ? W : H
+        let mm = CGFloat(L.filmMillimetre)   // same scale as the perforations
         var side = BorderRandom(seed: cfg.render.rollSeed ?? cfg.render.randomSeed, stream: 8)
         let farSide = side.unit() < 0.5   // edge print sits on the same edge for the whole roll
         var r = BorderRandom(seed: cfg.render.randomSeed, stream: 16)
@@ -407,14 +407,14 @@ public enum FilmBorderRenderer {
         } else {
             ctx.translateBy(x: 0, y: H); ctx.rotate(by: -.pi / 2)                         // left edge, reads downward
         }
-        let font = CTFontCreateWithName("AvenirNextCondensed-Bold" as CFString, 2.4 * mm, nil)
+        let font = CTFontCreateWithName("AvenirNextCondensed-DemiBold" as CFString, 1.6 * mm, nil)
         func text(_ s: String, at x: CGFloat) {
             let attr = NSAttributedString(string: s, attributes: [
                 NSAttributedString.Key(kCTFontAttributeName as String): font,
                 NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true,
             ])
             let line = CTLineCreateWithAttributedString(attr)
-            ctx.textPosition = CGPoint(x: x, y: 0.2 * mm)
+            ctx.textPosition = CGPoint(x: x, y: 0.15 * mm)
             CTLineDraw(line, ctx)
         }
         let start = CGFloat(r.unit()) * 0.1 * length
@@ -424,7 +424,7 @@ public enum FilmBorderRenderer {
         var x = start + 0.72 * length
         for _ in 0..<12 {
             let w = (0.25 + CGFloat(r.unit()) * 0.6) * mm
-            if r.unit() < 0.7 { ctx.fill(CGRect(x: x, y: 0, width: w, height: 1.8 * mm)) }   // code blocks sit on the strip edge
+            if r.unit() < 0.7 { ctx.fill(CGRect(x: x, y: 0, width: w, height: 1.1 * mm)) }   // code blocks sit on the strip edge
             x += w + 0.3 * mm
         }
         ctx.restoreGState()

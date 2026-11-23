@@ -1424,3 +1424,29 @@ Defaults differ per model (sharpness, contrast, NR, shadowBias) → must be stor
   - The full `swift test` suite and CI on the merged tree.
   - Device.
   - The host app's integration (`docs/FILM_BORDER_APP_INTEGRATION.md`).
+
+## 2026-11-23 — Film border tune from app screenshots (branch feature/film-border-tune, after 0.7.0)
+- **User feedback, from app screenshots:**
+  1. film_negative: the film border is too heavy;
+  2. aged_paper: too much paper between photo and frame, and then "bỏ luôn viền trắng bên ngoài" (drop the white
+     backdrop around the card);
+  3. the photo edge in every border should look like a scanned film frame.
+- **Changes:**
+  - **New `FilmBorderTemplates.scanFrameEdge(_:strength:)`**, classic_scan's opening edge for every template:
+    irregularity 0.2, roughness 0.5, softness 0.9, gate line 0.7, lift 0.1, fringe 0.25, corner 0.003. Applied to
+    aged_paper and film_negative at 1×, instant_print at 0.6×.
+  - **aged_paper:** edge to edge, no backdrop (`paperInset` 0, straight worn edge instead of deckle, since a deckle
+    needs a backdrop); paper borders 0.07 / 0.075 / 0.05 → 0.04 / 0.045 / 0.032; the share canvas now gives it the
+    box shadow.
+  - **film_negative, lighter:**
+    - rebate 0.157 → 0.13; perforations and edge print now scale from the visible rebate (`filmMillimetre` =
+      rebate / 5.5 mm), so they never touch the photo;
+    - base #DDDCDD with holes close to the base tone (backdrop #EEEEEC);
+    - edge print 0.45 strength, #C9764A, AvenirNextCondensed-DemiBold 1.6 mm, bars 1.1 mm;
+    - frame gap 0.03, darkening 0.12.
+- **Evidence:**
+  - `swift test --filter FilmBorderTests` 13/13 pass (strip test checks holes inside the rebate; share test covers
+    an edge-to-edge card and an inset card).
+  - Builds green.
+  - Renders of USER_mooncake (portrait) and BVQX5524 (landscape), all 4 templates, judged by eye.
+- **Unverified:** the user's approval on device / in the app; full `swift test`; CI.
