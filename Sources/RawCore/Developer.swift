@@ -23,6 +23,8 @@ public final class Developer: @unchecked Sendable {
     public let renderer: Renderer
     public var plugins: PluginRegistry
     public var calibration: CalibrationTable
+    /// Stage 0-H tone-inversion strength (`HEICToneInverse`); only `raw-bench heic-pairs --tone-k` changes it. 0 = display transfer only.
+    public var heicToneK: Float = HEICToneInverse.defaultK
     /// Pipeline v2 stage 2 (fixed stock render), run by `finish` only with `exposureModel == .v2Normalizer`.
     /// Default = the skeleton pass-through (pixels unchanged). Set once in `init` (a `let`, so no develop can see it change).
     public let stockRenderer: any StockRenderer
@@ -808,7 +810,8 @@ public final class Developer: @unchecked Sendable {
             // exposure input). Before the look, so skin protection and qualityGuard compare against the stage-2 output.
             // TODO(stage 2): the stock LUT below still mixes stock identity (stage 2) and look (stage 3); split when the
             // stage-2 parameters exist.
-            let illuminant = IlluminantMetadata(context: base.context)
+            // A HEIC frame carries its own estimate (stage 0-H), not the RAW decode's CIRAWFilter neutral.
+            let illuminant = base.recipe.heicStage0?.illuminant ?? IlluminantMetadata(context: base.context)
             let r = try stockRenderer.render(image, stock: stock, illuminant: illuminant)
             image = r.image
             out.recipe.stockRender = StockRenderRecord(renderer: stockRenderer.id, stock: st.stock, illuminant: illuminant,

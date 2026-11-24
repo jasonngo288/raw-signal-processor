@@ -119,6 +119,10 @@ public struct RenderSettings: Codable, Equatable, Sendable {
     /// Parameters of the v2 normalizer (nil = `SceneNormalizer.Parameters.provisional`). Only read with `v2Normalizer`.
     /// For lab runs; every default is provisional until the User approves the numbers.
     public var sceneNormalizer: SceneNormalizer.Parameters?
+    /// The user's exposure compensation (EV) at the press, recorded by the host. Read ONLY by the HEIC entry (stage 0-H), and
+    /// only to record it: the bias is already inside the HEIC pixels, so nothing re-applies or cancels it. No RAW path reads it.
+    /// nil = unknown (omitted from the JSON).
+    public var userExposureBiasEV: Double?
 
     /// The model in effect (nil = legacy).
     public var resolvedExposureModel: ExposureModel { exposureModel ?? .legacy }
@@ -326,6 +330,8 @@ public struct DecodeRecipe: Codable, Equatable, Sendable {
     /// Pipeline v2 stage 2 (fixed stock render): renderer, stock, stage-0 illuminant metadata, components applied / pending.
     /// nil with the legacy exposure model (absent from the JSON, as in 0.4.0). Skeleton: pass-through, pixels unchanged.
     public var stockRender: StockRenderRecord? = nil
+    /// Stage 0-H (HEIC entry for selfie / front-camera frames): what was read and decided. nil on RAW frames (omitted from the JSON).
+    public var heicStage0: HEICStage0Record? = nil
     /// Film border applied after development (FilmBorderRenderer), nil = no border. Old recipes lack it.
     public var border: FilmBorderRecord? = nil
 

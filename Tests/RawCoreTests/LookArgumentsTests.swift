@@ -188,7 +188,7 @@ final class LookArgumentsTests: XCTestCase {
 
     /// SupportedLooks = the listed looks; engine version published.
     func testSupportedLooksAndEngineVersion() {
-        XCTAssertEqual(RawCore.engineVersion, "0.7.1")
+        XCTAssertEqual(RawCore.engineVersion, "0.8.0-rc1")
         XCTAssertEqual(SupportedLooks.all.map(\.id), FilmLooks2026.names)
         XCTAssertEqual(SupportedLooks.all.count, 26)
         XCTAssertEqual(SupportedLooks.named("monoSoft")?.isMonochrome, true)
