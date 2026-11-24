@@ -250,49 +250,58 @@ public enum FilmBorderTemplates {
         return c
     }()
 
-    /// P0. Cream paper with an irregular deckle edge, aging toward the edge, fibres, a few specks, a contact shadow
-    /// on a light backdrop.
+    /// Photo-opening edge shared by every template (user 2026-11-23: "viền ảnh … nên giống frame của film scan"):
+    /// the scanned film-frame edge of classic_scan — fine serrations, soft, slightly brighter just inside, a broken dark
+    /// gate line on one side, a warm fringe on parts of the edge, barely rounded corners.
+    static func scanFrameEdge(_ c: inout FilmBorderConfiguration, strength k: Float = 1) {
+        c.edge.irregularity = 0.2; c.edge.roughness = 0.5 * k; c.edge.softness = 0.9
+        c.edge.gateLine = 0.7 * k; c.edge.lift = 0.1 * k; c.edge.fringe = 0.25 * k
+        c.shape.openingCornerRadius = 0.003
+    }
+
+    /// P0. Aged cream paper print, edge to edge (user 2026-11-23: no white backdrop around the card, less paper
+    /// between photo and edge): straight worn paper edge, aging toward the edge, fibres, a few specks; the photo has
+    /// the scanned film-frame edge.
     public static let agedPaper: FilmBorderConfiguration = {
         var c = FilmBorderConfiguration(id: "aged_paper", displayName: "Aged Paper")
-        c.shape.outline = .deckle; c.shape.deckleDepth = 0.0045; c.shape.deckleCount = 54
-        c.shape.openingCornerRadius = 0.002
+        c.shape.outline = .straight
         c.paper.color = BorderColor(hex: "#EFE8D6")!
         c.paper.textureStrength = 0.05; c.paper.mottleStrength = 0.12; c.paper.agingStrength = 0.45
         c.paper.speckles = 0.2; c.paper.fibres = 0.5
-        c.edge.irregularity = 0.1; c.edge.roughness = 0.3; c.edge.softness = 0.3
+        scanFrameEdge(&c)
         c.edge.darkening = 0.06; c.edge.wear = 0.05; c.edge.dust = 0.05
-        c.layout.top = 0.07; c.layout.bottom = 0.075; c.layout.left = 0.05; c.layout.right = 0.05
-        c.layout.paperInset = 0.025; c.layout.jitter = 0.08
-        c.layout.backdrop = BorderColor(hex: "#F7F7F5")!
+        c.layout.top = 0.04; c.layout.bottom = 0.045; c.layout.left = 0.032; c.layout.right = 0.032
+        c.layout.paperInset = 0; c.layout.jitter = 0.08
         return c
     }()
 
-    /// P1. Film strip: smooth film base, sprocket holes and edge print, dark gate edge; edge burn on the frame's
-    /// leading edge, following the roll position (strong on frames 1–2).
+    /// P1. Film strip, light (user 2026-11-23: "viền phim quá nặng"): the strip is shown as a scanner carrier does,
+    /// with a narrower rebate (0.10 of the canvas instead of the full 0.157 of a 35 mm strip; "nhẹ hơn nữa"
+    /// 2026-11-23), small faint edge print (0.3), a light base #E6E5E6 with holes barely lighter, softer burn (0.18); the photo has the scanned film-frame edge. Edge burn on the
+    /// frame's leading edge, following the roll position (strong on frames 1–2).
     public static let filmNegative: FilmBorderConfiguration = {
         var c = FilmBorderConfiguration(id: "film_negative", displayName: "Film Negative")
-        c.filmEdge.enabled = true; c.filmEdge.markings = 0.7
-        c.filmEdge.baseColor = BorderColor(hex: "#D5D4D6")!
-        c.shape.openingCornerRadius = 0.006
+        c.filmEdge.enabled = true; c.filmEdge.markings = 0.3
+        c.filmEdge.baseColor = BorderColor(hex: "#E6E5E6")!
+        c.filmEdge.markingColor = BorderColor(hex: "#C9764A")!
         c.paper.textureStrength = 0.015; c.paper.mottleStrength = 0.05
-        c.edge.irregularity = 0.2; c.edge.roughness = 0.5; c.edge.softness = 0.4
-        c.edge.darkening = 0.3; c.edge.wear = 0.05; c.edge.dust = 0.1
-        c.edge.burn = 0.25; c.edge.burnEdges = 1
-        // Long sides carry the holes: 35 mm film is 35 mm wide with a 24 mm frame, so each long border is
-        // (35 − 24) / 2 / 35 ≈ 0.157 of the strip height. Frame gap ≈ 2 mm → 0.045 at each end.
-        c.layout.top = 0.157; c.layout.bottom = 0.157; c.layout.left = 0.045; c.layout.right = 0.045
-        c.layout.backdrop = BorderColor(hex: "#ECECEA")!
+        scanFrameEdge(&c)
+        c.edge.darkening = 0.08; c.edge.wear = 0.05; c.edge.dust = 0.05
+        c.edge.burn = 0.18; c.edge.burnEdges = 1
+        c.layout.top = 0.10; c.layout.bottom = 0.10; c.layout.left = 0.025; c.layout.right = 0.025
+        c.layout.backdrop = BorderColor(hex: "#F1F1EF")!
         return c
     }()
 
     /// P1. Instant print: card picked by the photo's orientation (wide / mini / square) so a phone photo is not cut
-    /// to a square; smooth off-white card, rounded corners. Dust only inside the photo.
+    /// to a square; smooth off-white card, rounded corners; the photo has a lighter scanned film-frame edge.
     public static let instantPrint: FilmBorderConfiguration = {
         var c = FilmBorderConfiguration(id: "instant_print", displayName: "Instant Print")
         c.paper.color = BorderColor(hex: "#F4F3EF")!
         c.paper.textureStrength = 0.015; c.paper.mottleStrength = 0.02
-        c.shape.paperCornerRadius = 0.008; c.shape.openingCornerRadius = 0.002
-        c.edge.irregularity = 0.12; c.edge.darkening = 0.12; c.edge.wear = 0; c.edge.dust = 0.01
+        c.shape.paperCornerRadius = 0.008
+        scanFrameEdge(&c, strength: 0.6)
+        c.edge.irregularity = 0.12; c.edge.darkening = 0.08; c.edge.wear = 0; c.edge.dust = 0.01
         c.layout.instantFormats = true; c.layout.fitMode = .aspectFill
         return c
     }()
@@ -591,9 +600,11 @@ public struct FilmBorderLayout: Equatable, Sendable {
         guard c.filmEdge.enabled, c.filmEdge.sprocketHoles else { return ([], 0) }
         let W = Double(canvasWidth), H = Double(canvasHeight)
         let horizontal = filmHorizontal   // strip runs along the frame's long side
-        let stripWidth = horizontal ? H : W   // 35 mm
-        let mm = stripWidth / 35
-        let pitch = 4.75 * mm, holeAlong = 1.98 * mm, holeAcross = 2.8 * mm, centre = 2.0 * mm + holeAcross / 2
+        let stripWidth = horizontal ? H : W
+        // Scale from the visible rebate (a 35 mm rebate is 5.5 mm), so a narrower rebate shrinks the perforations
+        // with it and they never touch the photo; holes centred in the rebate.
+        let mm = filmMillimetre
+        let pitch = 4.75 * mm, holeAlong = 1.98 * mm, holeAcross = 2.8 * mm, centre = rebate / 2
         let length = horizontal ? W : H
         let count = max(Int((length / pitch).rounded(.down)), 1)
         var r = BorderRandom(seed: c.render.randomSeed, stream: 5)
@@ -610,6 +621,13 @@ public struct FilmBorderLayout: Equatable, Sendable {
         }
         return (out, 0.5 * mm)
     }
+
+    /// Width of the narrower film rebate in px (between the strip edge and the photo).
+    public var rebate: Double {
+        filmHorizontal ? min(opening.y, Double(canvasHeight) - opening.maxY) : min(opening.x, Double(canvasWidth) - opening.maxX)
+    }
+    /// One "film millimetre" in px: the visible rebate is 5.5 mm, as on 35 mm film.
+    public var filmMillimetre: Double { rebate / 5.5 }
 
     /// Edge-marking frame number: the configured one, else derived from the seed (1...36).
     public static func frameNumber(_ cfg: FilmBorderConfiguration) -> Int {
