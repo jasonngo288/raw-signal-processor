@@ -136,6 +136,13 @@ public enum DecisionEngine {
         public static let darkMedianStops = -5.35
         public static let veryHighISO = 1600.0
         public static let landscapeLabelConfidence = 0.5
+        /// Vision classifier labels that mean "a person is in the frame". Their best confidence fades the +0.05 landscape
+        /// look boost out through `labelRamp` (0.4...0.6, same ramp as the other label terms): boost x (1 - ramp). A person mask
+        /// can miss a small subject; skin protection and the 3 % / 1.5-4.5 % ramp are untouched.
+        /// Evidence (device roll 8FDA6B37, mask missed: face 0, pf ~0): people/adult f01 0.79, f03 0.63, f08 0.65, f10 0.73
+        /// (frames with a landscape label); frame_inventory.json F82B f3 0.90. f04 0.46 and f09 0.47 have no landscape label,
+        /// so the boost never applied there. Frames with no people/adult label keep the old path unchanged.
+        public static let peopleLabels: Set<String> = ["people", "adult"]
         public static let landscapeLabels: Set<String> = ["sky", "land", "mountain", "hill", "beach", "grass", "field", "sunset", "sunrise", "ocean", "lake", "forest"]
         public static let lookIntensityRange: ClosedRange<Float> = -0.15...0.10
         /// Score ramps (smoothstep), centred on the thresholds above. Dark: 0 at −4.6, 1 at −6.1 stops (ends inside
@@ -168,7 +175,23 @@ public enum DecisionEngine {
         add(-0.05, p.people, String(format: "people %.2f (mask %.1f%%, face %.1f%%; on top of skin protection)", p.people,
                                     (c.personFraction ?? 0) * 100, (c.largestFaceArea ?? 0) * 100))
         // Landscape only where there are no people and it is not dark (people and night win, as before).
-        add(0.05, p.landscape * (1 - p.people) * (1 - p.night), String(format: "landscape %.2f (%@), x no-people x not-dark", p.landscape, p.landscapeLabel ?? "none"))
+        // A high people label also vetoes it: the mask / face signal can miss a small subject (TASK-02 b).
+        let landscapeText = String(format: "landscape %.2f (%@), x no-people x not-dark", p.landscape, p.landscapeLabel ?? "none")
+        let fullBoost = p.landscape * (1 - p.people) * (1 - p.night)
+        if let pl = (c.labels ?? [:]).filter({ Threshold.peopleLabels.contains($0.key) }).max(by: { $0.value < $1.value }),
+           pl.value > Threshold.labelRamp.lowerBound {
+            let fade = ScenePrediction.ramp(pl.value, from: Threshold.labelRamp.lowerBound, to: Threshold.labelRamp.upperBound)
+            let kept = fullBoost * (1 - fade)
+            if 0.05 * Float(fullBoost) >= 0.0005 {   // the boost would have shown up: say how it was reduced
+                if 0.05 * Float(kept) >= 0.0005 {
+                    add(0.05, kept, String(format: "%@, x (1 - people label %@ %.2f ramp %.2f)", landscapeText, pl.key, pl.value, fade))
+                } else {
+                    why.append(String(format: "%@ boost skipped: people label %@ %.2f (ramp %.2f) -> look +0.000", landscapeText, pl.key, pl.value, fade))
+                }
+            }
+        } else {
+            add(0.05, fullBoost, landscapeText)
+        }
         let r = Threshold.lookIntensityRange
         let clamped = min(max(off, r.lowerBound), r.upperBound)
         if abs(clamped - off) > 1e-6 { why.append(String(format: "look offset %.3f clamped to %.2f", off, clamped)) }
@@ -238,6 +261,7 @@ public enum DecisionEngine {
         if st.lookIntensityOffset == nil {
             let (off, r) = lookIntensityOffset(context: c)
             if off != 0 { st.lookIntensityOffset = off; why += r }
+            else if r.contains(where: { $0.contains("boost skipped") }) { why += r }   // gate removed the whole boost: keep the reason
         }
         if why.isEmpty { why.append("no rule fired: Apple defaults kept (explicit)") }
         why.append(c.prediction.summary)
@@ -492,6 +516,14 @@ public struct PersonMaskDiagnostics: Codable, Sendable, Equatable {
     public var maxValue: Int?
     public var nonZeroPixels: Int?
     public var pixelsAtLeast128: Int?
+    /// Which Vision quality produced the mask the render uses (nil on failures / old data).
+    public enum Source: String, Codable, Sendable { case balanced, fastFallback }
+    public var source: Source?
+    /// Stats of `.balanced` / `.fast` when the fast fallback ran (balanced was empty). The main fields above describe the used mask.
+    public var balancedMaxValue: Int?
+    public var balancedPixelsAtLeast128: Int?
+    public var fastMaxValue: Int?
+    public var fastPixelsAtLeast128: Int?
 
     public init(status: Status, error: String? = nil) { self.status = status; self.error = error }
 
@@ -501,7 +533,12 @@ public struct PersonMaskDiagnostics: Codable, Sendable, Equatable {
     public var summary: String {
         switch status {
         case .ok:
-            return "ok, \(width ?? 0)x\(height ?? 0), max \(maxValue ?? 0), non-zero \(nonZeroPixels ?? 0) px, >=128 \(pixelsAtLeast128 ?? 0) px"
+            var t = "ok, \(width ?? 0)x\(height ?? 0), max \(maxValue ?? 0), non-zero \(nonZeroPixels ?? 0) px, >=128 \(pixelsAtLeast128 ?? 0) px"
+            if let s = source { t += ", source \(s.rawValue)" }
+            if let bm = balancedMaxValue {
+                t += ", balanced max \(bm) >=128 \(balancedPixelsAtLeast128 ?? 0) px, fast max \(fastMaxValue.map(String.init) ?? "n/a") >=128 \(fastPixelsAtLeast128 ?? 0) px"
+            }
+            return t
         case .requestFailed: return "Vision person request failed (\(error ?? "unknown")): no mask"
         case .noResult: return "Vision person request returned no result: no mask"
         case .noCGImage: return "no CGImage for Vision: person mask not run"

@@ -39,7 +39,7 @@ public final class Developer: @unchecked Sendable {
     /// unless `staleReason` says it no longer fits the render.
     public struct Analysis: Codable, @unchecked Sendable {
         /// Bumped when what an analysis measures changes; an older stored analysis is re-made.
-        public static let currentSchema = 6   // 6: personMaskDiag (Vision person mask status + measurements), person mask read as linear coverage; 5: displayClippedFraction on the camera HEIC (old value -> appleDecodeClippedFraction), ev100 + fNumber; 4: sky mask
+        public static let currentSchema = 7   // 7: person mask falls back to Vision .fast when .balanced is empty (personMaskDiag.source + both levels' stats); 6: personMaskDiag (Vision person mask status + measurements), person mask read as linear coverage; 5: displayClippedFraction on the camera HEIC (old value -> appleDecodeClippedFraction), ev100 + fNumber; 4: sky mask
         public static let fileName = "analysis.json"
         public static let maskFileName = "person-mask.png"
         public static let skyMaskFileName = "sky-mask.png"
@@ -1051,10 +1051,34 @@ public enum VisionAnalyzer {
         }
         var d = PersonMaskDiagnostics(status: .ok)
         d.measure(buf)
+        d.source = .balanced
+        var chosen = buf
+        // Option (a): on rear-camera frames `.balanced` can return an empty mask for small/distant people while `.fast`
+        // finds them. Only when balanced has no pixel >= 128, run `.fast` on the same input; use it if it has any.
+        // Its buffer is smaller (about 192x256); every consumer (areaMean, protectSkin, skinMedianL, lightLeak) rescales the
+        // mask to the image extent, so the size difference is harmless. The persisted PNG keeps the fast mask's native size.
+        if d.maskIsEmpty {
+            d.balancedMaxValue = d.maxValue; d.balancedPixelsAtLeast128 = d.pixelsAtLeast128
+            let fast = VNGeneratePersonSegmentationRequest()
+            fast.qualityLevel = .fast
+            fast.outputPixelFormat = kCVPixelFormatType_OneComponent8
+            let ok = timed("visionPersonFast") { (try? handler.perform([fast])) != nil }
+            if ok, let fbuf = fast.results?.first?.pixelBuffer {
+                var fd = PersonMaskDiagnostics(status: .ok)
+                fd.measure(fbuf)
+                d.fastMaxValue = fd.maxValue; d.fastPixelsAtLeast128 = fd.pixelsAtLeast128
+                if !fd.maskIsEmpty {
+                    fd.source = .fastFallback
+                    fd.balancedMaxValue = d.balancedMaxValue; fd.balancedPixelsAtLeast128 = d.balancedPixelsAtLeast128
+                    fd.fastMaxValue = d.fastMaxValue; fd.fastPixelsAtLeast128 = d.fastPixelsAtLeast128
+                    d = fd; chosen = fbuf
+                }
+            }
+        }
         ctx.personMaskDiag = d
         // Vision's 8-bit values are coverage (0..255 = 0..1), not display-encoded grey: no colour management, so
         // 128 stays 128 in the PNG and ~0.5 in `areaMean` (same convention as the sky mask, `Renderer.linearGray`).
-        return CIImage(cvPixelBuffer: buf, options: [.colorSpace: NSNull()])
+        return CIImage(cvPixelBuffer: chosen, options: [.colorSpace: NSNull()])
     }
 }
 #endif
