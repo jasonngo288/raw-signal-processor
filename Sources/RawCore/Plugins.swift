@@ -50,7 +50,7 @@ public struct PluginRenderContext {
     /// Decodes the same file scene-linear (Apple's tone removed) with this render's colour, white balance and exposure.
     public var decodeSceneLinear: (() throws -> CIImage)? = nil
     /// Vision person mask of the analysis (any size), when the caller has one. Used by `lightLeak` (x0.4 inside it).
-    /// OPEN: Developer.swift does not fill it yet, so the leak is not attenuated on people until it does.
+    /// `Developer.finish` fills it from the analysis (nil when Vision gave no mask or the frame was not analysed).
     public var personMask: CIImage? = nil
     /// The image before the look (finish stage only): what `qualityGuard` compares the finished image with.
     public var lookBase: CIImage? = nil
@@ -307,9 +307,12 @@ public struct LightLeakPlugin: DevelopPlugin {
         var why = [LightLeakPlanner.describe(plan, frame: frame, count: count, rollID: roll)]
         guard let leak = plan.leak else { return (image, why) }
         let out = FilmFinisher.lightLeak(image, spec: spec, leak: leak, personMask: ctx.personMask)
+        // The leak is scaled by (1 - (1 - personFactor) * mask), so a weak mask (no pixel >= 128) only attenuates partly: say so, not "x0.40".
+        let maskEmpty = ctx.personMask != nil && (ctx.scene?.personMaskDiag?.maskIsEmpty ?? false)
         why.append(String(format: "screen in linear light, peak add %.3f (%.2f x %.2f amount x %.2f strength), ceiling %.2f encoded, person mask %@",
                           spec.peakAdd * spec.amount * leak.strength, spec.peakAdd, spec.amount, leak.strength, spec.encodedCap,
-                          ctx.personMask != nil ? String(format: "x%.2f", spec.personFactor) : "not available: no attenuation"))
+                          maskEmpty ? String(format: "weak (no pixel >= 128): partial attenuation only, factor between x%.2f and x1.00", spec.personFactor)
+                              : ctx.personMask != nil ? String(format: "x%.2f", spec.personFactor) : "not available: no attenuation"))
         return (out, why)
     }
 }

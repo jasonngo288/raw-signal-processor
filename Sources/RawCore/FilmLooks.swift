@@ -467,7 +467,7 @@ public enum FilmLooks2026 {
 
 /// Engine identity the host app checks its stock catalog against (`minEngine` <= `engineVersion`).
 public enum RawCore {
-    public static let engineVersion = "0.8.1"
+    public static let engineVersion = "0.8.2"
 }
 
 /// A look a host app may name in a stock (`RenderSettings.stock` + `lookArguments`), with its defaults.

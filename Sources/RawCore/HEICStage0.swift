@@ -262,6 +262,8 @@ extension Developer {
         if let cg = renderer.cgImage(s1024) {
             mask = VisionAnalyzer.enrich(&c, image: cg)
             if let mask { c.personFraction = renderer.areaMean(mask) }
+        } else {
+            c.personMaskDiag = .init(status: .noCGImage)
         }
         #endif
         var sky: CIImage?
@@ -337,6 +339,7 @@ extension Developer {
         } else {
             a = try analyze(heic: url)
         }
+        if let d = a.context.personMaskDiag { reasons.append("[personMask] " + d.summary) }
         // Scene rules that do not touch a decode (people -> skin protection, scene -> look intensity): the same
         // DecisionEngine as the RAW path. No decode support is declared, so no decode parameter can change.
         let d = DecisionEngine.decide(context: a.context, defaults: a.defaults, support: a.support, base: st)

@@ -38,6 +38,8 @@ public struct SceneContext: Codable, Equatable, Sendable {
     public var exposureTime: Double? = nil
     /// Share of the frame covered by people (Vision person segmentation, mean of the mask).
     public var personFraction: Double? = nil
+    /// What the Vision person-segmentation step did and what the mask it returned measured. nil = not run (older analysis).
+    public var personMaskDiag: PersonMaskDiagnostics? = nil
     /// Union of Vision attention-saliency boxes, normalised [x, y, w, h] (origin bottom-left).
     public var saliencyBox: [Double]? = nil
     /// 64-bin histogram (GPU, CIAreaHistogram) of display-encoded luminance of the 512 px Apple render;
@@ -476,3 +478,60 @@ public extension SceneContext {
     /// Scores derived from this context (computed, not stored).
     var prediction: ScenePrediction { ScenePrediction(context: self) }
 }
+
+/// Diagnostics of the Vision person mask (status plus measurements of the raw 8-bit `CVPixelBuffer`). Diagnosis only:
+/// nothing in the render reads it except the recipe lines.
+public struct PersonMaskDiagnostics: Codable, Sendable, Equatable {
+    public enum Status: String, Codable, Sendable { case ok, requestFailed, noResult, noCGImage }
+    public var status: Status
+    /// `domain code` of the Vision error when the request failed (no message text).
+    public var error: String?
+    public var width: Int?
+    public var height: Int?
+    /// Largest pixel value (0...255) of the mask buffer.
+    public var maxValue: Int?
+    public var nonZeroPixels: Int?
+    public var pixelsAtLeast128: Int?
+
+    public init(status: Status, error: String? = nil) { self.status = status; self.error = error }
+
+    /// True when a mask exists but not one pixel reaches 128.
+    public var maskIsEmpty: Bool { status == .ok && (pixelsAtLeast128 ?? 0) == 0 }
+
+    public var summary: String {
+        switch status {
+        case .ok:
+            return "ok, \(width ?? 0)x\(height ?? 0), max \(maxValue ?? 0), non-zero \(nonZeroPixels ?? 0) px, >=128 \(pixelsAtLeast128 ?? 0) px"
+        case .requestFailed: return "Vision person request failed (\(error ?? "unknown")): no mask"
+        case .noResult: return "Vision person request returned no result: no mask"
+        case .noCGImage: return "no CGImage for Vision: person mask not run"
+        }
+    }
+}
+
+#if canImport(CoreVideo)
+import CoreVideo
+extension PersonMaskDiagnostics {
+    /// Measures a OneComponent8 buffer (size, max, non-zero count, count >= 128).
+    mutating func measure(_ buf: CVPixelBuffer) {
+        let w = CVPixelBufferGetWidth(buf), h = CVPixelBufferGetHeight(buf)
+        width = w; height = h
+        guard CVPixelBufferGetPixelFormatType(buf) == kCVPixelFormatType_OneComponent8,
+              CVPixelBufferLockBaseAddress(buf, .readOnly) == kCVReturnSuccess else { return }
+        defer { CVPixelBufferUnlockBaseAddress(buf, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(buf) else { return }
+        let stride = CVPixelBufferGetBytesPerRow(buf)
+        var mx = 0, nz = 0, hi = 0
+        for y in 0..<h {
+            let row = base.advanced(by: y * stride).assumingMemoryBound(to: UInt8.self)
+            for x in 0..<w {
+                let v = Int(row[x])
+                if v > mx { mx = v }
+                if v != 0 { nz += 1 }
+                if v >= 128 { hi += 1 }
+            }
+        }
+        maxValue = mx; nonZeroPixels = nz; pixelsAtLeast128 = hi
+    }
+}
+#endif

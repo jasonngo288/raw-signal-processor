@@ -39,7 +39,7 @@ public final class Developer: @unchecked Sendable {
     /// unless `staleReason` says it no longer fits the render.
     public struct Analysis: Codable, @unchecked Sendable {
         /// Bumped when what an analysis measures changes; an older stored analysis is re-made.
-        public static let currentSchema = 5   // 5: displayClippedFraction on the camera HEIC (old value -> appleDecodeClippedFraction), ev100 + fNumber; 4: sky mask
+        public static let currentSchema = 6   // 6: personMaskDiag (Vision person mask status + measurements), person mask read as linear coverage; 5: displayClippedFraction on the camera HEIC (old value -> appleDecodeClippedFraction), ev100 + fNumber; 4: sky mask
         public static let fileName = "analysis.json"
         public static let maskFileName = "person-mask.png"
         public static let skyMaskFileName = "sky-mask.png"
@@ -60,6 +60,9 @@ public final class Developer: @unchecked Sendable {
         /// Heuristic sky mask (plugin `skyMask`, `SkyMask.version` in `context`), 8-bit grey. Stored as `sky-mask.png`;
         /// absent when the frame has no sky or the plugin was off (the context says which).
         public var skyMask: CIImage? = nil
+        /// Seconds per analysis step (decode 512 / 1024, Vision requests, EDR, camera reference). DEBUG builds only; never
+        /// encoded (not in `CodingKeys`), so it is not in `analysis.json`.
+        public var timings: [String: Double]? = nil
 
         enum CodingKeys: String, CodingKey {
             case schema, context, defaults, support, seconds, decoderVersion, plugins, sourceFile, sourceBytes
@@ -82,6 +85,9 @@ public final class Developer: @unchecked Sendable {
             }
             if let v = context.skyMaskVersion, v != SkyMask.version { return "sky mask version \(v) != \(SkyMask.version)" }
             if (context.skyFraction ?? 0) >= SkyMask.minCoverage, skyMask == nil { return "sky mask image missing" }
+            // `personFraction` is only set when Vision produced a mask, and `write` always stores that mask as a PNG, so a
+            // fraction without the image means the PNG was lost (an all-zero mask still has its PNG: not stale).
+            if context.personFraction != nil, personMask == nil { return "person mask image missing" }
             return nil
         }
 
@@ -165,10 +171,20 @@ public final class Developer: @unchecked Sendable {
     /// does not need the HEIC file at develop time.
     public func analyze(url: URL, decoderVersion: String? = nil, cameraReference: String? = nil) throws -> Analysis {
         let t0 = Date()
+        var timings: [String: Double]?
+        #if DEBUG
+        timings = [:]
+        #endif
+        func timed<T>(_ key: String, _ body: () throws -> T) rethrows -> T {
+            #if DEBUG
+            let t = Date(); defer { timings?[key] = Date().timeIntervalSince(t) }
+            #endif
+            return try body()
+        }
         // Measure on the same decoder version the render will use (requested, else DecoderPolicy).
         let decoderVersion = try decoder.pinnedVersion(url: url, requested: decoderVersion)
         let s512 = try decoder.scaleFactor(url: url, longEdge: 512)
-        let lin = try decoder.decode(url: url, settings: RenderSettings(mode: .sceneLinear, decoderVersion: decoderVersion), scaleFactor: s512)
+        let lin = try timed("decode512") { try decoder.decode(url: url, settings: RenderSettings(mode: .sceneLinear, decoderVersion: decoderVersion), scaleFactor: s512) }
         let sceneLin = try renderer.linearImage(lin.image)
         var c = SceneContext.measure(sceneLinear: sceneLin, iso: lin.recipe.iso)
         c.exposureTime = lin.recipe.exposureTime
@@ -178,7 +194,7 @@ public final class Developer: @unchecked Sendable {
         // Apple's display render, once, at the size cameraMatch compares at (CameraMatchPlugin.histogramLongEdge):
         // display clipping, the luma histogram and Vision all read it (was a separate 512 px decode, 2026-11-09).
         let sDisp = try decoder.scaleFactor(url: url, longEdge: Int(CameraMatchPlugin.histogramLongEdge))
-        let disp = try decoder.decode(url: url, settings: RenderSettings(mode: .appleDefault, decoderVersion: decoderVersion), scaleFactor: sDisp)
+        let disp = try timed("decode1024") { try decoder.decode(url: url, settings: RenderSettings(mode: .appleDefault, decoderVersion: decoderVersion), scaleFactor: sDisp) }
         c.appleDecodeClippedFraction = SceneContext.clippedFraction(try renderer.linearImage(disp.image))
         c.fNumber = try? fNumber(url)
         c.ev100 = SceneNormalizer.ev100(fNumber: c.fNumber, exposureTime: c.exposureTime, iso: c.iso)
@@ -188,8 +204,10 @@ public final class Developer: @unchecked Sendable {
         var mask: CIImage?
         #if canImport(Vision)
         if let cg = renderer.cgImage(disp.image) {
-            mask = VisionAnalyzer.enrich(&c, image: cg)
+            mask = VisionAnalyzer.enrich(&c, image: cg, timings: &timings)
             if let mask { c.personFraction = renderer.areaMean(mask) }
+        } else {
+            c.personMaskDiag = .init(status: .noCGImage)
         }
         #endif
 
@@ -217,18 +235,22 @@ public final class Developer: @unchecked Sendable {
         if plugins.defaultEnabled.contains("highlightRecovery") {   // plugin work only when the plugin is on
             var edr = RenderSettings(mode: .explicit, decoderVersion: decoderVersion)
             edr.extendedDynamicRangeAmount = 1
-            let e = try decoder.decode(url: url, settings: edr, scaleFactor: s512)
+            let e = try timed("decodeEDR") { try decoder.decode(url: url, settings: edr, scaleFactor: s512) }
             c.edrHeadroom = SceneContext.headroom(try renderer.linearImage(e.image))
         }
         if let ref = cameraReference {
-            c.cameraReferenceHistogram = CameraMatchPlugin.referenceHistogram(ref, renderer: renderer, bins: c.lumaHistogram?.count ?? 64)
-            c.cameraReferenceHistogramFine = CameraMatchPlugin.referenceHistogram(ref, renderer: renderer, bins: CameraMatchPlugin.fineBins)
+            timed("cameraReference") {
+                c.cameraReferenceHistogram = CameraMatchPlugin.referenceHistogram(ref, renderer: renderer, bins: c.lumaHistogram?.count ?? 64)
+                c.cameraReferenceHistogramFine = CameraMatchPlugin.referenceHistogram(ref, renderer: renderer, bins: CameraMatchPlugin.fineBins)
+            }
             c.displayClippedFraction = c.cameraReferenceHistogramFine.flatMap { SceneContext.histogramFraction($0, atOrAboveLinear: SceneContext.clipLevel) }
         }
         let bytes = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value
-        return Analysis(context: c, defaults: lin.recipe.defaults, support: lin.recipe.support,
-                        seconds: Date().timeIntervalSince(t0), decoderVersion: decoderVersion, plugins: plugins.defaultEnabled,
-                        sourceFile: url.lastPathComponent, sourceBytes: bytes, personMask: mask, skyMask: sky)
+        var made = Analysis(context: c, defaults: lin.recipe.defaults, support: lin.recipe.support,
+                            seconds: Date().timeIntervalSince(t0), decoderVersion: decoderVersion, plugins: plugins.defaultEnabled,
+                            sourceFile: url.lastPathComponent, sourceBytes: bytes, personMask: mask, skyMask: sky)
+        made.timings = timings
+        return made
     }
 
     /// Calibration keys for a file: model identifier, DNG UniqueCameraModel, "Make Model".
@@ -352,6 +374,7 @@ public final class Developer: @unchecked Sendable {
             } else {
                 a = try analyze(url: url, decoderVersion: settings.decoderVersion)
             }
+            if let d = a.context.personMaskDiag { reasons.append("[personMask] " + d.summary) }
             // Everything the caller set is kept; DecisionEngine only adds/overrides bounded decode values.
             var base = settings
             if v2 { base.exposure = nil }
@@ -974,8 +997,16 @@ import Vision
 public enum VisionAnalyzer {
     /// Faces, classification, attention saliency and person segmentation. Returns the person mask (nil if Vision
     /// could not produce one). Each request runs on its own: one failing (e.g. no ANE in CI) leaves only its fields nil.
+    /// What the person request did is left in `ctx.personMaskDiag` (status, error code, mask measurements); this never
+    /// changes `personFraction` or any decision. `timings` (DEBUG callers only) gets seconds per request.
     @discardableResult
     public static func enrich(_ ctx: inout SceneContext, image: CGImage) -> CIImage? {
+        var none: [String: Double]? = nil
+        return enrich(&ctx, image: image, timings: &none)
+    }
+
+    @discardableResult
+    static func enrich(_ ctx: inout SceneContext, image: CGImage, timings: inout [String: Double]?) -> CIImage? {
         let handler = VNImageRequestHandler(cgImage: image, options: [:])
         let faces = VNDetectFaceRectanglesRequest()
         let classify = VNClassifyImageRequest()
@@ -984,25 +1015,46 @@ public enum VisionAnalyzer {
         person.qualityLevel = .balanced
         person.outputPixelFormat = kCVPixelFormatType_OneComponent8
 
+        func timed<T>(_ key: String, _ body: () -> T) -> T {
+            let t = Date(); let r = body()
+            if timings != nil { timings?[key] = Date().timeIntervalSince(t) }
+            return r
+        }
         ctx.faceCount = nil; ctx.largestFaceArea = nil; ctx.labels = nil; ctx.saliencyBox = nil
-        if (try? handler.perform([faces])) != nil {
+        if timed("visionFaces", { (try? handler.perform([faces])) != nil }) {
             let rects = faces.results ?? []
             ctx.faceCount = rects.count
             ctx.largestFaceArea = rects.map { Double($0.boundingBox.width * $0.boundingBox.height) }.max() ?? 0
         }
-        if (try? handler.perform([classify])) != nil {
+        if timed("visionClassify", { (try? handler.perform([classify])) != nil }) {
             var labels: [String: Double] = [:]
             for o in (classify.results ?? []) where o.confidence >= 0.3 { labels[o.identifier] = Double(o.confidence) }
             ctx.labels = labels
         }
-        if (try? handler.perform([saliency])) != nil, let objs = saliency.results?.first?.salientObjects, let first = objs.first {
+        if timed("visionSaliency", { (try? handler.perform([saliency])) != nil }), let objs = saliency.results?.first?.salientObjects, let first = objs.first {
             let u = objs.dropFirst().reduce(first.boundingBox) { $0.union($1.boundingBox) }
             ctx.saliencyBox = [u.minX, u.minY, u.width, u.height].map { Double($0) }
         }
-        if (try? handler.perform([person])) != nil, let buf = person.results?.first?.pixelBuffer {
-            return CIImage(cvPixelBuffer: buf)
+        var failure: Error?
+        let performed = timed("visionPerson") { () -> Bool in
+            do { try handler.perform([person]); return true } catch { failure = error; return false }
         }
-        return nil
+        guard performed else {
+            ctx.personMaskDiag = .init(status: .requestFailed, error: failure.map { e in
+                let n = e as NSError; return "\(n.domain) \(n.code)"   // domain + code only: no message text, no paths
+            })
+            return nil
+        }
+        guard let buf = person.results?.first?.pixelBuffer else {
+            ctx.personMaskDiag = .init(status: .noResult)
+            return nil
+        }
+        var d = PersonMaskDiagnostics(status: .ok)
+        d.measure(buf)
+        ctx.personMaskDiag = d
+        // Vision's 8-bit values are coverage (0..255 = 0..1), not display-encoded grey: no colour management, so
+        // 128 stays 128 in the PNG and ~0.5 in `areaMean` (same convention as the sky mask, `Renderer.linearGray`).
+        return CIImage(cvPixelBuffer: buf, options: [.colorSpace: NSNull()])
     }
 }
 #endif
