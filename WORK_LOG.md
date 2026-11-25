@@ -2,6 +2,14 @@
 
 Newest first. Each entry: what changed, why, evidence, what is NOT verified yet.
 
+## 2026-11-25 — 0.8.1: citrus2 retune for sunstruck tropical punch, clean whites, deep blacks
+- **What:** `citrus2` (FilmLooks.swift) retuned to deliver on its "Bright clean whites" character:
+  - CCT 5350K (was 5600K) + highlightTint (0, 0) (was gold 0.003) for pure neutral clean whites without Daybreak warmth.
+  - Contrast 1.30 (was 1.26), pivot 0.44, shoulder 0.92, black 0.0 for deep punchy film blacks.
+  - Saturation 1.22 (was 1.12), golden yellow band 82 x1.35, zesty lime band 110 shift +4 x1.45, foliage 145 shift -8 x1.25, cyan water 215 x1.18, blue sky 255 shift -2 x1.20.
+  - Skin bands 28 and 55 chroma 0.92 to preserve natural skin tones under vivid master saturation.
+  - `RawCore.engineVersion` = "0.8.1".
+
 ## 2026-11-19 — 0.6.1: per-frame grain seed, guard preview without grain (User decisions 2026-11-19; not committed)
 - **What:** `LookArguments.grainSeed: UInt32?` (RollStocks.swift:210, merged at :265 into `FilmFinish.grainSeed`). nil = the
   look's seed 1, pixel-identical to 0.6.0; absent from the arguments JSON when nil. The seed used is in the recipe: `args=`
