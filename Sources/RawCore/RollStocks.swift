@@ -208,13 +208,15 @@ public struct LookArguments: Codable, Equatable, Sendable {
     /// nil = the look's seed (1), pixel-identical to 0.6.0. Not part of the stock: a host passes it per frame (for example
     /// derived from the frame id). The seed used is in the recipe (`args=` and the `film finish ... (seed N)` decision).
     public var grainSeed: UInt32?
+    /// Analog depth modifier (0...1): deepen contrast, density and saturation outside skin bands.
+    public var depth: Float?
 
     public init(stockId: String? = nil, intensity: Float? = nil, iso: Int? = nil, tungsten: Bool? = nil, grain: Grain? = nil,
                 halation: Halation? = nil, vignette: Float? = nil, lightLeak: String? = nil, develop: DevelopCharacter? = nil,
-                grainSeed: UInt32? = nil) {
+                grainSeed: UInt32? = nil, depth: Float? = nil) {
         self.stockId = stockId; self.intensity = intensity; self.iso = iso; self.tungsten = tungsten; self.grain = grain
         self.halation = halation; self.vignette = vignette; self.lightLeak = lightLeak; self.develop = develop
-        self.grainSeed = grainSeed
+        self.grainSeed = grainSeed; self.depth = depth
     }
 
     /// Named light leaks RSP ships.
@@ -271,7 +273,15 @@ extension FilmStock {
             finish.lightLeak = spec
         }
         do { try finish.validate() } catch RawCoreError.invalidSettings(let m) { throw bad(m) }
-        var stock = FilmStock(name: look, source: base.source, lookIntensity: a.intensity ?? base.lookIntensity, finish: finish,
+        var stockSource = base.source
+        var stockName = look
+        if let d = a.depth, d > 0 {
+            if case .spec(let s) = base.source {
+                stockSource = .spec(s.deepened(d))
+                stockName = String(format: "%@~d%.2f", look, d)
+            }
+        }
+        var stock = FilmStock(name: stockName, source: stockSource, lookIntensity: a.intensity ?? base.lookIntensity, finish: finish,
                               summary: base.summary, allowsSkinProtection: base.allowsSkinProtection,
                               minSkinProtection: base.minSkinProtection)
         stock.lookInput = base.lookInput; stock.lookColorSpace = base.lookColorSpace; stock.logPrimaries = base.logPrimaries
