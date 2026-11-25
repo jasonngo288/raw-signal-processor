@@ -393,6 +393,37 @@ public enum FilmLooks2026 {
                          .init(108, width: 35, shift: 1, chroma: 1.12), .init(145, width: 45, shift: 10, chroma: 1.22, lightness: -0.03),
                          .init(255, width: 40, shift: -4, chroma: 1.0)] },
          1.0, FilmFinish(grainAmount: 0.45, grainSize: 0.075, vignette: 0.04), nil),
+        // richUltra: User-supplied experimental look (2026-11-24, DESIGN_DECISIONS 52), values verbatim.
+        ("richUltra", "deep analog colour: rich crimson reds, dense emerald greens, deep cobalt blues, soft highlights, subtle green-tinted shadows, fine grain",
+         spec {
+             $0.temperatureK = 5600
+             $0.tint = 0
+             $0.black = 0.015
+             $0.contrast = 1.04
+             $0.pivot = 0.45
+             $0.shoulder = 0.83
+             $0.white = 0.965
+             $0.saturation = 1.05
+             $0.vibrance = 0.14
+             $0.vibranceSkin = 0.4
+             $0.highlightDesat = 0.35
+             $0.shadowDesat = 0.08
+             $0.density = 0.11
+             $0.shadowTint = SIMD2(-0.006, 0.002)
+             $0.highlightTint = SIMD2(0.002, 0.005)
+             $0.neutralDrift = 0.025
+             $0.bands = [
+                 .init(25, width: 30, shift: 5, chroma: 1.15, lightness: -0.06),
+                 .init(52, width: 25, shift: 2, chroma: 0.92, lightness: -0.01),
+                 .init(100, width: 35, shift: 8, chroma: 0.95, lightness: -0.02),
+                 .init(140, width: 42, shift: 14, chroma: 0.88, lightness: -0.05),
+                 .init(200, width: 35, shift: 0, chroma: 0.98, lightness: -0.04),
+                 .init(255, width: 40, shift: -4, chroma: 1.18, lightness: -0.06)
+             ]
+         },
+         0.85,
+         FilmFinish(grainAmount: 0.24, grainSize: 0.055, vignette: 0.0),
+         nil),
     ]
 
     public static var names: [String] { looks.map(\.name) }
