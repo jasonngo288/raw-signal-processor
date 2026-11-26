@@ -307,7 +307,7 @@ public struct LightLeakPlugin: DevelopPlugin {
         var why = [LightLeakPlanner.describe(plan, frame: frame, count: count, rollID: roll)]
         guard let leak = plan.leak else { return (image, why) }
         let out = FilmFinisher.lightLeak(image, spec: spec, leak: leak, personMask: ctx.personMask)
-        // The leak is scaled by (1 - (1 - personFactor) * mask), so a weak mask (no pixel >= 128) only attenuates partly: say so, not "x0.40".
+        // Kept for masks handed in from outside: Vision's own enrich returns nil for an empty balanced mask (schema 8), so this is not reached by it. The leak is scaled by (1 - (1 - personFactor) * mask), so a weak mask (no pixel >= 128) only attenuates partly: say so, not "x0.40".
         let maskEmpty = ctx.personMask != nil && (ctx.scene?.personMaskDiag?.maskIsEmpty ?? false)
         why.append(String(format: "screen in linear light, peak add %.3f (%.2f x %.2f amount x %.2f strength), ceiling %.2f encoded, person mask %@",
                           spec.peakAdd * spec.amount * leak.strength, spec.peakAdd, spec.amount, leak.strength, spec.encodedCap,

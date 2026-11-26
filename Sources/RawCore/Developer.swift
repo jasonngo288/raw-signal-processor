@@ -39,7 +39,7 @@ public final class Developer: @unchecked Sendable {
     /// unless `staleReason` says it no longer fits the render.
     public struct Analysis: Codable, @unchecked Sendable {
         /// Bumped when what an analysis measures changes; an older stored analysis is re-made.
-        public static let currentSchema = 7   // 7: person mask falls back to Vision .fast when .balanced is empty (personMaskDiag.source + both levels' stats); 6: personMaskDiag (Vision person mask status + measurements), person mask read as linear coverage; 5: displayClippedFraction on the camera HEIC (old value -> appleDecodeClippedFraction), ev100 + fNumber; 4: sky mask
+        public static let currentSchema = 8   // 8: person mask is Vision .balanced only (no .fast fallback; an empty balanced mask = no person, no mask file); 7: person mask falls back to Vision .fast when .balanced is empty (personMaskDiag.source + both levels' stats); 6: personMaskDiag (Vision person mask status + measurements), person mask read as linear coverage; 5: displayClippedFraction on the camera HEIC (old value -> appleDecodeClippedFraction), ev100 + fNumber; 4: sky mask
         public static let fileName = "analysis.json"
         public static let maskFileName = "person-mask.png"
         public static let skyMaskFileName = "sky-mask.png"
@@ -85,8 +85,8 @@ public final class Developer: @unchecked Sendable {
             }
             if let v = context.skyMaskVersion, v != SkyMask.version { return "sky mask version \(v) != \(SkyMask.version)" }
             if (context.skyFraction ?? 0) >= SkyMask.minCoverage, skyMask == nil { return "sky mask image missing" }
-            // `personFraction` is only set when Vision produced a mask, and `write` always stores that mask as a PNG, so a
-            // fraction without the image means the PNG was lost (an all-zero mask still has its PNG: not stale).
+            // `personFraction` is only set when Vision produced a non-empty balanced mask (an empty one is dropped: no mask,
+            // no fraction, no PNG), and `write` always stores that mask as a PNG, so a fraction without the image means the PNG was lost.
             if context.personFraction != nil, personMask == nil { return "person mask image missing" }
             return nil
         }
@@ -912,7 +912,11 @@ public final class Developer: @unchecked Sendable {
                 image = renderer.protectSkin(looked: image, base: beforeLook, mask: personMask, strength: s)
                 out.recipe.decisions.append(String(format: "skin protection %.2f through the Vision person mask (CIBlendWithMask)", s))
             } else {
-                out.recipe.decisions.append("skin protection requested but no person mask (Vision unavailable or not analysed)")
+                if base.context?.personMaskDiag?.maskIsEmpty == true {
+                    out.recipe.decisions.append("skin protection requested but the person mask is empty (no person found): nothing to protect")
+                } else {
+                    out.recipe.decisions.append("skin protection requested but no person mask (Vision failed, unavailable or not analysed)")
+                }
             }
         }
         let finish = st.finish ?? stock?.finish
@@ -1052,33 +1056,11 @@ public enum VisionAnalyzer {
         var d = PersonMaskDiagnostics(status: .ok)
         d.measure(buf)
         d.source = .balanced
-        var chosen = buf
-        // Option (a): on rear-camera frames `.balanced` can return an empty mask for small/distant people while `.fast`
-        // finds them. Only when balanced has no pixel >= 128, run `.fast` on the same input; use it if it has any.
-        // Its buffer is smaller (about 192x256); every consumer (areaMean, protectSkin, skinMedianL, lightLeak) rescales the
-        // mask to the image extent, so the size difference is harmless. The persisted PNG keeps the fast mask's native size.
-        if d.maskIsEmpty {
-            d.balancedMaxValue = d.maxValue; d.balancedPixelsAtLeast128 = d.pixelsAtLeast128
-            let fast = VNGeneratePersonSegmentationRequest()
-            fast.qualityLevel = .fast
-            fast.outputPixelFormat = kCVPixelFormatType_OneComponent8
-            let ok = timed("visionPersonFast") { (try? handler.perform([fast])) != nil }
-            if ok, let fbuf = fast.results?.first?.pixelBuffer {
-                var fd = PersonMaskDiagnostics(status: .ok)
-                fd.measure(fbuf)
-                d.fastMaxValue = fd.maxValue; d.fastPixelsAtLeast128 = fd.pixelsAtLeast128
-                if !fd.maskIsEmpty {
-                    fd.source = .fastFallback
-                    fd.balancedMaxValue = d.balancedMaxValue; fd.balancedPixelsAtLeast128 = d.balancedPixelsAtLeast128
-                    fd.fastMaxValue = d.fastMaxValue; fd.fastPixelsAtLeast128 = d.fastPixelsAtLeast128
-                    d = fd; chosen = fbuf
-                }
-            }
-        }
         ctx.personMaskDiag = d
-        // Vision's 8-bit values are coverage (0..255 = 0..1), not display-encoded grey: no colour management, so
-        // 128 stays 128 in the PNG and ~0.5 in `areaMean` (same convention as the sky mask, `Renderer.linearGray`).
-        return CIImage(cvPixelBuffer: chosen, options: [.colorSpace: NSNull()])
+        // Only `.balanced` is used (probe, roll 2A23643D: `.fast` missed real people and invented others). A balanced mask
+        // with no pixel >= 128 means no person: no mask, so no skin protection / leak attenuation from it.
+        if d.maskIsEmpty { return nil }
+        return CIImage(cvPixelBuffer: buf, options: [.colorSpace: NSNull()])
     }
 }
 #endif

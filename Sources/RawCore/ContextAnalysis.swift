@@ -517,13 +517,12 @@ public struct PersonMaskDiagnostics: Codable, Sendable, Equatable {
     public var nonZeroPixels: Int?
     public var pixelsAtLeast128: Int?
     /// Which Vision quality produced the mask the render uses (nil on failures / old data).
-    public enum Source: String, Codable, Sendable { case balanced, fastFallback }
+    public enum Source: String, Codable, Sendable {
+        case balanced
+        /// Old stored data may say `fastFallback`; it decodes as balanced (those analyses are stale and re-made).
+        public init(from decoder: Decoder) throws { self = .balanced }
+    }
     public var source: Source?
-    /// Stats of `.balanced` / `.fast` when the fast fallback ran (balanced was empty). The main fields above describe the used mask.
-    public var balancedMaxValue: Int?
-    public var balancedPixelsAtLeast128: Int?
-    public var fastMaxValue: Int?
-    public var fastPixelsAtLeast128: Int?
 
     public init(status: Status, error: String? = nil) { self.status = status; self.error = error }
 
@@ -535,9 +534,7 @@ public struct PersonMaskDiagnostics: Codable, Sendable, Equatable {
         case .ok:
             var t = "ok, \(width ?? 0)x\(height ?? 0), max \(maxValue ?? 0), non-zero \(nonZeroPixels ?? 0) px, >=128 \(pixelsAtLeast128 ?? 0) px"
             if let s = source { t += ", source \(s.rawValue)" }
-            if let bm = balancedMaxValue {
-                t += ", balanced max \(bm) >=128 \(balancedPixelsAtLeast128 ?? 0) px, fast max \(fastMaxValue.map(String.init) ?? "n/a") >=128 \(fastPixelsAtLeast128 ?? 0) px"
-            }
+            if maskIsEmpty { t += ", balanced mask empty: treated as no person" }
             return t
         case .requestFailed: return "Vision person request failed (\(error ?? "unknown")): no mask"
         case .noResult: return "Vision person request returned no result: no mask"
