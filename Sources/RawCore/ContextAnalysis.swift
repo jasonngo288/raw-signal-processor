@@ -129,7 +129,7 @@ public enum DecisionEngine {
         public static let highISO = 800.0
         public static let faceArea = 0.01
         public static let personFraction = 0.03
-        public static let skinProtection: Float = 0.5
+        public static let skinProtection: Float = 0.75
         /// Scene-linear median (log2, 0 = diffuse white) below which a frame counts as dark / night.
         /// Midpoint of the gap between the tuning files only (holdout never used): darkest non-dark MTN01 −4.57,
         /// brightest dark CAFE01 −6.13 (NIGHT01 −6.36) → −5.35. Was −5.0, chosen with the holdout TOKYO01 in view.

@@ -82,7 +82,7 @@ final class HEICStage0Tests: XCTestCase {
         XCTAssertEqual(HEICToneInverse.version, "toneS-2")
     }
 
-    /// An explicit skinProtection (the app sets 0.75 for heicSource frames) overrides the auto 0.5 on the HEIC path.
+    /// An explicit skinProtection (the app sets 0.75 for heicSource frames) overrides the auto value (DecisionEngine.Threshold.skinProtection) on the HEIC path.
     func testExplicitSkinProtectionIsHonouredOnHEIC() throws {
         let url = try makeHEIC()
         defer { try? FileManager.default.removeItem(at: url) }
