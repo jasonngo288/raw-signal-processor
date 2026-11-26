@@ -160,20 +160,28 @@ public enum DecisionEngine {
     /// The ramps are centred on the old thresholds, and their ends sit inside the gaps between tuning files, so every
     /// tuning file keeps its old value (MTN01 −4.57 → 0, CAFE01 −6.13 → full).
     public static func lookIntensityOffset(context c: SceneContext) -> (Float, [String]) {
+        let r = lookIntensityOffsetDetailed(context: c)
+        return (r.clamped, r.why)
+    }
+
+    /// Same arithmetic as `lookIntensityOffset`, plus the typed terms and the unclamped sum (CALA M1-01 trace: record only).
+    static func lookIntensityOffsetDetailed(context c: SceneContext) -> (clamped: Float, why: [String], terms: [LookAdaptationTrace.LookOffset.Term], sum: Float) {
         let p = c.prediction
         var off: Float = 0
         var why: [String] = []
-        func add(_ weight: Float, _ score: Double, _ text: String) {
+        var terms: [LookAdaptationTrace.LookOffset.Term] = []
+        func add(_ weight: Float, _ score: Double, _ text: String, id: String) {
             let v = weight * Float(score)
             guard abs(v) >= 0.0005 else { return }
+            terms.append(.init(id: id, score: score, weight: weight, value: v))
             off += v
             why.append(String(format: "%@ -> look %+.3f", text, v))
         }
         add(-0.10, p.night, String(format: "dark scene %.2f (median %.2f stops, ramp %.2f…%.2f)", p.night, c.logP50,
-                                   Threshold.darkRamp.lowerBound, Threshold.darkRamp.upperBound))
-        add(-0.05, p.highISO, String(format: "high ISO %.2f (ISO %ld, ramp around %ld)", p.highISO, Int(c.iso ?? 0), Int(Threshold.veryHighISO)))
+                                   Threshold.darkRamp.lowerBound, Threshold.darkRamp.upperBound), id: "night")
+        add(-0.05, p.highISO, String(format: "high ISO %.2f (ISO %ld, ramp around %ld)", p.highISO, Int(c.iso ?? 0), Int(Threshold.veryHighISO)), id: "highISO")
         add(-0.05, p.people, String(format: "people %.2f (mask %.1f%%, face %.1f%%; on top of skin protection)", p.people,
-                                    (c.personFraction ?? 0) * 100, (c.largestFaceArea ?? 0) * 100))
+                                    (c.personFraction ?? 0) * 100, (c.largestFaceArea ?? 0) * 100), id: "people")
         // Landscape only where there are no people and it is not dark (people and night win, as before).
         // A high people label also vetoes it: the mask / face signal can miss a small subject (TASK-02 b).
         let landscapeText = String(format: "landscape %.2f (%@), x no-people x not-dark", p.landscape, p.landscapeLabel ?? "none")
@@ -184,18 +192,18 @@ public enum DecisionEngine {
             let kept = fullBoost * (1 - fade)
             if 0.05 * Float(fullBoost) >= 0.0005 {   // the boost would have shown up: say how it was reduced
                 if 0.05 * Float(kept) >= 0.0005 {
-                    add(0.05, kept, String(format: "%@, x (1 - people label %@ %.2f ramp %.2f)", landscapeText, pl.key, pl.value, fade))
+                    add(0.05, kept, String(format: "%@, x (1 - people label %@ %.2f ramp %.2f)", landscapeText, pl.key, pl.value, fade), id: "landscape")
                 } else {
                     why.append(String(format: "%@ boost skipped: people label %@ %.2f (ramp %.2f) -> look +0.000", landscapeText, pl.key, pl.value, fade))
                 }
             }
         } else {
-            add(0.05, fullBoost, landscapeText)
+            add(0.05, fullBoost, landscapeText, id: "landscape")
         }
         let r = Threshold.lookIntensityRange
         let clamped = min(max(off, r.lowerBound), r.upperBound)
         if abs(clamped - off) > 1e-6 { why.append(String(format: "look offset %.3f clamped to %.2f", off, clamped)) }
-        return (clamped, why)
+        return (clamped, why, terms, off)
     }
 
     public static func decide(context c: SceneContext, defaults d: DecodeParameters, support s: DecoderSupport,

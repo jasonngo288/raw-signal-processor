@@ -124,6 +124,10 @@ public struct RenderSettings: Codable, Equatable, Sendable {
     /// nil = unknown (omitted from the JSON).
     public var userExposureBiasEV: Double?
 
+    /// CALA M1-01: record the protection trace in `DecodeRecipe.lookAdaptation`. Record only: pixels are identical with it on or off.
+    /// nil/false = off (the recipe gets no `lookAdaptation` key; nil is omitted from the settings JSON).
+    public var traceLookAdaptation: Bool?
+
     /// The model in effect (nil = legacy).
     public var resolvedExposureModel: ExposureModel { exposureModel ?? .legacy }
 
@@ -334,6 +338,9 @@ public struct DecodeRecipe: Codable, Equatable, Sendable {
     public var heicStage0: HEICStage0Record? = nil
     /// Film border applied after development (FilmBorderRenderer), nil = no border. Old recipes lack it.
     public var border: FilmBorderRecord? = nil
+    /// CALA M1-01 protection trace (what skin protection, look offset, sky hold, highlight/exposure owners, guard and light leak
+    /// decided for this frame). nil = trace off (omitted from the JSON); old recipes lack it. Record only.
+    public var lookAdaptation: LookAdaptationTrace? = nil
 
     public init(file: String, settings: RenderSettings, decoderVersion: String, supportedDecoderVersions: [String],
                 defaults: DecodeParameters, effective: DecodeParameters, support: DecoderSupport, nativeSize: [Int],

@@ -147,6 +147,8 @@ public final class Developer: @unchecked Sendable {
         /// v2 only: the stage-1 output at the measuring size (`CameraMatchPlugin.histogramLongEdge`): the stock-independent
         /// decode with the display gain applied. Same for every stock; nil in legacy or when the normalizer did not run.
         var stage1Image: CIImage? = nil
+        /// CALA M1-01: decide-time values copied by `developBase` when `settings.traceLookAdaptation == true` (record only).
+        var adaptationCapture: LookAdaptationDecideCapture? = nil
     }
 
     /// Long edge of the v2 highlight probe decodes.
@@ -349,6 +351,8 @@ public final class Developer: @unchecked Sendable {
         var stage1Settings: RenderSettings?
         var stage1Image: CIImage?
         let calKey = try calibrationKey(url)
+        let callerExposure = settings.exposure   // v2 clears `base.exposure` below; the trace records what the caller set
+        var adaptationCapture: LookAdaptationDecideCapture?
         if v2 {
             var r = ExposureNormalizerRecord(parameters: settings.sceneNormalizer ?? .provisional)
             r.ignoredCallerExposureEV = settings.exposure
@@ -380,6 +384,13 @@ public final class Developer: @unchecked Sendable {
             if v2 { base.exposure = nil }
             base.mode = .explicit
             let d = DecisionEngine.decide(context: a.context, defaults: a.defaults, support: a.support, base: base)
+            if settings.traceLookAdaptation == true {   // copies values only; nothing below reads it
+                let off = base.lookIntensityOffset == nil ? DecisionEngine.lookIntensityOffsetDetailed(context: a.context) : nil
+                adaptationCapture = LookAdaptationDecideCapture(
+                    callerSkin: base.skinProtection, callerOffset: base.lookIntensityOffset, bias: callerExposure,
+                    autoFired: base.skinProtection == nil && d.settings.skinProtection != nil,
+                    terms: off?.terms, sum: off?.sum, clamped: off?.clamped, analysisReused: reused)
+            }
             st = d.settings
             reasons += d.reasons
             if v2 {
@@ -487,6 +498,7 @@ public final class Developer: @unchecked Sendable {
         var based = Base(image: image, recipe: out.recipe, settings: st, context: ctx, personMask: personMask, skyMask: skyMask,
                          developedFor: developedFor, active: active, ran: ran, pluginContext: pctx)
         based.stage1Image = stage1Image
+        based.adaptationCapture = adaptationCapture
         return based
     }
 
@@ -792,8 +804,10 @@ public final class Developer: @unchecked Sendable {
     /// analysis the hold acts only inside the sky mask: the look is rendered with and without the hold (two cached LUTs)
     /// and blended by the mask (CIBlendWithMask). Otherwise the hold stays colour-only, and the recipe says so.
     func skyGatedLook(stock: FilmStock, lut: CubeLUT, image: CIImage, strength: Float, base: Base,
-                      decisions: inout [String], ran: inout Set<String>) throws -> CIImage {
+                      decisions: inout [String], ran: inout Set<String>,
+                      path: inout LookAdaptationTrace.SkyHold.Path) throws -> CIImage {
         func colourOnly(_ why: String) throws -> CIImage {
+            path = .colourOnly
             decisions.append((base.active.contains { $0.id == "skyMask" } ? "[skyMask] " : "") + "sky mask unavailable (\(why)): colour-only sky hold")
             return try renderer.applyLook(lut, to: image, intensity: strength, colorSpace: stock.lookColorSpace)
         }
@@ -804,9 +818,11 @@ public final class Developer: @unchecked Sendable {
         ran.insert("skyMask")
         let tag = String(format: "sky hold %.2f of %@", stock.skyHoldAmount, stock.name)
         guard coverage >= SkyMask.minCoverage, let mask = base.skyMask else {
+            path = .unheldNoSky
             decisions.append("[skyMask] \(tag) switched off: no sky in the frame (\(ctx.skyGate ?? "coverage below minimum")); non-sky pixels are not held (colour-only would have held every bright blue pixel)")
             return try renderer.applyLook(unheld, to: image, intensity: strength, colorSpace: stock.lookColorSpace)
         }
+        path = .blendedByMask
         let held = try renderer.applyLook(lut, to: image, intensity: strength, colorSpace: stock.lookColorSpace)
         let plain = try renderer.applyLook(unheld, to: image, intensity: strength, colorSpace: stock.lookColorSpace)
         decisions.append(String(format: "[skyMask] sky mask v%d: coverage %.1f%% (%@); %@ applied only inside the mask (CIBlendWithMask of the look with and without the hold)",
@@ -852,20 +868,29 @@ public final class Developer: @unchecked Sendable {
         }
         var appliedLUT: CubeLUT?
         let off = st.lookIntensityOffset ?? 0
+        // CALA M1-01 trace locals: written beside the existing decisions, read only when the trace is on.
+        var traceBaseIntensity: Float?, traceAppliedIntensity: Float?
+        var traceSkip = LookAdaptationTrace.LookOffset.Skip.none
+        var traceUsedBy = LookAdaptationTrace.LookOffset.UsedBy.none
+        var traceSkyPath = LookAdaptationTrace.SkyHold.Path.notApplicable
         func intensity(_ base: Float, _ lut: CubeLUT) -> Float {
-            guard off != 0 else { return base }
+            traceBaseIntensity = base
+            guard off != 0 else { traceAppliedIntensity = base; traceSkip = .zeroOffset; return base }
             // Black and white is all or nothing: 95 % mono is just washed-out colour (CI 42492412535, mooncake).
             if lut.isMonochrome {
                 out.recipe.decisions.append("look intensity offset skipped: black-and-white look stays at full strength")
+                traceAppliedIntensity = base; traceSkip = .monoLook
                 return base
             }
             let v = min(max(base + off, 0), 1)
             out.recipe.decisions.append(String(format: "look intensity %.2f %+.2f (scene) -> %.2f", base, off, v))
+            traceAppliedIntensity = v
             return v
         }
         if let declared = try renderer.resolveLookDeclared(st.look) {
             let lut = declared.lut
             if let n = declared.note { out.recipe.decisions.append(n) }
+            traceUsedBy = .declaredLook
             image = try renderer.applyLook(lut, to: image, intensity: intensity(st.lookIntensity, lut), colorSpace: declared.space); appliedLUT = lut
         } else if let stock {
             let lut = stock.lut()
@@ -878,6 +903,7 @@ public final class Developer: @unchecked Sendable {
                 }
             }
             if let (looked, why) = pluginLook, let id = lookPlugin {
+                traceUsedBy = .pluginLook
                 image = renderer.dissolve(from: image, to: looked, amount: strength)
                 ran.insert(id)
                 out.recipe.decisions += why.map { "[\(id)] " + $0 }
@@ -886,9 +912,11 @@ public final class Developer: @unchecked Sendable {
                     out.recipe.decisions.append("\(stock.name) is a \(c.rawValue) look but no plugin applied it (logLook off): LUT applied to the display base")
                 }
                 if stock.lookInput == .display, stock.skyHoldAmount > 0 {
+                    traceUsedBy = .skyGatedLook
                     image = try skyGatedLook(stock: stock, lut: lut, image: image, strength: strength, base: base,
-                                             decisions: &out.recipe.decisions, ran: &ran)
+                                             decisions: &out.recipe.decisions, ran: &ran, path: &traceSkyPath)
                 } else {
+                    traceUsedBy = .plainLook
                     image = try renderer.applyLook(lut, to: image, intensity: strength, colorSpace: stock.lookColorSpace)
                 }
             }
@@ -977,7 +1005,150 @@ public final class Developer: @unchecked Sendable {
         }
         out.recipe.plugins = base.active.map(\.id).filter { ran.contains($0) }
         out.recipe.qualityGuardStrength = guardReport?.strength
+        if st.traceLookAdaptation == true {
+            // Record only: every value below was computed above (or by decide, copied in `developBase`); nothing is fed back.
+            let skinOutcome: LookAdaptationTrace.Skin.Outcome
+            if skin == nil { skinOutcome = .notRequested }
+            else if (skin ?? 0) <= 0 { skinOutcome = .skippedZero }
+            else if !looked { skinOutcome = .noLook }
+            else if appliedLUT?.isMonochrome ?? false { skinOutcome = .skippedMono }
+            else if stockLookUsed && !(stock?.allowsSkinProtection ?? true) { skinOutcome = .skippedStockDisallows }
+            else if base.personMask != nil { skinOutcome = .applied }
+            else { skinOutcome = .skippedNoMask }
+            out.recipe.lookAdaptation = Self.adaptationTrace(
+                base: base, settings: st, stock: stock, finish: finish, skin: skin, stockLookUsed: stockLookUsed, skinOutcome: skinOutcome,
+                lookOffset: (traceBaseIntensity, traceAppliedIntensity, traceSkip, traceUsedBy), skyPath: traceSkyPath,
+                guardReport: guardReport, effectiveExposure: out.recipe.effective.exposure)
+        }
         return Output(image: image, recipe: out.recipe, context: base.context)
+    }
+}
+
+extension Developer {
+    /// Person-mask validity from data that already exists (`personMaskDiag` + the mask image), M1_02 section 3.1.
+    static func personMaskValidity(_ base: Base) -> LookAdaptationTrace.Validity {
+        guard let ctx = base.context, let d = ctx.personMaskDiag else { return .unavailable }
+        switch d.status {
+        case .noCGImage: return .unavailable
+        case .requestFailed, .noResult: return .failed
+        case .ok: return d.maskIsEmpty ? .empty : (base.personMask != nil ? .ok : .unavailable)
+        }
+    }
+
+    /// CALA M1-01: assembles the typed trace from values `finish` and `developBase` already computed. Pure; never touches pixels.
+    static func adaptationTrace(base: Base, settings st: RenderSettings, stock: FilmStock?, finish: FilmFinish?, skin: Float?,
+                                stockLookUsed: Bool, skinOutcome: LookAdaptationTrace.Skin.Outcome,
+                                lookOffset lo: (base: Float?, applied: Float?, skip: LookAdaptationTrace.LookOffset.Skip, usedBy: LookAdaptationTrace.LookOffset.UsedBy),
+                                skyPath: LookAdaptationTrace.SkyHold.Path, guardReport: QualityGuardReport?,
+                                effectiveExposure: Float) -> LookAdaptationTrace {
+        typealias T = LookAdaptationTrace
+        let cap = base.adaptationCapture
+        let ctx = base.context
+        let isOn: (String) -> Bool = { id in base.active.contains { $0.id == id } }
+        let validity = personMaskValidity(base)
+
+        let frame = T.Frame(kind: base.recipe.heicStage0 != nil ? .heicOnly : .raw,
+                            finishOrder: st.outputCrop != nil ? .crop : .noCrop,
+                            outputCrop: st.outputCrop.map { [$0.x, $0.y, $0.width, $0.height] },
+                            analysed: ctx != nil, analysisReused: cap?.analysisReused, exposureModel: st.resolvedExposureModel.rawValue,
+                            look: st.stock ?? st.look, depth: st.lookArguments?.depth)
+
+        let skinReason: T.Reason
+        let skinStatus: T.Status
+        switch skinOutcome {
+        case .applied: skinStatus = .applied; skinReason = .ok
+        case .notRequested: skinStatus = .notApplicable; skinReason = .belowGate
+        case .skippedZero: skinStatus = .skipped; skinReason = .zeroValue
+        case .noLook: skinStatus = .skipped; skinReason = .noLook
+        case .skippedMono: skinStatus = .skipped; skinReason = .monoLook
+        case .skippedStockDisallows: skinStatus = .skipped; skinReason = .stockDisallows
+        case .skippedNoMask:
+            skinStatus = .skipped
+            skinReason = validity == .failed ? .noMaskFailed : (validity == .empty ? .noMaskEmpty : .noMaskUnavailable)
+        }
+        let skinTrace = T.Skin(status: skinStatus, reason: skinReason, callerSkin: cap?.callerSkin, autoFired: cap?.autoFired,
+                               personFraction: ctx?.personFraction, largestFaceArea: ctx?.largestFaceArea, faceCount: ctx?.faceCount,
+                               thresholdPersonFraction: DecisionEngine.Threshold.personFraction,
+                               thresholdFaceArea: DecisionEngine.Threshold.faceArea,
+                               autoStrength: DecisionEngine.Threshold.skinProtection,
+                               stockMin: stockLookUsed ? stock?.minSkinProtection : nil,
+                               stockAllows: stock?.allowsSkinProtection ?? true, effective: skin,
+                               maskValidity: validity, maskDiag: ctx?.personMaskDiag, outcome: skinOutcome)
+
+        let range = DecisionEngine.Threshold.lookIntensityRange
+        let offStatus: T.Status, offReason: T.Reason
+        if lo.base == nil { offStatus = .notApplicable; offReason = .noLook }
+        else if lo.skip == .zeroOffset { offStatus = .skipped; offReason = .zeroValue }
+        else if lo.skip == .monoLook { offStatus = .skipped; offReason = .monoLook }
+        else { offStatus = .applied; offReason = cap?.callerOffset != nil ? .callerSet : .ok }
+        let offsetTrace = T.LookOffset(status: offStatus, reason: offReason, callerLock: cap?.callerOffset, terms: cap?.terms,
+                                       sum: cap?.sum, clamped: cap?.clamped, rangeLower: range.lowerBound, rangeUpper: range.upperBound,
+                                       offset: st.lookIntensityOffset, skip: lo.skip, baseIntensity: lo.base,
+                                       appliedIntensity: lo.applied, usedBy: lo.usedBy)
+
+        let skyStatus: T.Status, skyReason: T.Reason
+        switch skyPath {
+        case .notApplicable: skyStatus = .notApplicable; skyReason = .notReached
+        case .blendedByMask: skyStatus = .applied; skyReason = .ok
+        case .unheldNoSky: skyStatus = .skipped; skyReason = .noSkyInFrame
+        case .colourOnly:
+            skyStatus = .skipped
+            if !isOn("skyMask") { skyReason = .pluginOff }
+            else if ctx?.skyMaskVersion == nil { skyReason = .noAnalysis }
+            else if ctx?.skyFraction == nil { skyReason = .noDecision }
+            else { skyReason = .noUnheldVariant }
+        }
+        let sky = T.SkyHold(status: skyStatus, reason: skyReason, holdAmount: stock?.skyHoldAmount ?? 0, pluginOn: isOn("skyMask"),
+                            maskVersion: ctx?.skyMaskVersion, fraction: ctx?.skyFraction, gate: ctx?.skyGate,
+                            minCoverage: SkyMask.minCoverage, path: skyPath)
+
+        let highlight = T.HighlightRecovery(pluginOn: isOn("highlightRecovery"), headroomPluginOn: isOn("headroom"),
+                                            displayClipped: ctx?.appleDecodeClippedFraction, recoverable: ctx?.recoverableClippedFraction,
+                                            edrHeadroom: ctx?.edrHeadroom, fired: st.toneMapSourceHeadroom != nil,
+                                            toneMapSourceHeadroom: st.toneMapSourceHeadroom, clarity: st.highlightClarity,
+                                            decodeHeadroomEV: st.decodeHeadroomEV, headroomRestoreEV: st.headroomRestoreEV)
+        let exposure = T.Exposure(bias: cap?.bias, finalDecodeEV: effectiveExposure, cameraMatchPluginOn: isOn("cameraMatch"),
+                                  cameraMatchStrength: st.cameraMatchStrength)
+
+        let guardOn = isOn("qualityGuard")
+        let given = st.qualityGuardStrength
+        let guardStrength = guardReport?.strength
+        let guardTrace = T.QualityGuard(
+            status: !guardOn ? .notApplicable : ((guardStrength ?? 1) < 1 ? .applied : .skipped),
+            reason: !guardOn ? .guardOff : (given != nil ? .givenFromPreview
+                : (guardStrength == nil ? .noStrength : ((guardStrength ?? 1) < 1 ? .ok : .guardPassed))),
+            source: !guardOn ? .off : (given != nil ? .given : .measured), strengthGiven: given, strengthFinal: guardStrength,
+            measures: guardReport?.measures, maxClipIncrease: QualityGuardPlugin.maxClipIncrease,
+            maxExposureDriftEV: QualityGuardPlugin.maxExposureDriftEV)
+
+        var leak = T.LightLeak(status: .notApplicable, reason: .pluginOff, specPresent: finish?.lightLeak != nil)
+        if isOn("lightLeak"), let spec = finish?.lightLeak {
+            if let frameIndex = st.rollFrameIndex, let count = st.rollFrameCount {
+                leak.frame = frameIndex; leak.count = count
+                if let plan = LightLeakPlanner.plan(spec: spec, rollID: st.rollID ?? "", frame: frameIndex, count: count) {
+                    leak.frameClass = plan.frameClass.rawValue; leak.chance = plan.chance; leak.chanceDraw = plan.chanceDraw
+                    leak.drawn = plan.leak != nil
+                    leak.personFactor = spec.personFactor; leak.encodedCap = spec.encodedCap
+                    if let l = plan.leak {
+                        leak.status = .applied; leak.reason = .ok
+                        leak.edge = l.edge.rawValue; leak.strength = l.strength; leak.position = l.position; leak.sigma = l.sigma
+                        leak.coreHue = l.coreHue; leak.outerHue = l.outerHue
+                        leak.personMaskUsed = base.personMask == nil ? .noMask : (spec.personFactor < 1 ? .attenuated : .factorIs1)
+                    } else {
+                        leak.status = .skipped; leak.reason = .noLeakDrawn
+                    }
+                } else {
+                    leak.status = .skipped; leak.reason = .outsideRoll
+                }
+            } else {
+                leak.status = .skipped; leak.reason = .noRollPosition
+            }
+        } else if isOn("lightLeak") {
+            leak.reason = .noLeakSpec
+        }
+
+        return LookAdaptationTrace(version: T.currentVersion, mode: "traceOnly", frame: frame, skin: skinTrace, lookOffset: offsetTrace,
+                                   skyHold: sky, highlightRecovery: highlight, exposure: exposure, qualityGuard: guardTrace, lightLeak: leak)
     }
 }
 
