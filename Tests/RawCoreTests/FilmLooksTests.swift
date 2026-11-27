@@ -17,7 +17,7 @@ final class FilmLooksTests: XCTestCase {
     }
 
     func testGeneratedLooksGenericNames() throws {
-        XCTAssertEqual(FilmLooks2026.names.count, 26)   // +3 refine4 looks (0.6.2: pastelCool2, mapleRed2, sunFade2) +2 (citrus2, daybreak2); 10 + the 8 trial looks promoted by T2 (2026-11-12) + 3 v2 looks (0.3.0); cinemaNegative retired 2026-11-10
+        XCTAssertEqual(FilmLooks2026.names.count, 28)   // +1 coolDaylightSlide (0.8.3); +3 refine4 looks (0.6.2: pastelCool2, mapleRed2, sunFade2) +2 (citrus2, daybreak2); 10 + the 8 trial looks promoted by T2 (2026-11-12) + 3 v2 looks (0.3.0); cinemaNegative retired 2026-11-10
         for n in FilmLooks2026.names { XCTAssertNotNil(FilmStock.named(n), n) }
         for l in allLooks {
             let words = (l.name + " " + l.summary).lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
@@ -201,6 +201,29 @@ final class FilmLooksTests: XCTestCase {
             if FilmLooks2026.trialNames.contains(a.0) || ["goldenDay2", "coolFade2", "softPortrait2"].contains(a.0) {
                 XCTAssertGreaterThanOrEqual(others[0].1, 2, "\(a.0) too close to \(others[0].0)")
             }
+        }
+    }
+
+    /// 0.8.3 coolDaylightSlide (Breeze): listed, supported, grey stays within its declared drift (0.03), skin hue within the proposal's +-6 deg.
+    /// The generic neutral-drift and skin tests above also cover it (it is in `looks`); these pin the proposal's guardrails.
+    func testCoolDaylightSlideGuardrails() throws {
+        let id = "coolDaylightSlide"
+        XCTAssertTrue(FilmLooks2026.names.contains(id))
+        XCTAssertNotNil(SupportedLooks.named(id))
+        let spec = try XCTUnwrap(FilmLooks2026.looks.first { $0.name == id }).spec
+        XCTAssertEqual(spec.neutralDrift, 0.03, accuracy: 1e-6)
+        XCTAssertLessThanOrEqual(spec.skinTolerance, 8)
+        let lut = try XCTUnwrap(FilmStock.named(id)).lut()
+        for i in 7...57 {
+            let v = Float(i) / 64
+            XCTAssertLessThanOrEqual(OKLab.lch(encodedP3: lut.apply(SIMD3(repeating: v))).y, 0.03 + 0.004, "grey \(v) drifts")
+        }
+        for i in [0, 1] {
+            let lin = ColorChecker.referenceLinearP3(ColorChecker.referenceLabD50[i])
+            let s = SIMD3(Preset26.encode(Float(lin.x)), Preset26.encode(Float(lin.y)), Preset26.encode(Float(lin.z)))
+            let a = OKLab.lch(encodedP3: s), b = OKLab.lch(encodedP3: lut.apply(s))
+            var dh = abs(b.z - a.z); if dh > 180 { dh = 360 - dh }
+            XCTAssertLessThanOrEqual(dh, 6, "\(ColorChecker.names[i]) hue moved \(dh) deg")
         }
     }
 }

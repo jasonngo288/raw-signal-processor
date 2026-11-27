@@ -425,6 +425,16 @@ public enum FilmLooks2026 {
          0.85,
          FilmFinish(grainAmount: 0.24, grainSize: 0.055, vignette: 0.0),
          nil),
+        // coolDaylightSlide (0.8.3, 2026-11-27): cool daylight slide for Breeze (BREEZE_COOL_SLIDE_PROPOSAL.md section 3), parameters verbatim.
+        // Grain here is the engine default finish; the catalog render block carries the Breeze grain/halation/vignette.
+        ("coolDaylightSlide", "cool daylight slide: neutral-to-cool whites, true deep blacks, firm contrast and shoulder, dense cyan-blue sky, restrained warm colours, natural skin",
+         spec { $0.temperatureK = 5100; $0.tint = 1; $0.black = 0.0; $0.contrast = 1.24; $0.pivot = 0.50; $0.shoulder = 0.92; $0.white = 0.985
+             $0.saturation = 1.12; $0.highlightDesat = 0.25; $0.shadowDesat = 0.05; $0.density = 0.08; $0.skyHold = 0.9; $0.neutralDrift = 0.03
+             $0.shadowTint = SIMD2(-0.006, -0.014); $0.highlightTint = SIMD2(0.002, 0.002)
+             $0.bands = [.init(25, width: 30, shift: -3, chroma: 1.0, lightness: -0.03), .init(52, width: 28, shift: 2, chroma: 1.02, lightness: 0.03),
+                         .init(100, width: 40, shift: 4, chroma: 0.85), .init(140, width: 45, shift: 6, chroma: 1.0, lightness: -0.04),
+                         .init(205, width: 35, shift: 0, chroma: 1.2, lightness: -0.05), .init(250, width: 40, shift: -6, chroma: 1.3, lightness: -0.10)] },
+         1.0, FilmFinish(grainAmount: 0.4, grainSize: 0.07), nil),
     ]
 
     public static var names: [String] { looks.map(\.name) }
@@ -467,7 +477,7 @@ public enum FilmLooks2026 {
 
 /// Engine identity the host app checks its stock catalog against (`minEngine` <= `engineVersion`).
 public enum RawCore {
-    public static let engineVersion = "0.8.2"
+    public static let engineVersion = "0.8.3"
 }
 
 /// A look a host app may name in a stock (`RenderSettings.stock` + `lookArguments`), with its defaults.
