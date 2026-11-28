@@ -356,6 +356,9 @@ public struct FilmStock: Equatable, Sendable {
     public var allowsSkinProtection: Bool = true
     /// Preset asks for skin protection on people ("skinProtect: true" in the 2026 spec): at least this strength.
     public var minSkinProtection: Float? = nil
+    /// The strength the AUTOMATIC skin protection uses on people for this look (RAW path); nil = `DecisionEngine.Threshold.skinProtection`.
+    /// Never applies when the caller sets `skinProtection` (0.8.4-rc2).
+    public var autoSkinProtection: Float? = nil
     /// What the look LUT expects as input. `.log` looks are applied by the `logLook` plugin on a scene-linear decode.
     public var lookInput: LookInput = .display
     /// Encoded colour space of a display-referred LUT (CIColorCubeWithColorSpace encodes into it).

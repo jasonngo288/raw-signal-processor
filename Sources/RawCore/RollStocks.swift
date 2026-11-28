@@ -284,6 +284,7 @@ extension FilmStock {
         var stock = FilmStock(name: stockName, source: stockSource, lookIntensity: a.intensity ?? base.lookIntensity, finish: finish,
                               summary: base.summary, allowsSkinProtection: base.allowsSkinProtection,
                               minSkinProtection: base.minSkinProtection)
+        stock.autoSkinProtection = base.autoSkinProtection
         stock.lookInput = base.lookInput; stock.lookColorSpace = base.lookColorSpace; stock.logPrimaries = base.logPrimaries
         if let iso = a.iso { stock.develop = FilmDevelop.stockProfile(iso: iso, character: a.develop ?? .auto) }
         return stock

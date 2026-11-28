@@ -435,7 +435,24 @@ public enum FilmLooks2026 {
                          .init(100, width: 40, shift: 4, chroma: 0.85), .init(140, width: 45, shift: 6, chroma: 1.0, lightness: -0.04),
                          .init(205, width: 35, shift: 0, chroma: 1.2, lightness: -0.05), .init(250, width: 40, shift: -6, chroma: 1.3, lightness: -0.10)] },
          1.0, FilmFinish(grainAmount: 0.4, grainSize: 0.07), nil),
+        // coolNegative400 (0.8.4-rc2, 2026-11-28): Breeze cool negative 400 (beta-stocks/superia/ROUND3.md section 4), parameters verbatim.
+        // Grain/halation/vignette live in the catalog render block; the engine default finish below is only the fallback.
+        // Automatic skin protection 0.5 for this look: see `autoSkinProtection`.
+        ("coolNegative400", "cool negative 400: cool teal-leaning whites, lifted shadows, olive-teal greens, saturated cool blues, restrained warm skin",
+         spec { $0.temperatureK = 5330; $0.tint = -2.0; $0.black = 0.05; $0.contrast = 1.16; $0.pivot = 0.50; $0.shoulder = 0.90; $0.white = 0.985
+             $0.saturation = 1.22; $0.highlightDesat = 0.30; $0.shadowDesat = 0.0; $0.density = 0.07; $0.skyHold = 0.85; $0.vibrance = 0.06; $0.neutralDrift = 0.03
+             $0.skinTolerance = 8
+             $0.shadowTint = SIMD2(-0.030, -0.016); $0.highlightTint = SIMD2(0.000, 0.000)
+             $0.bands = [.init(24, width: 20, shift: -10, chroma: 1.10, lightness: -0.04), .init(52, width: 28, shift: 11, chroma: 1.00, lightness: 0.01),
+                         .init(78, width: 22, shift: 10, chroma: 0.72, lightness: -0.05), .init(100, width: 25, shift: 10, chroma: 0.78),
+                         .init(142, width: 45, shift: 12, chroma: 1.35, lightness: -0.07), .init(205, width: 30, shift: -2, chroma: 1.30, lightness: -0.03),
+                         .init(245, width: 38, shift: -9, chroma: 1.30, lightness: -0.06), .init(325, width: 40, shift: 0, chroma: 0.70)] },
+         1.0, FilmFinish(grainAmount: 0.4, grainSize: 0.07), nil),
     ]
+
+    /// Per-look automatic skin-protection strength (replaces `DecisionEngine.Threshold.skinProtection` for that look only;
+    /// the gates and `minSkin` semantics are unchanged). Looks not listed use the global default.
+    static let autoSkinProtection: [String: Float] = ["coolNegative400": 0.5]
 
     public static var names: [String] { looks.map(\.name) }
 
@@ -468,8 +485,10 @@ public enum FilmLooks2026 {
     public static let trialStocks: [FilmStock] = trialLooks.map(stock)
 
     static func stock(_ l: (name: String, summary: String, spec: LookSpec, intensity: Float, finish: FilmFinish, minSkin: Float?)) -> FilmStock {
-        FilmStock(name: l.name, source: .spec(l.spec), lookIntensity: l.intensity, finish: l.finish, summary: l.summary,
-                  allowsSkinProtection: l.spec.monoWeights == nil, minSkinProtection: l.minSkin)
+        var s = FilmStock(name: l.name, source: .spec(l.spec), lookIntensity: l.intensity, finish: l.finish, summary: l.summary,
+                          allowsSkinProtection: l.spec.monoWeights == nil, minSkinProtection: l.minSkin)
+        s.autoSkinProtection = autoSkinProtection[l.name]
+        return s
     }
 }
 
@@ -477,7 +496,7 @@ public enum FilmLooks2026 {
 
 /// Engine identity the host app checks its stock catalog against (`minEngine` <= `engineVersion`).
 public enum RawCore {
-    public static let engineVersion = "0.8.3"
+    public static let engineVersion = "0.8.4"
 }
 
 /// A look a host app may name in a stock (`RenderSettings.stock` + `lookArguments`), with its defaults.

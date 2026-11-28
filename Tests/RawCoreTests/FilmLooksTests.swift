@@ -17,7 +17,7 @@ final class FilmLooksTests: XCTestCase {
     }
 
     func testGeneratedLooksGenericNames() throws {
-        XCTAssertEqual(FilmLooks2026.names.count, 28)   // +1 coolDaylightSlide (0.8.3); +3 refine4 looks (0.6.2: pastelCool2, mapleRed2, sunFade2) +2 (citrus2, daybreak2); 10 + the 8 trial looks promoted by T2 (2026-11-12) + 3 v2 looks (0.3.0); cinemaNegative retired 2026-11-10
+        XCTAssertEqual(FilmLooks2026.names.count, 29)   // +1 coolNegative400 (0.8.4-rc2); +1 coolDaylightSlide (0.8.3); +3 refine4 looks (0.6.2: pastelCool2, mapleRed2, sunFade2) +2 (citrus2, daybreak2); 10 + the 8 trial looks promoted by T2 (2026-11-12) + 3 v2 looks (0.3.0); cinemaNegative retired 2026-11-10
         for n in FilmLooks2026.names { XCTAssertNotNil(FilmStock.named(n), n) }
         for l in allLooks {
             let words = (l.name + " " + l.summary).lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
@@ -225,6 +225,58 @@ final class FilmLooksTests: XCTestCase {
             var dh = abs(b.z - a.z); if dh > 180 { dh = 360 - dh }
             XCTAssertLessThanOrEqual(dh, 6, "\(ColorChecker.names[i]) hue moved \(dh) deg")
         }
+    }
+
+    /// 0.8.4-rc2 coolNegative400 (Breeze): listed, supported, grey stays within its declared drift (0.03), skin hue within the skin band shift +11 within +-8 deg (ROUND3).
+    /// The generic neutral-drift and skin tests above also cover it (it is in `looks`); these pin the ROUND3 guardrails.
+    func testCoolNegative400Guardrails() throws {
+        let id = "coolNegative400"
+        XCTAssertTrue(FilmLooks2026.names.contains(id))
+        XCTAssertNotNil(SupportedLooks.named(id))
+        let spec = try XCTUnwrap(FilmLooks2026.looks.first { $0.name == id }).spec
+        XCTAssertEqual(spec.neutralDrift, 0.03, accuracy: 1e-6)
+        XCTAssertLessThanOrEqual(spec.skinTolerance, 8)
+        let lut = try XCTUnwrap(FilmStock.named(id)).lut()
+        for i in 7...57 {
+            let v = Float(i) / 64
+            XCTAssertLessThanOrEqual(OKLab.lch(encodedP3: lut.apply(SIMD3(repeating: v))).y, 0.03 + 0.004, "grey \(v) drifts")
+        }
+        for i in [0, 1] {
+            let lin = ColorChecker.referenceLinearP3(ColorChecker.referenceLabD50[i])
+            let s = SIMD3(Preset26.encode(Float(lin.x)), Preset26.encode(Float(lin.y)), Preset26.encode(Float(lin.z)))
+            let a = OKLab.lch(encodedP3: s), b = OKLab.lch(encodedP3: lut.apply(s))
+            var dh = abs(b.z - a.z); if dh > 180 { dh = 360 - dh }
+            XCTAssertLessThanOrEqual(dh, 8, "\(ColorChecker.names[i]) hue moved \(dh) deg")
+        }
+    }
+
+    /// 0.8.4-rc2: coolNegative400 carries autoSkinProtection 0.5; every other look has none (global 0.75 default unchanged).
+    func testAutoSkinProtectionOnlyOnCoolNegative400() throws {
+        XCTAssertEqual(FilmStock.named("coolNegative400")?.autoSkinProtection, 0.5)
+        for st in FilmStock.all where st.name != "coolNegative400" { XCTAssertNil(st.autoSkinProtection, st.name) }
+        XCTAssertEqual(DecisionEngine.Threshold.skinProtection, 0.75)
+        let r = try FilmStock.resolve(look: "coolNegative400", arguments: LookArguments(intensity: 1.0))
+        XCTAssertEqual(r.autoSkinProtection, 0.5)
+        var c = SceneContext(logP1: -8, logP50: -3, logP99: 0, dynamicRangeStops: 6, clippedFraction: 0, iso: 100, faceCount: 0, labels: nil)
+        c.personFraction = 0.2
+        let dp = DecodeParameters(exposure: 0, baselineExposure: 0, shadowBias: 0, boostAmount: 1, boostShadowAmount: 0.9,
+                                  localToneMapAmount: 0, sharpnessAmount: 0.5, contrastAmount: 0, detailAmount: 0,
+                                  luminanceNoiseReductionAmount: 0, colorNoiseReductionAmount: 0, moireReductionAmount: 0,
+                                  extendedDynamicRangeAmount: 0, lensCorrection: false, gamutMapping: true, neutralTemperature: 5000, neutralTint: 0)
+        let sup = DecoderSupport(localToneMap: false, sharpness: false, contrast: false, detail: false, luminanceNoiseReduction: false,
+                                 colorNoiseReduction: false, moireReduction: false, lensCorrection: false, maxExtendedDynamicRange: 2)
+        let d = DecisionEngine.decide(context: c, defaults: dp, support: sup, autoSkinProtection: 0.5)
+        XCTAssertEqual(d.settings.skinProtection, 0.5)
+        let g = DecisionEngine.decide(context: c, defaults: dp, support: sup)
+        XCTAssertEqual(g.settings.skinProtection, 0.75)
+        // RAW wiring (Developer.developBase): the stock name resolves to 0.5; a .cube look gets nil.
+        var named = RenderSettings.explicit; named.stock = "coolNegative400"
+        XCTAssertEqual(try named.resolvedStock()?.autoSkinProtection, 0.5)
+        var other = RenderSettings.explicit; other.stock = "goldenDay"
+        XCTAssertNil(try other.resolvedStock()?.autoSkinProtection)
+        var caller = RenderSettings.explicit; caller.skinProtection = 0.3
+        let k = DecisionEngine.decide(context: c, defaults: dp, support: sup, base: caller, autoSkinProtection: 0.5)
+        XCTAssertEqual(k.settings.skinProtection, 0.3)
     }
 }
 

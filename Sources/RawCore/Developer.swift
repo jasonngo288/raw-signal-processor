@@ -387,7 +387,9 @@ public final class Developer: @unchecked Sendable {
             var base = settings
             if v2 { base.exposure = nil }
             base.mode = .explicit
-            let d = DecisionEngine.decide(context: a.context, defaults: a.defaults, support: a.support, base: base)
+            // A look-picked stock (no .cube `look`) may set its own automatic strength; HEIC keeps the global value.
+            let autoSkin: Float? = base.look == nil ? try base.resolvedStock()?.autoSkinProtection : nil
+            let d = DecisionEngine.decide(context: a.context, defaults: a.defaults, support: a.support, base: base, autoSkinProtection: autoSkin)
             if settings.traceLookAdaptation == true {   // copies values only; nothing below reads it
                 let off = base.lookIntensityOffset == nil ? DecisionEngine.lookIntensityOffsetDetailed(context: a.context) : nil
                 adaptationCapture = LookAdaptationDecideCapture(
@@ -1080,7 +1082,7 @@ extension Developer {
                                personFraction: ctx?.personFraction, largestFaceArea: ctx?.largestFaceArea, faceCount: ctx?.faceCount,
                                thresholdPersonFraction: DecisionEngine.Threshold.personFraction,
                                thresholdFaceArea: DecisionEngine.Threshold.faceArea,
-                               autoStrength: DecisionEngine.Threshold.skinProtection,
+                               autoStrength: (stockLookUsed && base.recipe.heicStage0 == nil ? stock?.autoSkinProtection : nil) ?? DecisionEngine.Threshold.skinProtection,   // HEIC passes no per-look value
                                stockMin: stockLookUsed ? stock?.minSkinProtection : nil,
                                stockAllows: stock?.allowsSkinProtection ?? true, effective: skin,
                                maskValidity: validity, maskDiag: ctx?.personMaskDiag, outcome: skinOutcome)

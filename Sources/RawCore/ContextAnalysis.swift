@@ -207,7 +207,7 @@ public enum DecisionEngine {
     }
 
     public static func decide(context c: SceneContext, defaults d: DecodeParameters, support s: DecoderSupport,
-                              base: RenderSettings = .explicit) -> Decision {
+                              base: RenderSettings = .explicit, autoSkinProtection: Float? = nil) -> Decision {
         var st = base
         st.mode = .explicit
         var why: [String] = []
@@ -245,8 +245,9 @@ public enum DecisionEngine {
         // People in frame: hold part of the look back on them (skin protection through the Vision mask).
         let person = c.personFraction ?? 0, face = c.largestFaceArea ?? 0
         if st.skinProtection == nil, person >= Threshold.personFraction || face >= Threshold.faceArea {
-            st.skinProtection = Threshold.skinProtection
-            why.append(String(format: "people %.1f%% of frame, largest face %.1f%% -> skin protection %.2f", person * 100, face * 100, Threshold.skinProtection))
+            let strength = autoSkinProtection ?? Threshold.skinProtection   // per-look value (0.8.4-rc2); nil = global default
+            st.skinProtection = strength
+            why.append(String(format: "people %.1f%% of frame, largest face %.1f%% -> skin protection %.2f", person * 100, face * 100, strength))
         }
         // Visible faces: avoid crunchy skin. Tiny faces (crowd, stage) are left alone. Detail first; on Bayer files
         // Apple's detail default is 0 (nothing to lower), so sharpness takes the -0.10 instead (was a dead rule).
