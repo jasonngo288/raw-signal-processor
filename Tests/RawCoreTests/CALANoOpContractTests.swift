@@ -308,8 +308,99 @@ final class CALANoOpContractTests: XCTestCase {
         XCTAssertEqual(seen, [.unavailable, .failed, .empty, .ok], "all four states are distinct")
     }
 
-    func testT5_FaceSkyMeasuredValidity_SKIPPED() throws {
-        throw XCTSkip("T5 rows 3.2 to 3.4 (face, sky, measured): no production validity derivation exists (only the person mask has one, `Developer.personMaskValidity`). Needs the validity enum/function (capture-pipeline step, M1_02 section 7) before it can be tested; face unavailable-vs-failed is a documented GAP.")
+    // T5 rows 3.2-3.4 (M2-02): schema 9 column of M2_01 section 4. Pure functions over a synthetic SceneContext.
+    func ctx(_ edit: (inout SceneContext) -> Void = { _ in }) -> SceneContext {
+        var c = SceneContext(logP1: -12, logP50: -6.5, logP99: 1, dynamicRangeStops: 15, clippedFraction: 0.05, iso: 3200, faceCount: 1, labels: nil)
+        edit(&c); return c
+    }
+
+    func testT5_FaceValidityTable() {
+        XCTAssertEqual(Developer.faceValidity(nil), .init(.unavailable, reason: .noAnalysis))
+        XCTAssertEqual(Developer.faceValidity(ctx { $0.faceCount = nil }), .init(.unavailable, reason: .unknown))
+        XCTAssertEqual(Developer.faceValidity(ctx { $0.faceCount = 0 }), .init(.empty))
+        XCTAssertEqual(Developer.faceValidity(ctx { $0.faceCount = 1 }), .init(.ok))
+        XCTAssertEqual(Developer.faceValidity(ctx { $0.faceCount = 3 }).confidence, nil)
+        // no `failed` on schema 9: a swallowed request error is nil, same as not run
+        for n in [nil, 0, 2] as [Int?] { XCTAssertNotEqual(Developer.faceValidity(ctx { $0.faceCount = n }).state, .failed) }
+    }
+
+    func testT5_SkyValidityTable() {
+        let sky = Developer.skyValidity
+        XCTAssertEqual(sky(nil, false), .init(.unavailable, reason: .noAnalysis))
+        XCTAssertEqual(sky(ctx { $0.skyMaskVersion = nil; $0.skyFraction = 0.5 }, true), .init(.unavailable, reason: .pluginOffAtAnalysis))
+        XCTAssertEqual(sky(ctx { $0.skyMaskVersion = 3; $0.skyFraction = nil }, false), .init(.unavailable, reason: .gateUnavailable))
+        XCTAssertEqual(sky(ctx { $0.skyMaskVersion = 3; $0.skyFraction = 0 }, false), .init(.empty))           // gate closed
+        XCTAssertEqual(sky(ctx { $0.skyMaskVersion = 3; $0.skyFraction = 0.0099 }, true), .init(.empty))      // open, below min coverage
+        XCTAssertEqual(sky(ctx { $0.skyMaskVersion = 3; $0.skyFraction = 0.01 }, true), .init(.ok))
+        XCTAssertEqual(sky(ctx { $0.skyMaskVersion = 3; $0.skyFraction = 0.4 }, true).confidence, nil)
+        XCTAssertEqual(sky(ctx { $0.skyMaskVersion = 3; $0.skyFraction = 0.4 }, false), .init(.unavailable, reason: .inconsistent))
+        // the gate text is never parsed: same result whatever it says
+        XCTAssertEqual(sky(ctx { $0.skyMaskVersion = 3; $0.skyFraction = 0.4; $0.skyGate = "label sky 0.9" }, true),
+                       sky(ctx { $0.skyMaskVersion = 3; $0.skyFraction = 0.4; $0.skyGate = "garbage" }, true))
+    }
+
+    func testT5_MeasuredValidityRAW() {
+        func mv(_ e: (inout SceneContext) -> Void) -> T.ContextValidity { Developer.measuredValidity(ctx(e), kind: .raw, skyMaskPresent: false) }
+        let none = mv { _ in }
+        XCTAssertEqual(none.sensorClip.state, .ok); XCTAssertEqual(none.night.state, .ok)
+        XCTAssertEqual(none.displayClip, .init(.unavailable, reason: .noCameraReference))
+        XCTAssertEqual(mv { $0.displayClippedFraction = 0 }.displayClip, .init(.ok))   // 0 is a measurement
+        XCTAssertEqual(none.edrHeadroom, .init(.unavailable, reason: .notMeasured))
+        XCTAssertEqual(mv { $0.edrHeadroom = 1.0 }.edrHeadroom, .init(.empty))
+        XCTAssertEqual(mv { $0.edrHeadroom = 1.4 }.edrHeadroom, .init(.ok))
+        XCTAssertEqual(mv { $0.edrHeadroom = 0.9 }.edrHeadroom, .init(.unavailable, reason: .inconsistent))
+        XCTAssertEqual(mv { $0.cct = 5200 }.cctTint, .init(.ok))   // tint not required
+        XCTAssertEqual(none.lumaQuantiles, .init(.ok))
+        XCTAssertEqual(none.displayHistogram, .init(.unavailable, reason: .noHistogram))
+        XCTAssertEqual(mv { $0.lumaHistogram = [1] }.displayHistogram, .init(.ok))
+        XCTAssertEqual(none.ev100, .init(.unavailable, reason: .noValue))
+        XCTAssertEqual(mv { $0.ev100 = 10; $0.ev100Version = 1 }.ev100, .init(.ok))
+        XCTAssertEqual(mv { $0.ev100 = 10; $0.ev100Version = 2 }.ev100.state, .unavailable)
+        XCTAssertEqual(none.cctTint.state, .unavailable)
+        XCTAssertEqual(mv { $0.appleDecodeClippedFraction = 0.2 }.recoverableClip, .init(.ok))
+        XCTAssertEqual(none.appleDecodeClip.state, .unavailable)
+        // no analysis: everything unavailable
+        let n = Developer.measuredValidity(nil, kind: .raw, skyMaskPresent: false)
+        for f in [n.face, n.sky, n.sensorClip, n.displayClip, n.edrHeadroom, n.appleDecodeClip, n.recoverableClip, n.night, n.cctTint] { XCTAssertEqual(f.state, .unavailable) }
+    }
+
+    func testT5_MeasuredValidityHEICOnly() {
+        func mv(_ e: (inout SceneContext) -> Void) -> T.ContextValidity { Developer.measuredValidity(ctx(e), kind: .heicOnly, skyMaskPresent: true) }
+        let v = mv { $0.appleDecodeClippedFraction = 0.2; $0.edrHeadroom = 2; $0.cct = 5000; $0.tint = 0; $0.displayClippedFraction = 0.1 }
+        let dr = T.FeatureValidity(.unavailable, reason: .displayReferred)
+        XCTAssertEqual(v.sensorClip, dr); XCTAssertEqual(v.night, dr); XCTAssertEqual(v.appleDecodeClip, dr)
+        XCTAssertEqual(v.recoverableClip, dr); XCTAssertEqual(v.edrHeadroom, dr)                        // even if a value is stored
+        XCTAssertEqual(v.cctTint, .init(.unavailable, reason: .estimate))
+        XCTAssertEqual(v.displayClip, .init(.unavailable, reason: .noHistogram))                       // HEIC: from lumaHistogram, not displayClippedFraction
+        XCTAssertEqual(mv { $0.lumaHistogram = [Double](repeating: 1.0 / 64, count: 64) }.displayClip, .init(.ok))
+        XCTAssertEqual(v.lumaQuantiles, .init(.ok, reason: .displayReferred))
+    }
+
+    /// M2S-03: sky ok in the analysis, sky plugin off in the render -> validity stays ok; the render gate is SkyHold.pluginOn only.
+    func testT5_SkyValidityIgnoresRenderPlugin() throws {
+        var st = settings(trace: true); st.skinProtection = 0.75
+        var (_, base) = try synthetic(st, .ok)
+        base.context?.skyMaskVersion = 3; base.context?.skyFraction = 0.4
+        base.skyMask = CIImage(color: CIColor(red: 1, green: 1, blue: 1)).cropped(to: CGRect(x: 0, y: 0, width: 96, height: 64))
+        base.active = base.active.filter { $0.id != "skyMask" }
+        let t = Developer.adaptationTrace(base: base, settings: st, stock: nil, finish: nil, skin: nil, stockLookUsed: false, skinOutcome: .notRequested,
+                                          lookOffset: (nil, nil, .none, .none), skyPath: .colourOnly, guardReport: nil, effectiveExposure: 0)
+        XCTAssertEqual(t.contextValidity?.sky, .init(.ok))
+        XCTAssertFalse(t.skyHold.pluginOn)
+    }
+
+    func testT5_TraceVersion2DecodesVersion1JSON() throws {
+        XCTAssertEqual(T.currentVersion, 2)
+        var st = settings(trace: true); st.skinProtection = 0.75
+        let (_, base) = try synthetic(st, .ok)
+        let t = Developer.adaptationTrace(base: base, settings: st, stock: nil, finish: nil, skin: nil, stockLookUsed: false, skinOutcome: .notRequested,
+                                          lookOffset: (nil, nil, .none, .none), skyPath: .notApplicable, guardReport: nil, effectiveExposure: 0)
+        XCTAssertNotNil(t.contextValidity)
+        XCTAssertEqual(try JSONDecoder().decode(T.self, from: JSONEncoder().encode(t)), t)
+        var obj = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(t)) as? [String: Any])
+        obj.removeValue(forKey: "contextValidity"); obj["version"] = 1
+        let old = try JSONDecoder().decode(T.self, from: JSONSerialization.data(withJSONObject: obj))
+        XCTAssertNil(old.contextValidity); XCTAssertEqual(old.version, 1)
     }
 
     // MARK: T6

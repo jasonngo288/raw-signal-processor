@@ -6,7 +6,7 @@ import Foundation
 /// recipe JSON (`DecodeRecipe.lookAdaptation`), switched on with `RenderSettings.traceLookAdaptation`.
 /// Design: `.orchestration/film-lab/cala/m1/M1_01_PROTECTION_TRACE.md`.
 public struct LookAdaptationTrace: Codable, Equatable, Sendable {
-    public static let currentVersion = 1
+    public static let currentVersion = 2   // 2 (CALA M2-02): adds `contextValidity`; version 1 JSON still decodes (key absent = nil)
 
     public enum Status: String, Codable, Sendable { case applied, skipped, notApplicable }
 
@@ -32,6 +32,47 @@ public struct LookAdaptationTrace: Codable, Equatable, Sendable {
     public var exposure: Exposure
     public var qualityGuard: QualityGuard
     public var lightLeak: LightLeak
+    /// CALA M2-02: validity of the context features, derived from the stored analysis only (M2_01 spec section 4, schema 9 column).
+    /// nil on a version 1 trace. RECORD ONLY: nothing in the render reads it.
+    public var contextValidity: ContextValidity? = nil
+
+    /// One feature's validity: state, why (closed strings, nil when the state needs none) and the producer's confidence (nil = none, intentional).
+    public struct FeatureValidity: Codable, Equatable, Sendable {
+        public var state: Validity
+        public var reason: Reason?
+        public var confidence: Double?
+        /// Closed list (raw values are the JSON strings). noAnalysis: no SceneContext. unknown: face request failed or not run (schema 9 cannot tell).
+        /// pluginOffAtAnalysis: skyMaskVersion nil. gateUnavailable: no sky decision. inconsistent: stored data contradicts itself.
+        /// displayReferred: HEIC-only, value is display-referred (unavailable) or not comparable with RAW (F1, ok). estimate: HEIC white balance is a guess.
+        /// noHistogram / noCameraReference / notMeasured / noValue: the stored field is nil.
+        public enum Reason: String, Codable, Sendable {
+            case noAnalysis, unknown, pluginOffAtAnalysis, gateUnavailable, inconsistent
+            case displayReferred = "display-referred"
+            case estimate, noHistogram, noCameraReference, notMeasured, noValue
+        }
+        public init(_ state: Validity, reason: Reason? = nil, confidence: Double? = nil) {
+            self.state = state; self.reason = reason; self.confidence = confidence
+        }
+    }
+
+    /// Validity of the features M3 may read. Pure function of the stored `SceneContext` plus `frame.kind` and whether the sky mask image exists.
+    public struct ContextValidity: Codable, Equatable, Sendable {
+        public var face: FeatureValidity
+        public var sky: FeatureValidity
+        // Render-time sky plugin state is NOT here: it is `SkyHold.pluginOn` (M2_01 section 3.11).
+        /// F1 scene luma quantiles. heicOnly: ok with reason displayReferred (not comparable with RAW).
+        public var lumaQuantiles: FeatureValidity
+        /// F2 / F6 display histogram (`lumaHistogram`).
+        public var displayHistogram: FeatureValidity
+        public var ev100: FeatureValidity
+        public var sensorClip: FeatureValidity
+        public var displayClip: FeatureValidity
+        public var edrHeadroom: FeatureValidity
+        public var appleDecodeClip: FeatureValidity
+        public var recoverableClip: FeatureValidity
+        public var night: FeatureValidity
+        public var cctTint: FeatureValidity
+    }
 
     public struct Frame: Codable, Equatable, Sendable {
         public enum Kind: String, Codable, Sendable { case raw, heicOnly }

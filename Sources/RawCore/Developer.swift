@@ -1047,6 +1047,58 @@ extension Developer {
         }
     }
 
+    // MARK: CALA M2-02 validity (M2_01 spec section 4, schema 9 column). Pure; read the stored analysis only, never render settings.
+    // Nothing in DecisionEngine, ScenePrediction or the skin hold calls these (L1).
+
+    typealias FV = LookAdaptationTrace.FeatureValidity
+
+    /// Face: `faceCount` nil = unavailable("unknown") (a failed request cannot be told from not run, schema 9), 0 = empty, > 0 = ok. No confidence stored.
+    static func faceValidity(_ ctx: SceneContext?) -> FV {
+        guard let ctx else { return FV(.unavailable, reason: .noAnalysis) }
+        guard let n = ctx.faceCount else { return FV(.unavailable, reason: .unknown) }
+        return n <= 0 ? FV(.empty) : FV(.ok)
+    }
+
+    /// Sky gate + coverage (F10, F11). Schema 9: no label or confidence (never parse `skyGate`), so confidence is nil.
+    /// `maskPresent` = the sky mask image exists. Plugin state at render is NOT read here.
+    static func skyValidity(_ ctx: SceneContext?, maskPresent: Bool) -> FV {
+        guard let ctx else { return FV(.unavailable, reason: .noAnalysis) }
+        guard ctx.skyMaskVersion != nil else { return FV(.unavailable, reason: .pluginOffAtAnalysis) }
+        guard let f = ctx.skyFraction else { return FV(.unavailable, reason: .gateUnavailable) }
+        if f < SkyMask.minCoverage { return FV(.empty) }
+        return maskPresent ? FV(.ok) : FV(.unavailable, reason: .inconsistent)
+    }
+
+    /// Measured features (F3, F4, F7, night, CCT/tint). `heicOnly`: display-referred, so sensor clip, the two Apple-decode clips and night are
+    /// unavailable("display-referred"), CCT/tint unavailable("estimate"); display clip comes from `lumaHistogram`; EDR is unavailable.
+    static func measuredValidity(_ ctx: SceneContext?, kind: LookAdaptationTrace.Frame.Kind,
+                                 skyMaskPresent: Bool) -> LookAdaptationTrace.ContextValidity {
+        let none = FV(.unavailable, reason: .noAnalysis)
+        let heic = kind == .heicOnly
+        guard let c = ctx else {
+            return .init(face: none, sky: none, lumaQuantiles: none, displayHistogram: none, ev100: none, sensorClip: none, displayClip: none,
+                         edrHeadroom: none, appleDecodeClip: none, recoverableClip: none, night: none, cctTint: none)
+        }
+        let displayRef = FV(.unavailable, reason: .displayReferred)
+        let displayClip: FV = heic ? (c.lumaHistogram == nil ? FV(.unavailable, reason: .noHistogram) : FV(.ok))
+                                   : (c.displayClippedFraction == nil ? FV(.unavailable, reason: .noCameraReference) : FV(.ok))
+        let edr: FV
+        if heic { edr = displayRef }
+        else if let h = c.edrHeadroom { edr = h > 1.0 ? FV(.ok) : (h == 1.0 ? FV(.empty) : FV(.unavailable, reason: .inconsistent)) }   // floored at 1, so < 1 is bad data   // floored at 1: exactly 1.0 = measured, nothing above SDR white
+        else { edr = FV(.unavailable, reason: .notMeasured) }
+        let cct: FV = heic ? FV(.unavailable, reason: .estimate)
+                           : ((c.cct ?? 0) > 0 ? FV(.ok) : FV(.unavailable, reason: .noValue))
+        return .init(face: faceValidity(c), sky: skyValidity(c, maskPresent: skyMaskPresent),
+                     lumaQuantiles: heic ? FV(.ok, reason: .displayReferred) : FV(.ok),
+                     displayHistogram: c.lumaHistogram == nil ? FV(.unavailable, reason: .noHistogram) : FV(.ok),
+                     ev100: c.ev100 != nil && c.ev100Version == 1 ? FV(.ok) : FV(.unavailable, reason: .noValue),
+                     sensorClip: heic ? displayRef : FV(.ok),
+                     displayClip: displayClip, edrHeadroom: edr,
+                     appleDecodeClip: heic ? displayRef : (c.appleDecodeClippedFraction == nil ? FV(.unavailable, reason: .notMeasured) : FV(.ok)),
+                     recoverableClip: heic ? displayRef : (c.recoverableClippedFraction == nil ? FV(.unavailable, reason: .notMeasured) : FV(.ok)),
+                     night: heic ? displayRef : FV(.ok), cctTint: cct)
+    }
+
     /// CALA M1-01: assembles the typed trace from values `finish` and `developBase` already computed. Pure; never touches pixels.
     static func adaptationTrace(base: Base, settings st: RenderSettings, stock: FilmStock?, finish: FilmFinish?, skin: Float?,
                                 stockLookUsed: Bool, skinOutcome: LookAdaptationTrace.Skin.Outcome,
@@ -1160,7 +1212,8 @@ extension Developer {
         }
 
         return LookAdaptationTrace(version: T.currentVersion, mode: "traceOnly", frame: frame, skin: skinTrace, lookOffset: offsetTrace,
-                                   skyHold: sky, highlightRecovery: highlight, exposure: exposure, qualityGuard: guardTrace, lightLeak: leak)
+                                   skyHold: sky, highlightRecovery: highlight, exposure: exposure, qualityGuard: guardTrace, lightLeak: leak,
+                                   contextValidity: measuredValidity(ctx, kind: frame.kind, skyMaskPresent: base.skyMask != nil))
     }
 }
 

@@ -39,7 +39,7 @@ final class LookAdaptationTraceTests: XCTestCase {
         let (dev, base) = try syntheticBase(settings(trace: true), capture: capture)
         let out = try dev.finish(base)
         let t = try XCTUnwrap(out.recipe.lookAdaptation)
-        XCTAssertEqual(t.version, 1)
+        XCTAssertEqual(t.version, 2)
         XCTAssertEqual(t.mode, "traceOnly")
         XCTAssertEqual(t.frame.kind, .raw)
         XCTAssertEqual(t.frame.finishOrder, .noCrop)
