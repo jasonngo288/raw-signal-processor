@@ -116,5 +116,117 @@ final class HEICStage0Tests: XCTestCase {
         XCTAssertEqual(fb.tint, 0)
         XCTAssertTrue(fb.source.hasPrefix("fallback"))
     }
+
+    // MARK: Stage 0-H skin hold toward the camera tone (2026-11-28, film-lab selfie round)
+
+    /// HEIC base with a synthetic left-half person mask (Vision finds nobody in a gradient).
+    private func baseWithMask(_ url: URL, dev: Developer) throws -> Developer.Base {
+        var a = try dev.analyze(heic: url)
+        let white = CIImage(color: CIColor(red: 1, green: 1, blue: 1)).cropped(to: CGRect(x: 0, y: 0, width: 32, height: 48))
+        let black = CIImage(color: CIColor(red: 0, green: 0, blue: 0)).cropped(to: CGRect(x: 32, y: 0, width: 32, height: 48))
+        a.personMask = white.composited(over: black)
+        var s = RenderSettings(mode: .explicit)
+        s.stock = "PRESET_26_CPM35"
+        s.outputCrop = .full
+        s.skinProtection = 0.75
+        return try dev.developBase(heic: url, settings: s, scaleFactor: 1, analysis: a)
+    }
+
+    func testHEICSkinHoldUsesTheCameraImageAndWideFeather() throws {
+        let url = try makeHEIC()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let dev = Developer()
+        let base = try baseWithMask(url, dev: dev)
+        let hold = try XCTUnwrap(base.heicHoldBase, "HEIC frame with skin protection and a person mask carries the camera-tone hold base")
+        XCTAssertEqual(hold.extent, base.image.extent)
+        let out = try dev.finish(base)
+        XCTAssertTrue(out.recipe.decisions.contains { $0.contains("held toward the camera tone, feather 0.015") }, "\(out.recipe.decisions)")
+        // Pixel: the camera-tone hold changes the person half and leaves the far background (outside the feather) unchanged.
+        var plain = base
+        plain.heicHoldBase = nil
+        let outPlain = try dev.finish(plain)
+        XCTAssertFalse(outPlain.recipe.decisions.contains { $0.contains("camera tone") })
+        func meanY(_ img: CIImage, _ r: CGRect) throws -> Double {
+            ImageMetrics.measure(try dev.renderer.linearImage(img.cropped(to: r))).meanY
+        }
+        let person = CGRect(x: 40, y: 100, width: 160, height: 280), background = CGRect(x: 440, y: 100, width: 160, height: 280)
+        let dP = abs(try meanY(out.image, person) - meanY(outPlain.image, person))
+        let dB = abs(try meanY(out.image, background) - meanY(outPlain.image, background))
+        XCTAssertGreaterThan(dP, 1e-4, "person region now holds toward the camera image")
+        XCTAssertLessThan(dB, 1e-4, "background is untouched by the new hold")
+    }
+
+    func testNoHoldBaseWithoutSkinProtectionOrMask() throws {
+        let url = try makeHEIC()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let dev = Developer()
+        var s = RenderSettings(mode: .explicit)
+        s.outputCrop = .full
+        XCTAssertNil(try dev.developBase(heic: url, settings: s, scaleFactor: 1).heicHoldBase, "no skin protection requested")
+        s.skinProtection = 0.75
+        XCTAssertNil(try dev.developBase(heic: url, settings: s, scaleFactor: 1).heicHoldBase, "no person mask (gradient)")
+    }
+
+    /// DNG frames never go through the new branch, and the RAW call into `protectSkin` keeps the old 0.004 feather.
+    func testDNGFrameHasNoHoldBase() throws {
+        let dir = DevelopStagesTests.root.appendingPathComponent("originals")
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        guard let n = names.filter({ $0.lowercased().hasSuffix(".dng") }).sorted().first else { throw XCTSkip("no DNGs in originals/") }
+        let dev = Developer(plugins: .none)
+        var s = RenderSettings(mode: .explicit)
+        s.skinProtection = 0.75
+        let url = dir.appendingPathComponent(n)
+        let b = try dev.developBase(url: url, settings: s, auto: false, scaleFactor: try dev.decoder.scaleFactor(url: url, longEdge: 256))
+        XCTAssertNil(b.heicHoldBase)
+        XCTAssertFalse(b.recipe.decisions.contains { $0.contains("camera tone") })
+    }
+
+    func testProtectSkinDefaultFeatherIsTheOldOne() throws {
+        let dev = Developer()
+        let img = CIImage(color: CIColor(red: 0.8, green: 0.3, blue: 0.2)).cropped(to: CGRect(x: 0, y: 0, width: 64, height: 48))
+        let base = CIImage(color: CIColor(red: 0.2, green: 0.4, blue: 0.6)).cropped(to: img.extent)
+        let mask = CIImage(color: CIColor(red: 1, green: 1, blue: 1)).cropped(to: CGRect(x: 0, y: 0, width: 32, height: 48))
+            .composited(over: CIImage(color: CIColor(red: 0, green: 0, blue: 0)).cropped(to: img.extent))
+        let a = dev.renderer.protectSkin(looked: img, base: base, mask: mask, strength: 0.75)
+        let b = dev.renderer.protectSkin(looked: img, base: base, mask: mask, strength: 0.75, feather: 0.004)
+        let c = dev.renderer.protectSkin(looked: img, base: base, mask: mask, strength: 0.75, feather: 0.015)
+        func px(_ i: CIImage, _ x: CGFloat) -> [Float] {
+            var buf = [Float](repeating: 0, count: 4)
+            dev.renderer.context.render(i, toBitmap: &buf, rowBytes: 16, bounds: CGRect(x: x, y: 24, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+            return buf
+        }
+        XCTAssertEqual(px(a, 33), px(b, 33), "default feather is the old 0.004")
+        XCTAssertNotEqual(px(b, 33), px(c, 33), "the wide feather really differs near the mask edge")
+    }
+
+    /// A stock's `minSkinProtection` switches the hold on while `settings.skinProtection` is nil: the hold base must exist then too.
+    func testStockMinSkinProtectionGetsTheHoldBase() throws {
+        let url = try makeHEIC()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let dev = Developer()
+        let name = try XCTUnwrap(FilmStock.all.first { $0.minSkinProtection != nil }?.name, "a stock with minSkinProtection")
+        var a = try dev.analyze(heic: url)
+        a.personMask = CIImage(color: CIColor(red: 1, green: 1, blue: 1)).cropped(to: CGRect(x: 0, y: 0, width: 64, height: 48))
+        var s = RenderSettings(mode: .explicit)
+        s.stock = name
+        s.outputCrop = .full
+        s.skinProtection = nil
+        let b = try dev.developBase(heic: url, settings: s, scaleFactor: 1, analysis: a)
+        XCTAssertNotNil(b.heicHoldBase)
+    }
+
+    /// A failed second decode must not fail the frame: old hold, a decision records why.
+    func testSecondDecodeFailureFallsBackToTheOldHold() throws {
+        let url = try makeHEIC()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let dev = Developer()
+        HEICSkinHold.failSecondDecodeForTest = true
+        defer { HEICSkinHold.failSecondDecodeForTest = false }
+        let b = try baseWithMask(url, dev: dev)
+        XCTAssertNil(b.heicHoldBase)
+        XCTAssertTrue(b.recipe.decisions.contains { $0.contains("second HEIC decode failed") })
+        let out = try dev.finish(b)
+        XCTAssertFalse(out.recipe.decisions.contains { $0.contains("camera tone") })
+    }
 }
 #endif

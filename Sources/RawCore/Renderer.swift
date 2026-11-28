@@ -119,7 +119,7 @@ public final class Renderer: @unchecked Sendable {
 
     /// Roadmap "skin / subject protection": on people, hold back `strength` of the look.
     /// `mask` is the Vision person mask at any size; it is scaled to the image and softened.
-    public func protectSkin(looked: CIImage, base: CIImage, mask: CIImage, strength: Float) -> CIImage {
+    public func protectSkin(looked: CIImage, base: CIImage, mask: CIImage, strength: Float, feather: Double = 0.004) -> CIImage {
         guard strength > 0 else { return looked }
         let ext = looked.extent
         let m = mask.extent
@@ -129,7 +129,7 @@ public final class Renderer: @unchecked Sendable {
             .transformed(by: CGAffineTransform(scaleX: ext.width / m.width, y: ext.height / m.height))
             .transformed(by: CGAffineTransform(translationX: ext.minX, y: ext.minY))
             .clampedToExtent()
-            .applyingGaussianBlur(sigma: Double(min(ext.width, ext.height)) * 0.004)
+            .applyingGaussianBlur(sigma: Double(min(ext.width, ext.height)) * feather)
             .cropped(to: ext)
         guard let held = CIFilter(name: "CIDissolveTransition", parameters: [
             kCIInputImageKey: looked, kCIInputTargetImageKey: base, kCIInputTimeKey: strength,

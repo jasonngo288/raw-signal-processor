@@ -149,6 +149,10 @@ public final class Developer: @unchecked Sendable {
         var stage1Image: CIImage? = nil
         /// CALA M1-01: decide-time values copied by `developBase` when `settings.traceLookAdaptation == true` (record only).
         var adaptationCapture: LookAdaptationDecideCapture? = nil
+        /// Stage 0-H only: the HEIC as the camera made it (display transfer decoded, tone S NOT inverted), same size as `image`.
+        /// `finish` holds the person region back toward THIS image (Apple's own tone) instead of `beforeLook` (the tone-inverted,
+        /// flat image). nil on RAW frames: they hold toward `beforeLook` as before.
+        var heicHoldBase: CIImage? = nil
     }
 
     /// Long edge of the v2 highlight probe decodes.
@@ -937,8 +941,14 @@ public final class Developer: @unchecked Sendable {
             out.recipe.decisions.append("skin protection skipped: the applied look is black and white (colour skin in a mono frame)")
         } else if let s = skin, s > 0, looked {
             if let personMask = base.personMask {
-                image = renderer.protectSkin(looked: image, base: beforeLook, mask: personMask, strength: s)
-                out.recipe.decisions.append(String(format: "skin protection %.2f through the Vision person mask (CIBlendWithMask)", s))
+                if let apple = base.heicHoldBase {
+                    // Stage 0-H: hold toward the camera's own tone (S restored), wide feather (no halo at the person edge).
+                    image = renderer.protectSkin(looked: image, base: apple, mask: personMask, strength: s, feather: HEICSkinHold.feather)
+                    out.recipe.decisions.append(String(format: "skin protection %.2f through the Vision person mask (CIBlendWithMask), HEIC: held toward the camera tone, feather %.3f", s, HEICSkinHold.feather))
+                } else {
+                    image = renderer.protectSkin(looked: image, base: beforeLook, mask: personMask, strength: s)
+                    out.recipe.decisions.append(String(format: "skin protection %.2f through the Vision person mask (CIBlendWithMask)", s))
+                }
             } else {
                 if base.context?.personMaskDiag?.maskIsEmpty == true {
                     out.recipe.decisions.append("skin protection requested but the person mask is empty (no person found): nothing to protect")

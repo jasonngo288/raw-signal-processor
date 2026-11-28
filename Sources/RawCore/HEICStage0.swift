@@ -105,6 +105,16 @@ public enum HEICToneInverse {
     }
 }
 
+/// Stage 0-H skin-hold settings (film-lab selfie round, 2026-11-27).
+enum HEICSkinHold {
+    /// Hold the person region toward the camera HEIC (tone S kept) instead of the tone-inverted `beforeLook`.
+    static let toApple: Bool = true
+    /// Mask feather as a fraction of the short edge (RAW path keeps 0.004).
+    static let feather: Double = 0.015
+    /// Test hook only: makes the second (non-inverted) decode fail.
+    nonisolated(unsafe) static var failSecondDecodeForTest = false
+}
+
 /// Stage 0-H illuminant estimate from the HEIC's EXIF. A HEIC has no white-balance neutral; Apple's MakerNote holds no
 /// white-balance field this code reads (the keys are not public and none was verified on a device), so only standard EXIF is
 /// used, in this order: EXIF `LightSource` (standard code to CCT), `Flash` fired (nominal 5500 K), a bright-scene prior
@@ -172,8 +182,8 @@ extension Developer {
     /// `invertTone` Apple's global tone curve is then inverted (`HEICToneInverse`, approximate) so the result is approximately
     /// scene-linear P3. No headroom: nothing above 1.0. Analysis reads the display-referred decode (`invertTone: false`, the same
     /// kind of image the RAW analysis measures); develop reads the inverted one.
-    func stage0H(url: URL, scaleFactor: Float, invertTone: Bool = true, toneK: Float = HEICToneInverse.defaultK) throws -> (image: CIImage, properties: [String: Any], nativeSize: [Int]) {
-        guard let source = CIImage(contentsOf: url, options: [.applyOrientationProperty: true]) else {
+    func stage0H(url: URL, scaleFactor: Float, invertTone: Bool = true, toneK: Float = HEICToneInverse.defaultK, failForTest: Bool = false) throws -> (image: CIImage, properties: [String: Any], nativeSize: [Int]) {
+        guard !failForTest, let source = CIImage(contentsOf: url, options: [.applyOrientationProperty: true]) else {
             throw RawCoreError.renderFailed("cannot open the HEIC \(url.lastPathComponent)")
         }
         let props = source.properties
@@ -398,8 +408,20 @@ extension Developer {
         recipe.decoderVersionSource = "heic stage 0-H"
         recipe.pluginsEnabled = active.map(\.id)
         recipe.heicStage0 = record
-        return Base(image: image, recipe: recipe, settings: st, context: ctx, personMask: a.personMask, skyMask: a.skyMask,
+        var out = Base(image: image, recipe: recipe, settings: st, context: ctx, personMask: a.personMask, skyMask: a.skyMask,
                     developedFor: nil, active: active, ran: [], pluginContext: pctx)
+        // Gated on the mask only: a stock's `minSkinProtection` can switch the hold on when `st.skinProtection` is nil (the
+        // image is a lazy CIImage, so building it costs almost nothing). A failed second decode falls back to the old hold.
+        if HEICSkinHold.toApple, a.personMask != nil {
+            // The hold target: the same HEIC, same scale, without the tone inversion (stock exposure is 0 EV on a HEIC, so
+            // `image` differs from it only by the inversion). Two decodes (not one shared source): kept simple on purpose.
+            if let held = try? stage0H(url: url, scaleFactor: scaleFactor, invertTone: false, failForTest: HEICSkinHold.failSecondDecodeForTest).image {
+                out.heicHoldBase = held
+            } else {
+                out.recipe.decisions.append("skin hold: second HEIC decode failed, held toward the tone-inverted base (old behaviour)")
+            }
+        }
+        return out
     }
 }
 #endif
